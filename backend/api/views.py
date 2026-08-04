@@ -2,8 +2,10 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import generics, status
 from rest_framework.response import Response
-from .models import Department, UserRecord
-from .serializers import DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer
+from .models import Department, UserRecord, ParoiModel
+from .serializers import (
+    DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer, ParoiModelSerializer,
+)
 from . import solver
 
 
@@ -49,6 +51,20 @@ class UserListView(generics.ListAPIView):
 
     queryset         = UserRecord.objects.select_related('department')
     serializer_class = UserRecordSerializer
+
+
+class ParoiModelListCreateView(generics.ListCreateAPIView):
+    """GET/POST /api/paroi-modeles/ — bibliothèque de modèles de paroi réutilisables."""
+
+    queryset         = ParoiModel.objects.all()
+    serializer_class = ParoiModelSerializer
+
+
+class ParoiModelDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET/PUT/PATCH/DELETE /api/paroi-modeles/<id>/"""
+
+    queryset         = ParoiModel.objects.all()
+    serializer_class = ParoiModelSerializer
 
 
 class Calcul1DView(APIView):

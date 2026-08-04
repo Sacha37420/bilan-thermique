@@ -1,0 +1,69 @@
+<main class="page-parois">
+
+  <div class="parois-head">
+    <p class="eyebrow"><span class="dot"></span> Bibliothèque</p>
+    <h1>Modèles de paroi</h1>
+    <p class="subtitle">
+      Empilements de couches réutilisables — un modèle peut être chargé directement dans
+      <a routerLink="/calcul-1d">Calcul 1D</a>, et servira plus tard à définir les triangles d'un
+      maillage de bâtiment.
+    </p>
+  </div>
+
+  @if (error()) {
+    <div class="callout warn"><p>{{ error() }}</p></div>
+  }
+
+  <div class="toolbar">
+    <button type="button" class="btn-primary" (click)="startCreate()">+ Nouveau modèle</button>
+  </div>
+
+  @if (editing(); as e) {
+    <section class="form-card editor-card">
+      <h2>{{ e.id === null ? 'Nouveau modèle' : 'Modifier « ' + e.name + ' »' }}</h2>
+      <div class="field-grid">
+        <label>
+          <span>Nom</span>
+          <input type="text" [(ngModel)]="e.name" name="editName" />
+        </label>
+        <label>
+          <span>Description</span>
+          <input type="text" [(ngModel)]="e.description" name="editDescription" />
+        </label>
+      </div>
+
+      <app-layers-editor [layers]="e.layers" (layersChange)="setEditingLayers($event)" />
+
+      <div class="editor-actions">
+        <button type="button" class="btn-primary" (click)="save()" [disabled]="!e.name.trim() || saving()">
+          {{ saving() ? 'Enregistrement…' : 'Enregistrer' }}
+        </button>
+        <button type="button" class="btn-secondary" (click)="cancelEdit()">Annuler</button>
+      </div>
+    </section>
+  }
+
+  @if (loading()) {
+    <p class="hint">Chargement…</p>
+  } @else if (models().length === 0) {
+    <p class="hint">Aucun modèle enregistré pour l'instant.</p>
+  } @else {
+    <div class="model-list">
+      @for (m of models(); track m.id) {
+        <div class="model-card">
+          <div class="model-info">
+            <h3>{{ m.name }}</h3>
+            @if (m.description) {
+              <p class="model-desc">{{ m.description }}</p>
+            }
+            <p class="model-meta">{{ m.layers.length }} couche(s) · mis à jour le {{ m.updated_at | date:'dd/MM/yyyy HH:mm' }}</p>
+          </div>
+          <div class="model-actions">
+            <button type="button" class="btn-secondary" (click)="startEdit(m)">Éditer</button>
+            <button type="button" class="btn-secondary danger" (click)="remove(m)">Supprimer</button>
+          </div>
+        </div>
+      }
+    </div>
+  }
+</main>

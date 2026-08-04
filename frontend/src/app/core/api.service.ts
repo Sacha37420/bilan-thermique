@@ -30,4 +30,20 @@ export class ApiService {
   runCalcul1D(payload: unknown): Observable<unknown> {
     return this.http.post(`${this.base}/api/calcul-1d/`, payload);
   }
+
+  getParoiModeles(): Observable<unknown[]> {
+    return this.http.get<unknown[]>(`${this.base}/api/paroi-modeles/`);
+  }
+
+  createParoiModele(payload: unknown): Observable<unknown> {
+    return this.http.post(`${this.base}/api/paroi-modeles/`, payload);
+  }
+
+  updateParoiModele(id: number, payload: unknown): Observable<unknown> {
+    return this.http.patch(`${this.base}/api/paroi-modeles/${id}/`, payload);
+  }
+
+  deleteParoiModele(id: number): Observable<unknown> {
+    return this.http.delete(`${this.base}/api/paroi-modeles/${id}/`);
+  }
 }

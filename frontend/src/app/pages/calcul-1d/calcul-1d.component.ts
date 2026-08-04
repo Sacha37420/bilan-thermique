@@ -1,17 +1,15 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
+import { LayerInput, LayersEditorComponent } from '../../components/layers-editor/layers-editor.component';
 
-interface LayerInput {
-  e: number;
-  lam: number;
-  rho: number;
-  c: number;
-  tau: number;
-  r: number;
-  alpha: number;
+interface ParoiModel {
+  id: number;
+  name: string;
+  description: string;
+  layers: LayerInput[];
 }
 
 interface WeatherPoint {
@@ -51,11 +49,11 @@ const MARGIN = { top: 16, right: 92, bottom: 32, left: 46 };
 @Component({
   selector: 'app-calcul-1d',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, RouterLink],
+  imports: [FormsModule, DecimalPipe, RouterLink, LayersEditorComponent],
   templateUrl: './calcul-1d.component.html',
   styleUrl: './calcul-1d.component.scss',
 })
-export class Calcul1DComponent {
+export class Calcul1DComponent implements OnInit {
   private api = inject(ApiService);
 
   // ── Paroi ──────────────────────────────────────────────────────────
@@ -66,16 +64,48 @@ export class Calcul1DComponent {
     { e: 0.013, lam: 0.25, rho: 850, c: 1000, tau: 0, r: 0.9, alpha: 0.1 },
   ]);
 
-  addLayer(): void {
-    this.layers.update(list => [...list, { e: 0.05, lam: 0.5, rho: 800, c: 1000, tau: 0, r: 0.9, alpha: 0.1 }]);
+  // ── Bibliothèque de modèles de paroi ────────────────────────────────
+  paroiModels = signal<ParoiModel[]>([]);
+  selectedModelId: number | null = null;
+  newModelName = '';
+  libraryMessage = signal('');
+  libraryError = signal('');
+
+  ngOnInit(): void {
+    this.refreshParoiModels();
   }
 
-  removeLayer(i: number): void {
-    this.layers.update(list => list.filter((_, idx) => idx !== i));
+  private refreshParoiModels(): void {
+    this.api.getParoiModeles().subscribe({
+      next: (models) => this.paroiModels.set(models as ParoiModel[]),
+      error: () => {},
+    });
   }
 
-  layerSumWarning(l: LayerInput): boolean {
-    return Math.abs(l.tau + l.r + l.alpha - 1) > 0.01;
+  loadFromLibrary(): void {
+    const model = this.paroiModels().find(m => m.id === this.selectedModelId);
+    if (!model) return;
+    this.layers.set(model.layers.map(l => ({ ...l })));
+    this.libraryMessage.set(`Modèle « ${model.name} » chargé.`);
+    this.libraryError.set('');
+  }
+
+  saveAsModel(): void {
+    const name = this.newModelName.trim();
+    if (!name) return;
+    this.libraryError.set('');
+    this.libraryMessage.set('');
+    this.api.createParoiModele({ name, description: '', layers: this.layers() }).subscribe({
+      next: () => {
+        this.newModelName = '';
+        this.libraryMessage.set(`Modèle « ${name} » enregistré.`);
+        this.refreshParoiModels();
+      },
+      error: (err) => {
+        const detail = err?.error?.name?.[0] ?? "Échec de l'enregistrement.";
+        this.libraryError.set(detail);
+      },
+    });
   }
 
   // ── Maillage ───────────────────────────────────────────────────────

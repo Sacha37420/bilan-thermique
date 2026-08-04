@@ -1,0 +1,70 @@
+:host { display: block; }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: var(--space-4); }
+
+table { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
+
+th, td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); text-align: left; }
+
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+
+thead th {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-mute);
+  background: var(--bg);
+}
+
+tbody tr:last-child td { border-bottom: none; }
+
+input[type="number"] {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  min-height: 40px;
+  width: 100%;
+  min-width: 72px;
+
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
+
+.row-warn td { background: var(--warning-tint); }
+.row-warn-note td { color: var(--warning); font-size: var(--text-xs); font-family: var(--font-mono); background: var(--warning-tint); }
+
+.icon-btn-sm {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-mute);
+  cursor: pointer;
+
+  &:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+  &:disabled { opacity: 0.4; cursor: not-allowed; }
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: opacity 0.15s, border-color 0.15s;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+
+  &:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}

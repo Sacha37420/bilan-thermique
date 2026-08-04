@@ -1,0 +1,38 @@
+<div class="table-wrap">
+  <table class="layers-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>e (m)</th>
+        <th>λ (W/m·K)</th>
+        <th>ρ (kg/m³)</th>
+        <th>c (J/kg·K)</th>
+        <th>τ</th>
+        <th>r</th>
+        <th>α</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (layer of layers(); track $index; let i = $index) {
+        <tr [class.row-warn]="layerSumWarning(layer)">
+          <td class="num">{{ i + 1 }}</td>
+          <td><input type="number" step="0.001" min="0.0001" [(ngModel)]="layer.e" name="e{{i}}" /></td>
+          <td><input type="number" step="0.001" min="0.001" [(ngModel)]="layer.lam" name="lam{{i}}" /></td>
+          <td><input type="number" step="1" min="1" [(ngModel)]="layer.rho" name="rho{{i}}" /></td>
+          <td><input type="number" step="1" min="1" [(ngModel)]="layer.c" name="c{{i}}" /></td>
+          <td><input type="number" step="0.01" min="0" max="1" [(ngModel)]="layer.tau" name="tau{{i}}" /></td>
+          <td><input type="number" step="0.01" min="0" max="1" [(ngModel)]="layer.r" name="r{{i}}" /></td>
+          <td><input type="number" step="0.01" min="0" max="1" [(ngModel)]="layer.alpha" name="alpha{{i}}" /></td>
+          <td>
+            <button type="button" class="icon-btn-sm" (click)="removeLayer(i)" [disabled]="layers().length <= 1" aria-label="Supprimer la couche" title="Supprimer la couche">✕</button>
+          </td>
+        </tr>
+        @if (layerSumWarning(layer)) {
+          <tr class="row-warn-note"><td colspan="9">⚠ τ + r + α = {{ (layer.tau + layer.r + layer.alpha) | number:'1.2-2' }} — doit valoir 1.</td></tr>
+        }
+      }
+    </tbody>
+  </table>
+</div>
+<button type="button" class="btn-secondary" (click)="addLayer()">+ Ajouter une couche</button>

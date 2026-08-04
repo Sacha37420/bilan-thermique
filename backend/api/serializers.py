@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Department, UserRecord
+from .models import Department, UserRecord, ParoiModel
 
 
 class LayerSerializer(serializers.Serializer):
@@ -18,6 +18,32 @@ class LayerSerializer(serializers.Serializer):
                 f"tau + r + alpha doit valoir 1 (obtenu {total:.3f})."
             )
         return data
+
+
+class ParoiModelSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(max_length=150)
+    description = serializers.CharField(allow_blank=True, required=False, default='')
+    layers = LayerSerializer(many=True, min_length=1, max_length=20)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+    def validate_name(self, value):
+        qs = ParoiModel.objects.filter(name=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Un modèle de paroi porte déjà ce nom.")
+        return value
+
+    def create(self, validated_data):
+        return ParoiModel.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+        return instance
 
 
 class WeatherPointSerializer(serializers.Serializer):
