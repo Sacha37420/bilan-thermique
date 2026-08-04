@@ -1,0 +1,302 @@
+<main class="page-calcul">
+
+  <div class="calcul-head">
+    <p class="eyebrow"><span class="dot"></span> Simulation horaire</p>
+    <h1>Calcul 1D</h1>
+    <p class="subtitle">
+      Définissez la paroi, le maillage, les conditions aux limites et la météo extérieure : le
+      calcul résout le régime transitoire heure par heure et affiche la température en chaque
+      point de la paroi. Le détail de la méthode est expliqué dans la page
+      <a routerLink="/theorie">Théorie</a>.
+    </p>
+  </div>
+
+  <form class="calcul-form" (ngSubmit)="submit()">
+
+    <section class="form-card">
+      <h2>Paroi — couches (extérieur → intérieur)</h2>
+      <div class="table-wrap">
+        <table class="layers-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>e (m)</th>
+              <th>λ (W/m·K)</th>
+              <th>ρ (kg/m³)</th>
+              <th>c (J/kg·K)</th>
+              <th>τ</th>
+              <th>r</th>
+              <th>α</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (layer of layers(); track $index; let i = $index) {
+              <tr [class.row-warn]="layerSumWarning(layer)">
+                <td class="num">{{ i + 1 }}</td>
+                <td><input type="number" step="0.001" min="0.0001" [(ngModel)]="layer.e" name="e{{i}}" /></td>
+                <td><input type="number" step="0.001" min="0.001" [(ngModel)]="layer.lam" name="lam{{i}}" /></td>
+                <td><input type="number" step="1" min="1" [(ngModel)]="layer.rho" name="rho{{i}}" /></td>
+                <td><input type="number" step="1" min="1" [(ngModel)]="layer.c" name="c{{i}}" /></td>
+                <td><input type="number" step="0.01" min="0" max="1" [(ngModel)]="layer.tau" name="tau{{i}}" /></td>
+                <td><input type="number" step="0.01" min="0" max="1" [(ngModel)]="layer.r" name="r{{i}}" /></td>
+                <td><input type="number" step="0.01" min="0" max="1" [(ngModel)]="layer.alpha" name="alpha{{i}}" /></td>
+                <td>
+                  <button type="button" class="icon-btn-sm" (click)="removeLayer(i)" [disabled]="layers().length <= 1" aria-label="Supprimer la couche" title="Supprimer la couche">✕</button>
+                </td>
+              </tr>
+              @if (layerSumWarning(layer)) {
+                <tr class="row-warn-note"><td colspan="9">⚠ τ + r + α = {{ (layer.tau + layer.r + layer.alpha) | number:'1.2-2' }} — doit valoir 1.</td></tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+      <button type="button" class="btn-secondary" (click)="addLayer()">+ Ajouter une couche</button>
+    </section>
+
+    <section class="form-card">
+      <h2>Maillage &amp; géométrie</h2>
+      <div class="field-grid">
+        <label>
+          <span>dx maximum (m)</span>
+          <input type="number" step="0.005" min="0.001" [(ngModel)]="dxMax" name="dxMax" />
+          <small>Taille max d'un élément — une couche plus épaisse est subdivisée automatiquement.</small>
+        </label>
+        <label>
+          <span>Inclinaison de la paroi β (°)</span>
+          <input type="number" step="1" min="0" max="180" [(ngModel)]="wallTiltDeg" name="wallTiltDeg" />
+          <small>90° = mur vertical, 0° = toiture plate. Fixe le facteur de vue du ciel F_ciel.</small>
+        </label>
+      </div>
+    </section>
+
+    <section class="form-card">
+      <h2>Conditions aux limites</h2>
+      <div class="field-grid">
+        <label>
+          <span>h_e — échange convectif extérieur (W/m²·K)</span>
+          <input type="number" step="0.5" min="0.1" [(ngModel)]="hE" name="hE" />
+        </label>
+        <label>
+          <span>Température initiale uniforme (°C)</span>
+          <input type="number" step="0.5" [(ngModel)]="tInit" name="tInit" />
+          <small>État de départ, à t = 0, appliqué à tous les nœuds.</small>
+        </label>
+      </div>
+
+      <div class="mode-toggle" role="radiogroup" aria-label="Mode côté intérieur">
+        <label class="mode-option">
+          <input type="radio" name="interiorMode" value="imposed" [(ngModel)]="interiorMode" />
+          <span>Température intérieure imposée</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="interiorMode" value="free" [(ngModel)]="interiorMode" />
+          <span>Évolution libre (nœud d'air)</span>
+        </label>
+      </div>
+
+      <div class="field-grid">
+        <label>
+          <span>h_i — échange convectif intérieur (W/m²·K)</span>
+          <input type="number" step="0.5" min="0.1" [(ngModel)]="hI" name="hI" />
+          <small>Sépare la température d'air T_int de la température de la surface intérieure — dans les deux modes, comme h_e côté extérieur.</small>
+        </label>
+        @if (interiorMode === 'imposed') {
+          <label>
+            <span>T_int — température d'air imposée (°C)</span>
+            <input type="number" step="0.5" [(ngModel)]="tInt" name="tInt" />
+          </label>
+        } @else {
+          <label>
+            <span>C_air,int — capacité air + mobilier (J/m²·K)</span>
+            <input type="number" step="1000" min="100" [(ngModel)]="cAirInt" name="cAirInt" />
+          </label>
+        }
+      </div>
+    </section>
+
+    <section class="form-card">
+      <h2>Météo extérieure — série horaire</h2>
+      <p class="hint">
+        Une ligne par heure : <code>T_ext, h_s, θᵢ, E_dir, E_dif</code>
+        (°C, degrés, degrés, W/m², W/m²) — séparateur virgule ou point-virgule.
+      </p>
+
+      <div class="const-weather">
+        <p class="const-weather-title">Météo constante — mêmes valeurs répétées sur N heures (utile pour vérifier un régime établi)</p>
+        <div class="field-grid const-weather-grid">
+          <label>
+            <span>T_ext (°C)</span>
+            <input type="number" step="0.5" [(ngModel)]="constWeather.t_ext" name="cwTExt" />
+          </label>
+          <label>
+            <span>h_s (°)</span>
+            <input type="number" step="1" [(ngModel)]="constWeather.h_s" name="cwHs" />
+          </label>
+          <label>
+            <span>θᵢ (°)</span>
+            <input type="number" step="1" min="0" max="180" [(ngModel)]="constWeather.theta_i" name="cwThetaI" />
+          </label>
+          <label>
+            <span>E_dir (W/m²)</span>
+            <input type="number" step="10" min="0" [(ngModel)]="constWeather.e_dir" name="cwEdir" />
+          </label>
+          <label>
+            <span>E_dif (W/m²)</span>
+            <input type="number" step="10" min="0" [(ngModel)]="constWeather.e_dif" name="cwEdif" />
+          </label>
+          <label>
+            <span>Durée (h)</span>
+            <input type="number" step="1" min="1" [(ngModel)]="constWeather.hours" name="cwHours" />
+          </label>
+        </div>
+        <button type="button" class="btn-secondary" (click)="loadConstant()">Générer cette série constante</button>
+      </div>
+
+      <textarea
+        rows="8"
+        [(ngModel)]="weatherRaw"
+        name="weatherRaw"
+        (blur)="parseWeather()"
+        placeholder="5.2,12,42,300,60&#10;4.8,18,38,410,70&#10;..."
+      ></textarea>
+      <div class="weather-actions">
+        <button type="button" class="btn-secondary" (click)="loadExample(48)">Charger un exemple (48 h)</button>
+        <button type="button" class="btn-secondary" (click)="loadExample(168)">Charger un exemple (7 j)</button>
+        @if (weather().length > 0) {
+          <span class="weather-count">{{ weather().length }} heure(s) chargée(s)</span>
+        }
+      </div>
+      @if (weatherError()) {
+        <p class="field-error">{{ weatherError() }}</p>
+      }
+    </section>
+
+    @if (error()) {
+      <div class="callout warn">
+        <span class="callout-label">Erreur</span>
+        <p>{{ error() }}</p>
+      </div>
+    }
+
+    <button type="submit" class="btn-primary" [disabled]="!canSubmit()">
+      {{ loading() ? 'Calcul en cours…' : 'Lancer le calcul' }}
+    </button>
+  </form>
+
+  @if (result(); as r) {
+    <section class="results">
+      <h2>Résultats — {{ r.temperatures.length - 1 }} heure(s)</h2>
+
+      <div class="legend" role="group" aria-label="Nœuds affichés">
+        @for (opt of nodeOptions(); track opt.nodeIndex) {
+          <label class="legend-item">
+            <input
+              type="checkbox"
+              [checked]="visibleNodes().has(opt.nodeIndex)"
+              (change)="toggleNode(opt.nodeIndex)"
+            />
+            <span class="swatch" [style.background]="'var(' + opt.colorVar + ')'"></span>
+            <span>{{ opt.label }}</span>
+          </label>
+        }
+      </div>
+
+      <div class="chart-wrap viz-root">
+        <svg
+          [attr.viewBox]="'0 0 ' + chartW + ' ' + chartH"
+          role="img"
+          aria-label="Évolution horaire des températures"
+          (mousemove)="onChartHover($event)"
+          (mouseleave)="onChartLeave()"
+        >
+          <!-- grille -->
+          @for (t of yTicks(); track t) {
+            <line
+              class="gridline"
+              [attr.x1]="plotLeft" [attr.x2]="plotLeft + plotWidth"
+              [attr.y1]="yForTick(t)"
+              [attr.y2]="yForTick(t)"
+            />
+          }
+
+          <!-- axe Y : libellés -->
+          @for (t of yTicks(); track t) {
+            <text
+              class="axis-label"
+              [attr.x]="plotLeft - 8"
+              [attr.y]="yForTick(t) + 4"
+              text-anchor="end"
+            >{{ t | number:'1.0-1' }}°</text>
+          }
+
+          <!-- axe X : libellés -->
+          @for (tick of xTicks(); track tick.hour) {
+            <text class="axis-label" [attr.x]="tick.x" [attr.y]="chartH - 10" text-anchor="middle">{{ tick.hour }}h</text>
+          }
+
+          <!-- séries -->
+          @for (s of series(); track s.nodeIndex) {
+            <path class="series-line" [attr.d]="s.path" [style.stroke]="'var(' + s.colorVar + ')'" />
+            <circle class="series-end" [attr.cx]="s.lastPoint.x" [attr.cy]="s.lastPoint.y" r="3.5" [style.fill]="'var(' + s.colorVar + ')'" />
+            <text
+              class="series-label"
+              [attr.x]="s.lastPoint.x + 8"
+              [attr.y]="s.lastPoint.y + 4"
+              [style.fill]="'var(' + s.colorVar + ')'"
+            >{{ s.lastPoint.value | number:'1.1-1' }}°</text>
+          }
+
+          <!-- curseur -->
+          @if (hoverX(); as hx) {
+            <line class="crosshair" [attr.x1]="hx" [attr.x2]="hx" [attr.y1]="plotTop" [attr.y2]="plotTop + plotHeight" />
+          }
+        </svg>
+
+        @if (hoverHour(); as hh) {
+          <div class="tooltip">
+            <div class="tooltip-title">Heure {{ hh }}</div>
+            @for (row of hoverRows(); track row.label) {
+              <div class="tooltip-row">
+                <span class="swatch" [style.background]="'var(' + row.colorVar + ')'"></span>
+                <span class="tooltip-label">{{ row.label }}</span>
+                <span class="tooltip-value">{{ row.value | number:'1.1-1' }}°C</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <div class="table-actions">
+        <button type="button" class="btn-secondary" (click)="downloadCsv()">Télécharger le CSV complet</button>
+        @if (r.temperatures.length > tablePreviewLimit) {
+          <span class="hint">Aperçu limité aux {{ tablePreviewLimit }} premières heures — le CSV contient les {{ r.temperatures.length }} lignes.</span>
+        }
+      </div>
+
+      <div class="table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Heure</th>
+              @for (opt of nodeOptions(); track opt.nodeIndex) {
+                <th class="num">{{ opt.label }}</th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of tableRows(); track row.hour) {
+              <tr>
+                <td class="num">{{ row.hour }}</td>
+                @for (opt of nodeOptions(); track opt.nodeIndex) {
+                  <td class="num">{{ row.values[opt.nodeIndex] | number:'1.1-1' }}</td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  }
+</main>

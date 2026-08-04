@@ -6,3 +6,4 @@ psycopg2-binary>=2.9
 PyJWT>=2.8
 cryptography>=40.0
 django-cors-headers>=3.14.0
+numpy>=1.26,<2.0

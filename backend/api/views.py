@@ -1,9 +1,10 @@
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import generics
+from rest_framework import generics, status
 from rest_framework.response import Response
 from .models import Department, UserRecord
-from .serializers import DepartmentSerializer, UserRecordSerializer
+from .serializers import DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer
+from . import solver
 
 
 class MeView(APIView):
@@ -48,3 +49,23 @@ class UserListView(generics.ListAPIView):
 
     queryset         = UserRecord.objects.select_related('department')
     serializer_class = UserRecordSerializer
+
+
+class Calcul1DView(APIView):
+    """
+    POST /api/calcul-1d/
+    Simule le régime transitoire 1D d'une paroi multicouche, heure par heure,
+    à partir de sa définition, du maillage souhaité, des conditions aux
+    limites intérieures et d'une série météo extérieure. Voir api/solver.py.
+    """
+
+    def post(self, request):
+        serializer = CalculRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = solver.run_simulation(serializer.validated_data)
+        except solver.SimulationError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(result)

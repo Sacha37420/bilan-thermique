@@ -1,0 +1,798 @@
+<main class="page-theorie">
+
+  <div class="theorie-head">
+    <p class="eyebrow"><span class="dot"></span> Bilan thermique — document de référence théorique</p>
+    <h1>Régime transitoire 1D dans une paroi multicouche, par éléments finis</h1>
+    <p class="subtitle">
+      Conduction, capacité thermique et apports solaires couplés en un seul système matriciel,
+      résolu heure par heure. Ce document pose les bases physiques et numériques avant toute
+      implémentation applicative des calculs.
+    </p>
+    <div class="meta-row">
+      <span class="meta-chip"><strong>Domaine</strong> — paroi plane, 1D, épaisseur x ∈ [0, L]</span>
+      <span class="meta-chip"><strong>Méthode</strong> — éléments finis (Galerkin), schéma temporel implicite</span>
+      <span class="meta-chip"><strong>Pas de temps</strong> — Δt = 1 h</span>
+      <span class="meta-chip"><strong>Grandeurs</strong> — flux ramenés à l'unité de surface (W·m⁻²)</span>
+    </div>
+  </div>
+
+  <div class="theorie-layout">
+
+    <nav class="toc desktop" aria-label="Sommaire">
+      <h2>Sommaire</h2>
+      <ol>
+        <li><a href="#sec-portee"><span class="n">01</span> Portée et hypothèses</a></li>
+        <li><a href="#sec-paroi"><span class="n">02</span> Géométrie et maillage</a></li>
+        <li><a href="#sec-proprietes"><span class="n">03</span> Propriétés de couche</a></li>
+        <li><a href="#sec-solaire"><span class="n">04</span> Rayonnement solaire incident</a></li>
+        <li><a href="#sec-propagation"><span class="n">05</span> Propagation à travers les couches</a></li>
+        <li><a href="#sec-chaleur"><span class="n">06</span> Équation de la chaleur</a></li>
+        <li><a href="#sec-ef"><span class="n">07</span> Discrétisation éléments finis</a></li>
+        <li><a href="#sec-cl"><span class="n">08</span> Conditions aux limites</a></li>
+        <li><a href="#sec-temps"><span class="n">09</span> Discrétisation temporelle</a></li>
+        <li><a href="#sec-algo"><span class="n">10</span> Algorithme pas à pas</a></li>
+        <li><a href="#sec-bilan"><span class="n">11</span> Bilan énergétique</a></li>
+        <li><a href="#sec-extensions"><span class="n">12</span> Extensions possibles</a></li>
+        <li><a href="#sec-notations"><span class="n">13</span> Table des notations</a></li>
+      </ol>
+    </nav>
+
+    <main class="content" id="sec-top">
+      <details class="toc-mobile">
+        <summary>Sommaire du document</summary>
+        <nav class="toc" aria-label="Sommaire (mobile)">
+          <ol>
+            <li><a href="#sec-portee"><span class="n">01</span> Portée et hypothèses</a></li>
+            <li><a href="#sec-paroi"><span class="n">02</span> Géométrie et maillage</a></li>
+            <li><a href="#sec-proprietes"><span class="n">03</span> Propriétés de couche</a></li>
+            <li><a href="#sec-solaire"><span class="n">04</span> Rayonnement solaire incident</a></li>
+            <li><a href="#sec-propagation"><span class="n">05</span> Propagation à travers les couches</a></li>
+            <li><a href="#sec-chaleur"><span class="n">06</span> Équation de la chaleur</a></li>
+            <li><a href="#sec-ef"><span class="n">07</span> Discrétisation éléments finis</a></li>
+            <li><a href="#sec-cl"><span class="n">08</span> Conditions aux limites</a></li>
+            <li><a href="#sec-temps"><span class="n">09</span> Discrétisation temporelle</a></li>
+            <li><a href="#sec-algo"><span class="n">10</span> Algorithme pas à pas</a></li>
+            <li><a href="#sec-bilan"><span class="n">11</span> Bilan énergétique</a></li>
+            <li><a href="#sec-extensions"><span class="n">12</span> Extensions possibles</a></li>
+            <li><a href="#sec-notations"><span class="n">13</span> Table des notations</a></li>
+          </ol>
+        </nav>
+      </details>
+
+      <section class="chapter" id="sec-portee">
+        <p class="chapter-eyebrow">01 — Portée et hypothèses</p>
+        <h2>Ce que ce modèle couvre, et ce qu'il laisse de côté</h2>
+        <div class="prose">
+          <p>
+            Le modèle traite une paroi plane <em class="term">1D</em> : la température ne varie que
+            selon l'épaisseur <span class="sym">x</span>, jamais en hauteur ni en largeur. C'est
+            l'hypothèse standard pour une paroi homogène loin de ses bords (pas de pont thermique
+            traité ici). Toutes les grandeurs — flux, capacités — sont exprimées par unité de
+            surface de paroi (<span class="sym">W·m⁻²</span>, <span class="sym">J·m⁻²·K⁻¹</span>),
+            ce qui évite de porter une surface <span class="sym">S</span> dans chaque équation ; il
+            suffit de multiplier par <span class="sym">S</span> à la toute fin si une puissance
+            totale est nécessaire.
+          </p>
+          <p>
+            La paroi est <em class="term">multicouche</em> : une succession de matériaux
+            d'épaisseurs et de propriétés différentes, empilés selon <span class="sym">x</span>.
+            Chaque couche porte deux jeux de propriétés, qui alimentent deux bilans distincts mais
+            couplés :
+          </p>
+          <ul>
+            <li><strong>thermique</strong> — comment la chaleur s'y conduit et s'y stocke ;</li>
+            <li><strong>optique (« lumineuse »)</strong> — comment le rayonnement solaire incident
+              s'y réfléchit, s'y absorbe ou la traverse.</li>
+          </ul>
+          <p>
+            Le résultat des deux bilans se combine en un seul terme source, injecté au bon endroit
+            dans l'équation de la chaleur — c'est tout l'objet des sections 05 à 07.
+          </p>
+        </div>
+        <div class="callout">
+          <span class="callout-label">Hors périmètre de ce document</span>
+          <p>
+            Échanges grande longueur d'onde (infrarouge) avec la voûte céleste, rayonnement solaire
+            réfléchi par le sol (albédo), réflexions multiples entre couches vitrées successives,
+            effets 2D/3D (ponts thermiques, angles), couplage simultané avec plusieurs parois d'un
+            même local. Ces raffinements sont mentionnés en section 12 comme extensions possibles —
+            ils ne changent pas la structure du modèle, seulement le contenu de certains termes.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-paroi">
+        <p class="chapter-eyebrow">02 — Géométrie et maillage</p>
+        <h2>De la paroi physique au maillage de nœuds</h2>
+        <div class="prose">
+          <p>
+            La paroi occupe <span class="sym">x ∈ [0, L]</span>, face extérieure en
+            <span class="sym">x = 0</span>, face intérieure en <span class="sym">x = L</span>. Elle
+            est composée de <span class="sym">N</span> couches indexées <span class="sym">i = 1…N</span>
+            dans l'ordre extérieur → intérieur. Chaque couche est ensuite discrétisée en un ou
+            plusieurs <em class="term">éléments</em> linéaires (segments) délimités par des
+            <em class="term">nœuds</em> — c'est en ces nœuds que la température est calculée à
+            chaque pas de temps ; entre deux nœuds, elle est interpolée linéairement.
+          </p>
+          <p>
+            Une couche épaisse ou très diffusive gagne à être subdivisée en plusieurs éléments (2 à
+            4 typiquement) plutôt qu'un seul : la capacité thermique de la couche est alors répartie
+            sur plusieurs nœuds au lieu d'être concentrée aux deux extrémités, ce qui réduit l'erreur
+            de discrétisation spatiale sans changer quoi que ce soit à la méthode elle-même.
+          </p>
+        </div>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 920 380" role="img" aria-labelledby="diag-title diag-desc">
+            <title id="diag-title">Coupe de la paroi multicouche</title>
+            <desc id="diag-desc">
+              Rayons solaires directs et diffus arrivant sur la face extérieure d'une paroi à quatre
+              couches, nœuds aux interfaces, conditions aux limites extérieure et intérieure.
+            </desc>
+            <circle cx="70" cy="58" r="20" fill="none" stroke="var(--accent)" stroke-width="2"/>
+            <g stroke="var(--accent)" stroke-width="2">
+              <line x1="70" y1="20" x2="70" y2="8"/>
+              <line x1="70" y1="96" x2="70" y2="108"/>
+              <line x1="32" y1="58" x2="20" y2="58"/>
+              <line x1="45" y1="33" x2="35" y2="23"/>
+              <line x1="95" y1="33" x2="105" y2="23"/>
+              <line x1="45" y1="83" x2="35" y2="93"/>
+            </g>
+            <path d="M 20 130 A 160 160 0 0 1 220 130" fill="none" stroke="var(--text-mute)" stroke-width="1.5" stroke-dasharray="3 4"/>
+            <text x="120" y="118" text-anchor="middle" font-family="var(--font-mono)" font-size="12" fill="var(--text-mute)">ciel diffus</text>
+
+            <line x1="70" y1="78" x2="240" y2="168" stroke="var(--accent)" stroke-width="2"/>
+            <polygon points="240,168 228,162 232,174" fill="var(--accent)"/>
+            <text x="150" y="112" font-family="var(--font-mono)" font-size="12" fill="var(--accent)">E_dir</text>
+            <text x="150" y="128" font-family="var(--font-mono)" font-size="11" fill="var(--text-mute)">h_s (hauteur solaire)</text>
+
+            <line x1="130" y1="140" x2="238" y2="190" stroke="var(--text-mute)" stroke-width="1.5" stroke-dasharray="3 4"/>
+            <text x="150" y="200" font-family="var(--font-mono)" font-size="12" fill="var(--text-mute)">E_dif</text>
+
+            <line x1="240" y1="120" x2="240" y2="240" stroke="var(--border)" stroke-width="1" stroke-dasharray="2 3"/>
+            <text x="248" y="152" font-family="var(--font-mono)" font-size="11" fill="var(--text-mute)">normale</text>
+            <path d="M 240 168 A 26 26 0 0 0 233 190" fill="none" stroke="var(--text-mute)" stroke-width="1"/>
+            <text x="205" y="200" font-family="var(--font-mono)" font-size="11" fill="var(--text-mute)">θ_i</text>
+
+            <text x="20" y="260" font-family="var(--font-mono)" font-size="12" fill="var(--text)">T_ext(t)</text>
+            <text x="20" y="278" font-family="var(--font-mono)" font-size="12" fill="var(--text)">h_e</text>
+            <line x1="70" y1="255" x2="235" y2="223" stroke="var(--text-mute)" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-mute)"/>
+              </marker>
+            </defs>
+
+            <g>
+              <rect x="240" y="60" width="70" height="260" fill="var(--bg)" stroke="var(--border)"/>
+              <rect x="310" y="60" width="140" height="260" fill="var(--accent-tint)" stroke="var(--border)"/>
+              <rect x="450" y="60" width="60" height="260" fill="var(--bg)" stroke="var(--border)"/>
+              <rect x="510" y="60" width="110" height="260" fill="var(--bg)" stroke="var(--border)"/>
+            </g>
+
+            <text x="275" y="345" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--text-mute)">couche 1</text>
+            <text x="275" y="360" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--text-mute)">opaque, e₁ λ₁ α₁</text>
+
+            <text x="380" y="345" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--accent)">couche 2 — translucide</text>
+            <text x="380" y="360" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--text-mute)">τ₂ r₂ α₂ (source répartie)</text>
+
+            <text x="480" y="345" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--text-mute)">couche 3</text>
+            <text x="480" y="360" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--text-mute)">opaque</text>
+
+            <text x="565" y="345" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--text-mute)">couche 4</text>
+            <text x="565" y="360" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--text-mute)">opaque, face intérieure</text>
+
+            <g fill="var(--card)" stroke="var(--text)" stroke-width="1.5">
+              <circle cx="240" cy="190" r="5"/>
+              <circle cx="310" cy="190" r="5"/>
+              <circle cx="380" cy="190" r="4" fill="var(--accent)" stroke="var(--accent)"/>
+              <circle cx="450" cy="190" r="5"/>
+              <circle cx="510" cy="190" r="5"/>
+              <circle cx="620" cy="190" r="5"/>
+            </g>
+            <text x="240" y="175" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--text)">T₀</text>
+            <text x="310" y="175" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--text)">T₁</text>
+            <text x="380" y="175" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--accent)">Tₖ (source S(x,t))</text>
+            <text x="450" y="175" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--text)">T₂</text>
+            <text x="510" y="175" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--text)">T₃</text>
+            <text x="620" y="175" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--text)">Tₙ</text>
+
+            <text x="660" y="255" font-family="var(--font-mono)" font-size="12" fill="var(--text)">h_i</text>
+            <line x1="625" y1="223" x2="700" y2="253" stroke="var(--text-mute)" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <text x="700" y="270" font-family="var(--font-mono)" font-size="12" fill="var(--text)">cas 1 — T_int(t) imposée</text>
+            <text x="700" y="288" font-family="var(--font-mono)" font-size="12" fill="var(--text)">cas 2 — nœud air libre, C_air,int</text>
+
+            <text x="240" y="45" font-family="var(--font-mono)" font-size="12" fill="var(--text-mute)">x = 0</text>
+            <text x="608" y="45" font-family="var(--font-mono)" font-size="12" fill="var(--text-mute)">x = L</text>
+          </svg>
+          <figcaption>
+            Coupe de la paroi : 4 couches, dont une translucide (couche 2) qui laisse passer une
+            partie du rayonnement absorbée en volume. Les points sont les nœuds du maillage — c'est
+            en ces points que <span class="sym">T(x,t)</span> est calculée.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="chapter" id="sec-proprietes">
+        <p class="chapter-eyebrow">03 — Propriétés de couche</p>
+        <h2>Ce que chaque couche doit déclarer</h2>
+        <div class="prose">
+          <p>
+            Une couche <span class="sym">i</span> est entièrement définie par sept nombres : quatre
+            thermiques, trois optiques. Aucune couche ne demande de méthode de calcul différente —
+            seule la valeur de <span class="sym">τᵢ</span> (transmittance) distingue une couche
+            opaque d'une couche translucide dans le traitement qui suit.
+          </p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption>Sept grandeurs par couche — c'est la fiche technique attendue en entrée du modèle</caption>
+            <thead>
+              <tr><th>Symbole</th><th>Nom</th><th>Unité</th><th>Rôle</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="sym">eᵢ</span></td><td>Épaisseur</td><td class="num">m</td><td>Longueur de la couche selon x</td></tr>
+              <tr><td><span class="sym">λᵢ</span></td><td>Conductivité thermique</td><td class="num">W·m⁻¹·K⁻¹</td><td>Résistance à la conduction (matrice <span class="sym">[K]</span>)</td></tr>
+              <tr><td><span class="sym">ρᵢ</span></td><td>Masse volumique</td><td class="num">kg·m⁻³</td><td>Avec <span class="sym">cᵢ</span>, fixe l'inertie thermique</td></tr>
+              <tr><td><span class="sym">cᵢ</span></td><td>Chaleur massique</td><td class="num">J·kg⁻¹·K⁻¹</td><td>Capacité de stockage (matrice <span class="sym">[C]</span>)</td></tr>
+              <tr><td><span class="sym">τᵢ</span></td><td>Transmittance solaire</td><td class="num">—</td><td>Fraction transmise à la couche suivante (0 si opaque)</td></tr>
+              <tr><td><span class="sym">rᵢ</span></td><td>Réflectance solaire</td><td class="num">—</td><td>Fraction renvoyée, perdue pour le bilan</td></tr>
+              <tr><td><span class="sym">αᵢ</span></td><td>Absorptance solaire</td><td class="num">—</td><td>Fraction convertie en chaleur dans la couche</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">(ρc)ᵢ = ρᵢ · cᵢ</span><span class="op">— capacité thermique volumique de la couche</span></div>
+          <div class="eq"><span class="sym accent">τᵢ + rᵢ + αᵢ = 1</span><span class="op">— conservation de l'énergie solaire à l'échelle de la couche</span></div>
+        </div>
+        <div class="prose">
+          <p>
+            Une couche <em class="term">opaque</em> (béton, isolant, bois, plâtre…) a
+            <span class="sym">τᵢ = 0</span> : rien ne la traverse, tout ce qui n'est pas réfléchi est
+            absorbé <em>en surface</em>, sur une épaisseur physiquement négligeable (de l'ordre du
+            micromètre pour la plupart des matériaux de construction face au rayonnement solaire) —
+            c'est pourquoi son absorption est traitée comme un flux de surface, jamais comme une
+            source répartie dans son volume.
+          </p>
+          <p>
+            Une couche <em class="term">translucide</em> (vitrage, polycarbonate, film plastique…) a
+            <span class="sym">τᵢ &gt; 0</span> : une partie du rayonnement continue vers la couche
+            suivante, et la fraction absorbée <span class="sym">αᵢ</span> devient une source de
+            chaleur répartie dans l'épaisseur de la couche elle-même (section 05).
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-solaire">
+        <p class="chapter-eyebrow">04 — Rayonnement solaire incident</p>
+        <h2>Ce qui arrive sur la face extérieure</h2>
+        <div class="prose">
+          <p>
+            Trois données sont fournies pour l'extérieur, à chaque pas de temps : la hauteur solaire
+            <span class="sym">h_s(t)</span> (angle du soleil au-dessus de l'horizon), l'angle
+            d'incidence <span class="sym">θᵢ(t)</span> entre le rayon direct et la normale à la
+            paroi, et les éclairements <span class="sym">E_dir(t)</span> (direct, mesuré
+            perpendiculairement au rayon) et <span class="sym">E_dif(t)</span> (diffus, reçu du ciel
+            dans son ensemble). La hauteur solaire intervient dans le calcul de
+            <span class="sym">θᵢ</span> en amont (géométrie solaire) ; une fois
+            <span class="sym">θᵢ</span> connu, c'est lui seul qui règle la projection du direct sur
+            la paroi.
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym accent">E_glo(t)</span><span class="op">=</span><span class="sym">E_dir(t) · cos θᵢ(t)</span><span class="op">+</span><span class="sym">E_dif(t) · F_ciel</span></div>
+          <div class="eq-caption">éclairement global reçu par le plan de la paroi, en W·m⁻²</div>
+        </div>
+        <div class="prose">
+          <p>
+            <span class="sym">F_ciel</span> est le facteur de vue du ciel de la paroi — la fraction
+            de la voûte céleste qu'elle « voit ». Pour une paroi inclinée d'un angle
+            <span class="sym">β</span> par rapport à l'horizontale (<span class="sym">β = 90°</span>
+            pour un mur vertical, <span class="sym">β = 0°</span> pour une toiture plate) sous
+            hypothèse de ciel isotrope :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">F_ciel</span><span class="op">=</span><span class="frac"><span class="num">1 + cos β</span><span class="den">2</span></span></div>
+          <div class="eq-caption">= 0,5 pour un mur vertical — il ne voit que la moitié du ciel</div>
+        </div>
+        <div class="callout">
+          <span class="callout-label">Si l'éclairement de la paroi est déjà fourni</span>
+          <p>
+            Quand <span class="sym">E_dir</span> et <span class="sym">E_dif</span> sont déjà exprimés
+            dans le plan de la paroi (et non horizontal / normal aux rayons), la formule se réduit à
+            <span class="sym">E_glo = E_dir + E_dif</span> : <span class="sym">θᵢ</span> et
+            <span class="sym">F_ciel</span> ont alors déjà été appliqués en amont. Le point à fixer
+            côté application est simplement lequel des deux conventions les données d'entrée suivent.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-propagation">
+        <p class="chapter-eyebrow">05 — Propagation à travers les couches</p>
+        <h2>L'approche « lumineuse » : suivre l'énergie couche après couche</h2>
+        <div class="prose">
+          <p>
+            <span class="sym">E_glo(t)</span> ne concerne que la toute première surface exposée. Ce
+            qui se passe ensuite dépend de la nature de chaque couche rencontrée, dans l'ordre. Le
+            principe est un bilan à répéter couche par couche, en propageant vers l'intérieur ce qui
+            n'a été ni réfléchi ni absorbé :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">E_inc,1 = E_glo(t)</span></div>
+          <div class="eq"><span class="sym accent">E_abs,j</span><span class="op">=</span><span class="sym">αⱼ · E_inc,j</span><span class="op">(absorbée dans la couche j)</span></div>
+          <div class="eq"><span class="sym">E_réfl,j = rⱼ · E_inc,j</span><span class="op">(perdue, ne participe plus au bilan)</span></div>
+          <div class="eq"><span class="sym">E_inc,j+1</span><span class="op">=</span><span class="sym">τⱼ · E_inc,j</span><span class="op">(ce qui atteint la couche suivante)</span></div>
+          <div class="eq-caption">à répéter pour j = 1 … N, dans l'ordre extérieur → intérieur</div>
+        </div>
+        <div class="prose">
+          <p>Deux issues possibles à chaque couche :</p>
+          <ul>
+            <li>
+              <strong>couche opaque</strong> (<span class="sym">τⱼ = 0</span>) — toute l'énergie non
+              réfléchie est absorbée à la surface d'entrée de cette couche, au nœud correspondant.
+              <span class="sym">E_inc,j+1 = 0</span> : la propagation s'arrête net, les couches
+              suivantes ne reçoivent plus rien du rayonnement solaire (seule la conduction continue
+              de s'y exercer).
+            </li>
+            <li>
+              <strong>couche translucide</strong> (<span class="sym">τⱼ &gt; 0</span>) — l'énergie
+              absorbée <span class="sym">E_abs,j</span> devient une source volumique dans
+              l'épaisseur de la couche (répartie uniformément par défaut, voir encart ci-dessous), et
+              le reliquat <span class="sym">E_inc,j+1</span> continue vers la couche suivante.
+            </li>
+          </ul>
+          <p>
+            Ce mécanisme se généralise à un cas concret et fréquent : un vitrage (couche translucide)
+            suivi d'une lame d'air puis d'un mur absorbant (couche opaque) — c'est le principe d'un
+            <em class="term">mur Trombe</em>. Le modèle n'a besoin d'aucun traitement spécial pour ce
+            cas : la source solaire apparaît simplement à l'interface où la lumière rencontre la
+            première surface opaque, quelle que soit sa position dans l'épaisseur de la paroi.
+          </p>
+        </div>
+        <div class="callout">
+          <span class="callout-label">Répartition de la source dans une couche translucide épaisse</span>
+          <p>
+            Le modèle par défaut répartit <span class="sym">E_abs,j</span> uniformément sur
+            l'épaisseur <span class="sym">eⱼ</span> :
+            <span class="sym">S_j(x,t) = αⱼ E_inc,j(t) / eⱼ</span> (W·m⁻³), ce qui est suffisant dès
+            que la couche est finement maillée (section 02). Pour une couche épaisse représentée par
+            un seul élément, un profil décroissant selon la loi de Bouguer-Lambert
+            (<span class="sym">E(x) = E_inc,j · e^(−κx)</span>) donne une répartition plus réaliste,
+            concentrée côté extérieur de la couche — un raffinement, pas un changement de structure.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-chaleur">
+        <p class="chapter-eyebrow">06 — Équation de la chaleur avec terme source</p>
+        <h2>Où thermique et lumineux se rejoignent</h2>
+        <div class="prose">
+          <p>
+            Les deux bilans convergent vers une seule et même équation : la conduction 1D classique,
+            à laquelle s'ajoute le terme <span class="sym">S(x,t)</span> construit en section 05.
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="sym">ρ(x)·c(x)·</span><span class="frac"><span class="num">∂T</span><span class="den">∂t</span></span>
+            <span class="op">=</span>
+            <span class="frac"><span class="num">∂</span><span class="den">∂x</span></span>
+            <span class="op">(</span><span class="sym">λ(x)·</span><span class="frac"><span class="num">∂T</span><span class="den">∂x</span></span><span class="op">)</span>
+            <span class="op">+</span>
+            <span class="sym accent">S(x,t)</span>
+          </div>
+          <div class="eq-caption">
+            terme de gauche : stockage local · terme de droite : diffusion conductive + apport
+            solaire local
+          </div>
+        </div>
+        <div class="prose">
+          <p>
+            <span class="sym">S(x,t)</span> est nul partout sauf dans les couches translucides (source
+            répartie, section 05) ; l'absorption des couches opaques n'apparaît pas ici mais dans les
+            conditions aux limites / interfaces (section 08), puisqu'il s'agit d'un flux de surface
+            et non d'un terme volumique.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-ef">
+        <p class="chapter-eyebrow">07 — Discrétisation par éléments finis</p>
+        <h2>De l'équation continue au système matriciel</h2>
+        <div class="prose">
+          <p>
+            Formulation faible (Galerkin) : on multiplie l'équation par une fonction test
+            <span class="sym">w(x)</span> et on intègre sur <span class="sym">[0, L]</span>, en
+            intégrant par parties le terme de conduction pour faire apparaître les flux aux bornes :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="sym">∫₀ᴸ ρc·w·</span><span class="frac"><span class="num">∂T</span><span class="den">∂t</span></span><span class="sym">dx</span>
+            <span class="op">+</span>
+            <span class="sym">∫₀ᴸ λ·</span><span class="frac"><span class="num">∂w</span><span class="den">∂x</span></span><span class="sym">·</span><span class="frac"><span class="num">∂T</span><span class="den">∂x</span></span><span class="sym">dx</span>
+            <span class="op">=</span>
+            <span class="sym accent">∫₀ᴸ w·S dx</span>
+            <span class="op">+</span>
+            <span class="sym">[ w·λ·∂T/∂x ]₀ᴸ</span>
+          </div>
+          <div class="eq-caption">le dernier terme, évalué aux deux bornes, est exactement ce que les conditions aux limites viennent remplacer (section 08)</div>
+        </div>
+        <div class="prose">
+          <p>
+            On approxime <span class="sym">T(x,t) ≈ Σⱼ Nⱼ(x)·Tⱼ(t)</span> avec des fonctions de forme
+            <span class="sym">Nⱼ</span> linéaires par élément (« chapeaux »), et on choisit
+            <span class="sym">w = Nₖ</span> successivement (méthode de Galerkin). Pour un élément
+            <span class="sym">e</span> de longueur <span class="sym">lₑ</span>, conductivité
+            <span class="sym">λₑ</span> et capacité volumique <span class="sym">(ρc)ₑ</span>, cela
+            donne deux matrices élémentaires 2×2 :
+          </p>
+        </div>
+        <div class="split">
+          <div class="card">
+            <h4>Matrice de conduction Kₑ</h4>
+            <div class="eq" style="justify-content:center;">
+              <span class="sym">Kₑ =</span>
+              <span class="frac"><span class="num">λₑ</span><span class="den">lₑ</span></span>
+              <span class="matrix">
+                <span class="matrix-grid" style="grid-template-columns:1.4em 1.4em;">
+                  <span>1</span><span>−1</span>
+                  <span>−1</span><span>1</span>
+                </span>
+              </span>
+            </div>
+          </div>
+          <div class="card">
+            <h4>Matrice de capacité Cₑ</h4>
+            <div class="eq" style="justify-content:center;">
+              <span class="sym">Cₑ =</span>
+              <span class="frac"><span class="num">(ρc)ₑ·lₑ</span><span class="den">6</span></span>
+              <span class="matrix">
+                <span class="matrix-grid" style="grid-template-columns:1.4em 1.4em;">
+                  <span>2</span><span>1</span>
+                  <span>1</span><span>2</span>
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="prose">
+          <p>
+            <span class="sym">Cₑ</span> ci-dessus est la matrice de capacité « cohérente » (issue
+            directement de l'intégration de Galerkin). Sa variante « concentrée » (<em>lumped</em>),
+            <span class="sym">diag((ρc)ₑlₑ/2, (ρc)ₑlₑ/2)</span>, est plus simple à interpréter — chaque
+            nœud porte la moitié de la capacité de chaque élément qui le touche — et couramment
+            utilisée en physique du bâtiment ; les deux variantes sont admissibles, la version
+            concentrée est recommandée comme point de départ pour sa lisibilité physique directe.
+          </p>
+          <p>
+            L'assemblage global consiste à sommer les contributions de chaque élément dans les
+            matrices globales <span class="sym">[K]</span> et <span class="sym">[C]</span> (taille
+            <span class="sym">n × n</span>, <span class="sym">n</span> = nombre total de nœuds), aux
+            emplacements de leurs deux nœuds — technique standard d'assemblage par recouvrement des
+            indices. Le terme source <span class="sym accent">S(x,t)</span> alimente de la même façon
+            un vecteur global <span class="sym">&#123;F(t)&#125;</span> :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">Fₖ += ∫_élément Nₖ(x)·S(x,t) dx</span><span class="op">— pour chaque élément d'une couche translucide</span></div>
+        </div>
+        <div class="prose">
+          <p>Le système global, avant conditions aux limites, s'écrit :</p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="matrix"><span class="sym">C</span></span>
+            <span class="op">&#123;</span><span class="sym">Ṫ</span><span class="op">&#125;</span>
+            <span class="op">+</span>
+            <span class="matrix"><span class="sym">K</span></span>
+            <span class="op">&#123;</span><span class="sym">T</span><span class="op">&#125;</span>
+            <span class="op">=</span>
+            <span class="op">&#123;</span><span class="sym accent">F(t)</span><span class="op">&#125;</span>
+          </div>
+          <div class="eq-caption">système d'équations différentielles linéaires en temps — <span class="sym">Ṫ = dT/dt</span></div>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-cl">
+        <p class="chapter-eyebrow">08 — Conditions aux limites</p>
+        <h2>Fermer le système aux deux bords</h2>
+        <div class="prose">
+          <p>
+            Le terme de bord <span class="sym">[w·λ·∂T/∂x]₀ᴸ</span> laissé en suspens en section 07
+            se règle exactement à ce stade : à chaque extrémité, on remplace le flux inconnu par ce
+            que l'on sait physiquement de l'échange qui s'y produit.
+          </p>
+        </div>
+
+        <h3>Face extérieure (nœud 0) — toujours de type Robin + source</h3>
+        <div class="prose">
+          <p>
+            Convection avec l'air extérieur et absorption solaire de la première surface rencontrée
+            se combinent en une seule condition, appliquée au nœud où le rayonnement s'arrête
+            réellement (le nœud 0 si la couche 1 est opaque — le cas général, une interface plus
+            profonde si des couches translucides la précèdent, cf. section 05) :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="sym">hₑ·(T_ext(t) − T₀)</span>
+            <span class="op">+</span>
+            <span class="sym accent">α₁·E_inc,1(t)</span>
+            <span class="op">=</span>
+            <span class="op">−λ₁·</span><span class="frac"><span class="num">∂T</span><span class="den">∂x</span></span><span class="op">|₀⁺</span>
+          </div>
+          <div class="eq-caption">flux entrant par convection + flux solaire absorbé = flux conductif qui pénètre dans la paroi</div>
+        </div>
+        <div class="prose">
+          <p>Traduit dans le système matriciel, cette condition modifie une ligne et un terme de charge :</p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">K[0,0] += hₑ</span></div>
+          <div class="eq"><span class="sym accent">F[0] += hₑ·T_ext(t) + α₁·E_inc,1(t)</span></div>
+        </div>
+
+        <h3>Face intérieure (nœud n) — même structure Robin qu'à l'extérieur</h3>
+        <div class="prose">
+          <p>
+            Symétrique au bord extérieur : un coefficient d'échange <span class="sym">hᵢ</span>
+            sépare <em class="term">toujours</em> la température de la surface intérieure
+            <span class="sym">Tₙ</span> de la température de l'air intérieur — que cette dernière
+            soit connue (cas 1) ou elle-même inconnue (cas 2). Oublier <span class="sym">hᵢ</span>
+            dans le cas imposé reviendrait à confondre <span class="sym">T_int</span> avec la
+            température de <em>surface</em> (résistance superficielle nulle), ce qu'aucune paroi
+            réelle ne fait. La modification structurelle est donc identique dans les deux cas :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">K[n,n] += hᵢ</span><span class="op">— toujours, contribution constante dans le temps, exactement comme K[0,0] += hₑ</span></div>
+        </div>
+        <div class="prose">
+          <p>Les deux cas ne diffèrent qu'ensuite, dans la façon dont <span class="sym">T_int</span> entre dans le système :</p>
+        </div>
+        <div class="split">
+          <div class="card">
+            <h4>Cas 1 — température imposée</h4>
+            <p>
+              <span class="sym">T_int(t)</span> (température d'<em>air</em>, pas de surface) est
+              connue — consigne de chauffage/climatisation par exemple. Elle entre en <em class="term">forçage
+              direct</em>, sans ajouter d'inconnue :
+            </p>
+          </div>
+          <div class="card">
+            <h4>Cas 2 — évolution libre</h4>
+            <p>
+              <span class="sym">T_air,int(t)</span> est cette fois inconnue : on ajoute un
+              <em class="term">degré de liberté supplémentaire</em> — un nœud « air + mobilier », de
+              capacité <span class="sym">C_air,int</span> (J·m⁻²·K⁻¹), sans conduction propre, relié
+              au nœud <span class="sym">n</span> uniquement par <span class="sym">hᵢ</span>.
+            </p>
+          </div>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym accent">F[n] += hᵢ·T_int(t)</span><span class="op">— cas 1, symétrique à F[0] += hₑ·T_ext(t)</span></div>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="sym">C_air,int·</span><span class="frac"><span class="num">dT_air,int</span><span class="den">dt</span></span>
+            <span class="op">=</span>
+            <span class="sym">hᵢ·(Tₙ − T_air,int)</span>
+          </div>
+          <div class="eq-caption">cas 2 — bilan du nœud d'air intérieur, isolé de tout autre échange (une seule paroi considérée)</div>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">K[n,air] −= hᵢ</span><span class="op">,</span> <span class="sym">K[air,n] −= hᵢ</span><span class="op">,</span> <span class="sym">K[air,air] += hᵢ</span><span class="op">,</span> <span class="sym">C[air,air] += C_air,int</span></div>
+          <div class="eq-caption">cas 2 — en plus de K[n,n] += hᵢ déjà posé plus haut</div>
+        </div>
+        <div class="callout">
+          <span class="callout-label">Pourquoi les deux cas partagent le même maillage</span>
+          <p>
+            Le maillage de la paroi ne change jamais d'un cas à l'autre, et la ligne
+            <span class="sym">n</span> reçoit la même contribution <span class="sym">hᵢ</span> dans
+            les deux cas — seule la présence d'une ligne/colonne supplémentaire (cas 2) diffère. Une
+            implémentation peut donc traiter le bord intérieur de façon quasi identique dans les deux
+            modes : <span class="sym">T_int</span> est soit une donnée qui alimente
+            <span class="sym">F</span>, soit une inconnue de plus dans le système.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-temps">
+        <p class="chapter-eyebrow">09 — Discrétisation temporelle</p>
+        <h2>De l'état à l'instant t à l'état à t + Δt</h2>
+        <div class="prose">
+          <p>
+            Le système <span class="sym">[C]&#123;Ṫ&#125; + [K]&#123;T&#125; = &#123;F(t)&#125;</span> est continu en temps ; il
+            faut le discrétiser pour avancer par pas de <span class="sym">Δt = 1 h</span>. On utilise
+            un <em class="term">schéma θ généralisé</em> (ici noté <span class="sym">ω</span> pour ne
+            pas le confondre avec l'angle d'incidence <span class="sym">θᵢ</span>), qui interpole
+            entre l'état <span class="sym">n</span> (connu) et l'état <span class="sym">n+1</span>
+            (inconnu) :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="op">(</span><span class="matrix"><span class="sym">C</span></span><span class="op">/Δt +</span>
+            <span class="sym">ω</span><span class="matrix"><span class="sym">K</span></span><span class="op">)</span>
+            <span class="op">&#123;</span><span class="sym accent">Tⁿ⁺¹</span><span class="op">&#125;</span>
+            <span class="op">=</span>
+            <span class="op">(</span><span class="matrix"><span class="sym">C</span></span><span class="op">/Δt − (1−ω)</span><span class="matrix"><span class="sym">K</span></span><span class="op">)</span>
+            <span class="op">&#123;</span><span class="sym">Tⁿ</span><span class="op">&#125;</span>
+            <span class="op">+ ω&#123;F</span><span class="sym accent">ⁿ⁺¹</span><span class="op">&#125; + (1−ω)&#123;Fⁿ&#125;</span>
+          </div>
+          <div class="eq-caption"><span class="sym">ω = 0</span> explicite · <span class="sym">ω = 1</span> implicite · <span class="sym">ω = 0,5</span> Crank-Nicolson</div>
+        </div>
+        <div class="prose">
+          <p>
+            Le schéma explicite (<span class="sym">ω = 0</span>) n'est stable que sous une condition
+            de type Fourier, <span class="sym">Δt ≤ (ρc)ₑlₑ² / (2λₑ)</span> par élément — à
+            <span class="sym">Δt = 1 h</span>, cette condition est violée par la plupart des maillages
+            de matériaux de construction courants (elle impose typiquement des pas de quelques
+            minutes pour des éléments centimétriques). Le schéma <em class="term">implicite</em>
+            (<span class="sym">ω = 1</span>) est inconditionnellement stable et constitue le choix
+            recommandé pour ce pas de temps :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="op">(</span><span class="matrix"><span class="sym">C</span></span><span class="op">/Δt +</span>
+            <span class="matrix"><span class="sym">K</span></span><span class="op">)</span>
+            <span class="op">&#123;</span><span class="sym accent">Tⁿ⁺¹</span><span class="op">&#125;</span>
+            <span class="op">=</span>
+            <span class="matrix"><span class="sym">C</span></span><span class="op">/Δt &#123;Tⁿ&#125; + &#123;F</span><span class="sym accent">ⁿ⁺¹</span><span class="op">&#125;</span>
+          </div>
+          <div class="eq-caption">Euler implicite — un système linéaire à résoudre par pas de temps</div>
+        </div>
+        <div class="callout warn">
+          <span class="callout-label">Crank-Nicolson (ω = 0,5), une fausse bonne idée ici</span>
+          <p>
+            Plus précis en théorie (ordre 2 contre ordre 1 pour l'implicite pur), il peut produire des
+            oscillations non physiques lorsque les sollicitations varient brusquement d'un pas horaire
+            au suivant — exactement le cas d'un flux solaire qui saute d'une valeur à l'autre entre
+            deux heures. L'implicite pur (<span class="sym">ω = 1</span>) reste le choix pragmatique
+            par défaut pour ce modèle.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-algo">
+        <p class="chapter-eyebrow">10 — Algorithme, pas à pas</p>
+        <h2>Résoudre un pas horaire, de T(t) à T(t + Δt)</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-n">1</span>
+            <p>Lire les entrées à l'instant <span class="sym">t + Δt</span> : <span class="sym">T_ext</span>, <span class="sym">h_s</span>, <span class="sym">θᵢ</span>, <span class="sym">E_dir</span>, <span class="sym">E_dif</span>, et selon le cas <span class="sym">T_int</span> imposée.</p>
+          </li>
+          <li>
+            <span class="step-n">2</span>
+            <p>Calculer <span class="sym">E_glo = E_dir·cos θᵢ + E_dif·F_ciel</span> (section 04).</p>
+          </li>
+          <li>
+            <span class="step-n">3</span>
+            <p>Propager couche par couche (section 05) : à chaque couche, répartir en réfléchi / absorbé / transmis ; construire les sources — concentrée à la première interface opaque rencontrée, réparties dans chaque couche translucide traversée.</p>
+          </li>
+          <li>
+            <span class="step-n">4</span>
+            <p>Assembler <span class="sym accent">&#123;Fⁿ⁺¹&#125;</span> : convection extérieure, sources solaires de l'étape 3. Les matrices <span class="sym">[K]</span> et <span class="sym">[C]</span>, elles, ne changent pas d'un pas à l'autre — assemblées une seule fois au démarrage.</p>
+          </li>
+          <li>
+            <span class="step-n">5</span>
+            <p>Appliquer la condition intérieure : ligne <span class="sym">n</span> imposée (cas 1) ou couplage au nœud d'air libre déjà présent dans <span class="sym">[K]</span>/<span class="sym">[C]</span> (cas 2, rien à refaire à ce pas — seule la valeur de <span class="sym">T_air,int</span> résultera de la résolution).</p>
+          </li>
+          <li>
+            <span class="step-n">6</span>
+            <p>Résoudre le système linéaire implicite de la section 09 pour <span class="sym accent">&#123;Tⁿ⁺¹&#125;</span>.</p>
+          </li>
+          <li>
+            <span class="step-n">7</span>
+            <p><span class="sym">&#123;Tⁿ⁺¹&#125;</span> devient l'état courant ; c'est le <span class="sym">&#123;Tⁿ&#125;</span> du pas suivant. Retour à l'étape 1.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="chapter" id="sec-bilan">
+        <p class="chapter-eyebrow">11 — Bilan énergétique</p>
+        <h2>Vérifier la conservation d'énergie à chaque pas</h2>
+        <div class="prose">
+          <p>
+            Le système matriciel conserve l'énergie par construction : sommer toutes les lignes du
+            système global fait s'annuler les contributions internes de <span class="sym">[K]</span>
+            (chaque flux interne quitte un nœud pour entrer dans le suivant, en somme nulle), et ne
+            laisse subsister que les termes de bord — exactement les flux physiquement échangés avec
+            l'extérieur de la paroi. C'est ce qui permet d'écrire, à chaque pas, un bilan explicite et
+            de l'utiliser comme test de correction d'une implémentation :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="sym">Φ_in(t)</span>
+            <span class="op">=</span>
+            <span class="sym">hₑ·(T_ext − T₀)</span>
+            <span class="op">+</span>
+            <span class="sym accent">E_abs,totale(t)</span>
+          </div>
+          <div class="eq-caption">flux entrant : convection extérieure + toute l'énergie solaire absorbée dans la paroi, toutes couches confondues</div>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="sym">Φ_out(t)</span>
+            <span class="op">=</span>
+            <span class="sym">hᵢ·(Tₙ − T_int(t))</span>
+            <span class="op">(cas 1)</span>
+            <span class="op">ou</span>
+            <span class="sym">hᵢ·(Tₙ − T_air,int)</span>
+            <span class="op">(cas 2)</span>
+          </div>
+          <div class="eq-caption">même expression dans les deux cas — cas 1 avec T_int connue, cas 2 avec T_air,int résolue ; plus besoin de « flux de réaction », hᵢ étant maintenant posé explicitement dans les deux cas (section 08)</div>
+        </div>
+        <div class="eq-panel">
+          <div class="eq">
+            <span class="sym">Φ_in(t) − Φ_out(t)</span>
+            <span class="op">=</span>
+            <span class="sym">Σₖ Cₖₖ ·</span>
+            <span class="frac"><span class="num">Tₖⁿ⁺¹ − Tₖⁿ</span><span class="den">Δt</span></span>
+          </div>
+          <div class="eq-caption">flux net = vitesse de stockage total dans la paroi (et le nœud d'air, en cas 2)</div>
+        </div>
+        <div class="prose">
+          <p>
+            Un écart significatif entre les deux membres, pas de temps après pas de temps, signale
+            presque toujours une erreur d'assemblage (une contribution de bord oubliée, un signe
+            inversé) plutôt qu'une approximation numérique acceptable — le schéma implicite décrit en
+            section 09 conserve cette égalité de façon exacte, à arithmétique flottante près.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-extensions">
+        <p class="chapter-eyebrow">12 — Extensions possibles</p>
+        <h2>Ce que la structure du modèle permet d'ajouter plus tard</h2>
+        <div class="prose">
+          <p>
+            Aucun des points ci-dessous ne remet en cause l'architecture posée dans ce document —
+            chacun ajoute un terme à une matrice ou un vecteur déjà en place, sans changer la méthode.
+          </p>
+          <ul>
+            <li><strong>Grande longueur d'onde (IR)</strong> — perte radiative nette vers le ciel nocturne, à ajouter au bilan du nœud 0 comme un terme <span class="sym">εσ(T₀⁴ − T_ciel⁴)</span> linéarisé autour de <span class="sym">T₀</span> pour rester dans un système linéaire.</li>
+            <li><strong>Albédo du sol</strong> — troisième composante de <span class="sym">E_glo</span>, proportionnelle à l'éclairement horizontal global et au facteur de vue du sol (<span class="sym">1 − F_ciel</span>).</li>
+            <li><strong>Réflexions multiples entre couches vitrées</strong> — pour un vitrage multiple, la méthode couche-par-couche en section 05 ignore les réflexions internes répétées entre lames ; un traitement type ISO 15099 les prendrait en compte au prix d'un système optique résolu à part, dont la sortie reste la même grandeur <span class="sym">E_abs,j</span> par couche.</li>
+            <li><strong>Ponts thermiques (2D/3D)</strong> — hors de portée d'un modèle 1D par nature ; nécessiterait un maillage surfacique ou volumique.</li>
+            <li><strong>Couplage multizone</strong> — en cas 2, le nœud d'air intérieur ne voit ici qu'une seule paroi ; un bâtiment réel somme les contributions <span class="sym">hᵢ·(Tₙ − T_air,int)</span> de chaque paroi du local sur la même ligne du système.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-notations">
+        <p class="chapter-eyebrow">13 — Table des notations</p>
+        <h2>Récapitulatif des symboles</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Symbole</th><th>Signification</th><th>Unité</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="sym">x</span></td><td>Position dans l'épaisseur (0 = extérieur, L = intérieur)</td><td class="num">m</td></tr>
+              <tr><td><span class="sym">T(x,t)</span></td><td>Température</td><td class="num">°C</td></tr>
+              <tr><td><span class="sym">eᵢ, λᵢ, ρᵢ, cᵢ</span></td><td>Épaisseur, conductivité, masse volumique, chaleur massique de la couche i</td><td class="num">m, W·m⁻¹·K⁻¹, kg·m⁻³, J·kg⁻¹·K⁻¹</td></tr>
+              <tr><td><span class="sym">τᵢ, rᵢ, αᵢ</span></td><td>Transmittance, réflectance, absorptance solaires de la couche i</td><td class="num">—</td></tr>
+              <tr><td><span class="sym">hₑ, hᵢ</span></td><td>Coefficients d'échange convectif extérieur / intérieur</td><td class="num">W·m⁻²·K⁻¹</td></tr>
+              <tr><td><span class="sym">T_ext(t)</span></td><td>Température de l'air extérieur</td><td class="num">°C</td></tr>
+              <tr><td><span class="sym">T_int(t) / T_air,int(t)</span></td><td>Température intérieure imposée (cas 1) / inconnue (cas 2)</td><td class="num">°C</td></tr>
+              <tr><td><span class="sym">h_s(t), θᵢ(t)</span></td><td>Hauteur solaire, angle d'incidence sur la paroi</td><td class="num">rad</td></tr>
+              <tr><td><span class="sym">E_dir(t), E_dif(t)</span></td><td>Éclairements solaires direct et diffus</td><td class="num">W·m⁻²</td></tr>
+              <tr><td><span class="sym">F_ciel</span></td><td>Facteur de vue du ciel de la paroi</td><td class="num">—</td></tr>
+              <tr><td><span class="sym">E_glo(t)</span></td><td>Éclairement global reçu par la face extérieure</td><td class="num">W·m⁻²</td></tr>
+              <tr><td><span class="sym">S(x,t)</span></td><td>Puissance volumique absorbée (source)</td><td class="num">W·m⁻³</td></tr>
+              <tr><td><span class="sym">C_air,int</span></td><td>Capacité thermique équivalente air + mobilier</td><td class="num">J·m⁻²·K⁻¹</td></tr>
+              <tr><td><span class="sym">[K], [C], &#123;F&#125;, &#123;T&#125;</span></td><td>Matrices de conduction, de capacité, vecteur de charge, vecteur des températures nodales</td><td class="num">—</td></tr>
+              <tr><td><span class="sym">Δt, ω</span></td><td>Pas de temps, paramètre du schéma d'intégration temporelle</td><td class="num">s, —</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</main>
