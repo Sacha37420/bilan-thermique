@@ -1,0 +1,40 @@
+version: "3.9"
+
+networks:
+  sso-net:
+    external: true
+    name: sso-lab_sso-net
+  dev-net:
+    external: true
+    name: dev-net
+
+services:
+
+  backend:
+    build: ./backend
+    container_name: bilan-thermique-backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8099:8000"
+    networks:
+      - sso-net
+      - dev-net
+    labels:
+      caddy: "${DOMAIN}"
+      caddy.handle_path: "/bilan-thermique-api/*"
+      caddy.handle_path.reverse_proxy: "{{upstreams 8000}}"
+
+  frontend:
+    build: ./frontend
+    container_name: bilan-thermique-frontend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "4214:80"
+    networks:
+      - sso-net
+    labels:
+      caddy: "${DOMAIN}"
+      caddy.handle_path: "/bilan-thermique/*"
+      caddy.handle_path.reverse_proxy: "{{upstreams 80}}"

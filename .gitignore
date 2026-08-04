@@ -1,0 +1,25 @@
+# ── Secrets / config locale ──────────────────────────────────────────────────
+.env
+.keycloak-client-opts
+
+# ── Python / Django (racine si app Django seul, backend/ si Django+Angular) ───
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+db.sqlite3
+media/
+backend/media/
+
+# ── Angular / Node (racine si app Angular seul, frontend/ si +Angular) ────────
+node_modules/
+dist/
+.angular/
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+# ── Divers ───────────────────────────────────────────────────────────────────
+*.log
+.DS_Store
