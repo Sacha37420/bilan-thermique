@@ -6,10 +6,11 @@ from rest_framework.response import Response
 from .models import Department, UserRecord, ParoiModel, Building, Environment, Job
 from .serializers import (
     DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer, ParoiModelSerializer,
-    BuildingSerializer, EnvironmentSerializer, JobSerializer,
+    BuildingSerializer, EnvironmentSerializer, JobSerializer, BuildingCalculRequestSerializer,
 )
 from . import solver
 from . import tasks
+from . import building_solver
 
 
 class MeView(APIView):
@@ -127,6 +128,44 @@ class PrecomputeShadowsView(APIView):
 
         job = Job.objects.create(kind='shadow_precompute', params={'building_id': building.pk})
         tasks.precompute_shadows.delay(job.id, building.pk)
+        return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+
+
+class BuildingCalculView(APIView):
+    """
+    POST /api/batiments/<id>/calcul-3d/
+    Lance en tâche de fond la simulation du bâtiment entier (Lot D) : un
+    système EF par triangle, tous couplés à un même nœud d'air pondéré par
+    aire (api/building_solver.py). Mesuré à ~28 s pour 338 triangles sur une
+    année horaire complète — trop long pour une requête HTTP synchrone dès
+    qu'un bâtiment réel dépasse quelques centaines de triangles, d'où le
+    passage en Celery (même mutex lab-wide qu'au Lot C : un calcul lourd à
+    la fois, --concurrency=1 sur le worker).
+    """
+
+    def post(self, request, pk):
+        building = get_object_or_404(Building, pk=pk)
+        serializer = BuildingCalculRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        triangles = building.envelope.get('triangles', [])
+        if not triangles:
+            return Response({'detail': "Ce bâtiment n'a pas encore de maillage importé."},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        unassigned = sum(1 for t in triangles if t.get('paroi_model_id') is None)
+        if unassigned:
+            return Response(
+                {'detail': f"{unassigned} triangle(s) sans modèle de paroi assigné — complétez l'assignation."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).exists():
+            return Response({'detail': "Un calcul est déjà en cours pour le lab — réessayez plus tard."},
+                             status=status.HTTP_409_CONFLICT)
+
+        job = Job.objects.create(kind='building_calcul', params={'building_id': building.pk})
+        tasks.run_building_calcul.delay(job.id, building.pk, serializer.validated_data)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 

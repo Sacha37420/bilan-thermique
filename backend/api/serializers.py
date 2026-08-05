@@ -253,6 +253,44 @@ class CalculRequestSerializer(serializers.Serializer):
     weather = WeatherPointSerializer(many=True, min_length=1, max_length=8784)
 
 
+class BuildingWeatherPointSerializer(serializers.Serializer):
+    t_ext = serializers.FloatField(min_value=-60.0, max_value=60.0)
+    sun_azimuth = serializers.FloatField(min_value=0.0, max_value=360.0)
+    sun_elevation = serializers.FloatField(min_value=-90.0, max_value=90.0)
+    e_dir = serializers.FloatField(min_value=0.0, max_value=1400.0)
+    e_dif = serializers.FloatField(min_value=0.0, max_value=600.0)
+
+
+class BuildingInteriorSerializer(serializers.Serializer):
+    mode = serializers.ChoiceField(choices=['imposed', 'free', 'thermostat'])
+    h_i = serializers.FloatField(min_value=0.1, max_value=100.0)
+    t_int = serializers.FloatField(required=False, min_value=-30.0, max_value=50.0)
+    c_air_int = serializers.FloatField(required=False, min_value=100.0, max_value=1_000_000_000.0)
+    t_min = serializers.FloatField(required=False, min_value=-30.0, max_value=50.0)
+    t_max = serializers.FloatField(required=False, min_value=-30.0, max_value=50.0)
+
+    def validate(self, data):
+        mode = data['mode']
+        if mode == 'imposed' and 't_int' not in data:
+            raise serializers.ValidationError("t_int est requis en mode 'imposed'.")
+        if mode in ('free', 'thermostat') and 'c_air_int' not in data:
+            raise serializers.ValidationError(f"c_air_int est requis en mode '{mode}'.")
+        if mode == 'thermostat':
+            if 't_min' not in data or 't_max' not in data:
+                raise serializers.ValidationError("t_min et t_max sont requis en mode 'thermostat'.")
+            if data['t_min'] >= data['t_max']:
+                raise serializers.ValidationError("t_min doit être strictement inférieur à t_max.")
+        return data
+
+
+class BuildingCalculRequestSerializer(serializers.Serializer):
+    dx_max = serializers.FloatField(min_value=0.001, max_value=1.0)
+    h_e = serializers.FloatField(min_value=0.1, max_value=100.0)
+    interior = BuildingInteriorSerializer()
+    t_init = serializers.FloatField(min_value=-30.0, max_value=50.0)
+    weather = BuildingWeatherPointSerializer(many=True, min_length=1, max_length=8784)
+
+
 class DepartmentSerializer(serializers.ModelSerializer):
     member_count = serializers.IntegerField(source='members.count', read_only=True)
 
