@@ -53,6 +53,33 @@
         </label>
       </div>
 
+      <h3>Ombrage</h3>
+      <div class="mode-toggle" role="radiogroup" aria-label="Mode d'ombrage">
+        <label class="mode-option">
+          <input type="radio" name="shadowMode" value="precomputed" [(ngModel)]="shadowMode" />
+          <span>Grille précalculée</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="shadowMode" value="realtime" [(ngModel)]="shadowMode" />
+          <span>Temps réel (exact)</span>
+        </label>
+      </div>
+      @if (shadowMode === 'precomputed') {
+        <p class="hint">
+          Utilise la grille d'ombrage et le facteur de vue du ciel précalculés (page Bâtiment,
+          bouton « Précalculer l'ombrage ») — rapide, mais arrondi à la case de grille la plus
+          proche. Échoue si le bâtiment n'a pas de précalcul à jour (badge « périmé »).
+        </p>
+      } @else {
+        <p class="hint">
+          Relance un vrai lancer de rayons à l'azimuth/élévation exacts de chaque heure — aucun
+          arrondi, mais nettement plus lent (jusqu'à ~50× plus de calcul qu'un précalcul sur un
+          an d'heures). Fonctionne sans précalcul préalable. À réserver aux séries météo courtes
+          ou aux petits bâtiments.
+        </p>
+      }
+
+      <h3>Conditions intérieures</h3>
       <div class="mode-toggle" role="radiogroup" aria-label="Mode intérieur">
         <label class="mode-option">
           <input type="radio" name="interiorMode" value="imposed" [(ngModel)]="interiorMode" />

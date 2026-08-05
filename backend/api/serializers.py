@@ -293,6 +293,10 @@ class BuildingCalculRequestSerializer(serializers.Serializer):
     interior = BuildingInteriorSerializer()
     t_init = serializers.FloatField(min_value=-30.0, max_value=50.0)
     weather = BuildingWeatherPointSerializer(many=True, min_length=1, max_length=8784)
+    # 'precomputed' (défaut) : grille d'ombrage précalculée (rapide, discrétisée).
+    # 'realtime' : lancer de rayons réel à chaque heure (précis, plus lent) —
+    # voir building_solver.run_building_simulation.
+    shadow_mode = serializers.ChoiceField(choices=['precomputed', 'realtime'], required=False, default='precomputed')
 
 
 class DepartmentSerializer(serializers.ModelSerializer):

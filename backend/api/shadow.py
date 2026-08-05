@@ -59,6 +59,14 @@ def build_occluder_mesh(*envelopes):
     )
 
 
+def build_occluder_intersector(building_envelope, environment_envelope=None):
+    """Prêt à l'emploi pour un test d'occlusion en temps réel (mode 'realtime'
+    de building_solver) : construit le maillage occulteur une seule fois,
+    réutilisable pour autant de rayons/heures qu'on veut."""
+    mesh = build_occluder_mesh(building_envelope, environment_envelope)
+    return trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+
+
 def sun_direction(azimuth_deg, elevation_deg):
     """Vecteur unitaire pointant du sol VERS le soleil (même convention que
     api.geometry.compute_triangle_geometry : azimuth 0°=+Y, 90°=+X)."""

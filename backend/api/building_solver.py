@@ -36,6 +36,11 @@ from . import shadow
 DT_SECONDS = 3600.0
 MAX_TOTAL_DOF = 60_000
 MAX_WEATHER_POINTS = 8784
+# triangles x heures — garde-fou du mode 'realtime' (lancer de rayons rejoué
+# à chaque heure, contrairement au mode précalculé qui teste une grille fixe
+# une fois pour toutes) : au-delà, le calcul monopoliserait le worker du lab
+# (--concurrency=1) trop longtemps.
+MAX_REALTIME_RAYCAST_OPS = 2_000_000
 
 
 class BuildingSimulationError(ValueError):
@@ -114,7 +119,17 @@ def _assemble_global_kc(systems, areas, h_i):
     return K_global.tocsc(), C_global.tocsc(), offsets, air_idx, n_dof
 
 
-def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, sun_visibility, h_e, point):
+def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
+                      sky_view_factor=None, sun_visibility_grid=None,
+                      occluder_intersector=None, centroids=None):
+    """sky_view_factor : liste par triangle (précalculée OU recalculée en
+    temps réel par l'appelant) ou None -> repli analytique par triangle.
+    Occlusion du rayon direct — deux sources mutuellement exclusives :
+      - sun_visibility_grid : lookup dans la grille précalculée (Lot C).
+      - occluder_intersector + centroids : lancer de rayon réel, à l'azimuth/
+        élévation EXACTS de l'heure (mode 'realtime', pas de discrétisation).
+    Aucune des deux : pas de test d'occlusion (cos(theta_i) géométrique seul).
+    """
     F = np.zeros(n_dof)
     t_ext = point['t_ext']
     sun_el = point['sun_elevation']
@@ -125,26 +140,45 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, sun_visibil
     sun_up = sun_el > 0.0
     direction = _sun_direction(sun_az, sun_el) if sun_up else None
 
+    # Test d'occlusion en temps réel : un seul lot de rayons pour tous les
+    # triangles faisant face au soleil à cette heure (même principe que
+    # shadow.compute_visibility_grid, mais rejoué à chaque heure réelle
+    # plutôt que sur une grille (azimuth, élévation) précalculée).
+    realtime_blocked = None
+    if sun_up and occluder_intersector is not None:
+        normals = np.array([g['normal'] for g in triangles_geom])
+        facing = normals @ direction > 1e-6
+        realtime_blocked = np.zeros(len(triangles_geom), dtype=bool)
+        if facing.any():
+            idx = np.nonzero(facing)[0]
+            origins = centroids[idx]
+            directions = np.tile(direction, (len(idx), 1))
+            realtime_blocked[idx] = occluder_intersector.intersects_any(origins, directions)
+
     for i, (mesh, K, C, layers) in enumerate(systems):
         off = offsets[i]
         n = mesh['n_wall_nodes']
         area = areas[i]
         geom = triangles_geom[i]
-        # Facteur de vue du ciel : la valeur précalculée par lancer de rayons
-        # (occlusion réelle par l'environnement + auto-ombrage, Lot C élargi)
-        # est utilisée si disponible, sinon repli sur la formule analytique
-        # du ciel isotrope sans obstacle (même formule que solver.py).
-        if sun_visibility is not None and 'sky_view_factor' in sun_visibility:
-            f_ciel = sun_visibility['sky_view_factor'][i]
+        # Facteur de vue du ciel : valeur précalculée ou recalculée par
+        # lancer de rayons si disponible, sinon repli sur la formule
+        # analytique du ciel isotrope sans obstacle (même formule que
+        # solver.py).
+        if sky_view_factor is not None:
+            f_ciel = sky_view_factor[i]
         else:
             f_ciel = (1.0 + math.cos(math.radians(geom['tilt_deg']))) / 2.0
 
         cos_ti = 0.0
         if sun_up:
             cos_ti = max(float(np.dot(geom['normal'], direction)), 0.0)
-            if cos_ti > 0.0 and sun_visibility is not None:
-                if not shadow.lookup_visibility(sun_visibility, i, sun_az, sun_el):
-                    cos_ti = 0.0
+            if cos_ti > 0.0:
+                if realtime_blocked is not None:
+                    if realtime_blocked[i]:
+                        cos_ti = 0.0
+                elif sun_visibility_grid is not None:
+                    if not shadow.lookup_visibility(sun_visibility_grid, i, sun_az, sun_el):
+                        cos_ti = 0.0
         e_glo = e_dir * cos_ti + e_dif * f_ciel
 
         f_local = np.zeros(n)
@@ -168,9 +202,21 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, sun_visibil
     return F
 
 
-def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibility, payload, progress_cb=None):
+def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibility, payload,
+                             environment_envelope=None, progress_cb=None):
     """payload : {dx_max, h_e, interior: {mode, h_i, c_air_int, t_int?, t_min?, t_max?},
-    t_init, weather: [{t_ext, sun_azimuth, sun_elevation, e_dir, e_dif}, ...]}
+    t_init, weather: [{t_ext, sun_azimuth, sun_elevation, e_dir, e_dif}, ...],
+    shadow_mode: 'precomputed' | 'realtime' (défaut 'precomputed')}
+
+    'precomputed' : utilise la grille d'ombrage + facteur de vue du ciel déjà
+    calculés (api.shadow, Lot C) — rapide, discrétisé sur une grille
+    (azimuth, élévation), nécessite d'avoir lancé le précalcul au préalable.
+    'realtime' : reconstruit le maillage occulteur une seule fois puis relance
+    un vrai lancer de rayons à l'azimuth/élévation EXACTS de chaque heure —
+    aucune discrétisation, mais nettement plus lent (jusqu'à ~50x plus de
+    lancers de rayons qu'un précalcul sur un an d'heures) ; le facteur de vue
+    du ciel est aussi recalculé une fois (pas par heure, il ne dépend que de
+    la géométrie) plutôt que d'utiliser la formule analytique par défaut.
     """
     triangles = building_envelope['triangles']
     if not triangles:
@@ -183,13 +229,39 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     mode = interior['mode']
     t_init = payload['t_init']
     weather = payload['weather']
+    shadow_mode = payload.get('shadow_mode', 'precomputed')
 
     if len(weather) > MAX_WEATHER_POINTS:
         raise BuildingSimulationError(f"{len(weather)} pas horaires, au-delà de la limite de {MAX_WEATHER_POINTS}.")
     if not weather:
         raise BuildingSimulationError("La série météo est vide.")
+    if shadow_mode not in ('precomputed', 'realtime'):
+        raise BuildingSimulationError(f"shadow_mode inconnu : {shadow_mode!r}")
+    if shadow_mode == 'realtime' and len(triangles) * len(weather) > MAX_REALTIME_RAYCAST_OPS:
+        raise BuildingSimulationError(
+            f"{len(triangles)} triangles × {len(weather)} heures dépasse la limite du mode temps réel "
+            f"({MAX_REALTIME_RAYCAST_OPS} — utiliser le mode précalculé, ou réduire le maillage/la période)."
+        )
 
     areas = [tri['area'] for tri in triangles]
+
+    occluder_intersector = None
+    centroids = None
+    sky_view_factor = None
+    sun_visibility_grid = None
+
+    if shadow_mode == 'realtime':
+        occluder_intersector = shadow.build_occluder_intersector(building_envelope, environment_envelope)
+        vertices = building_envelope['vertices']
+        centroids = np.array([
+            np.mean([vertices[j] for j in tri['v']], axis=0) + np.array(tri['normal']) * shadow.RAY_ORIGIN_EPSILON
+            for tri in triangles
+        ])
+        sky_view_factor = shadow.compute_sky_view_factors(building_envelope, environment_envelope)
+    elif sun_visibility is not None and sun_visibility.get('per_triangle'):
+        sun_visibility_grid = sun_visibility
+        if 'sky_view_factor' in sun_visibility:
+            sky_view_factor = sun_visibility['sky_view_factor']
     systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i)
     K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(systems, areas, h_i)
 
@@ -241,7 +313,11 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     n_hours_total = len(weather)
     for hour_idx, point in enumerate(weather):
-        F = _assemble_F_hour(systems, areas, offsets, n_dof, triangles, sun_visibility, h_e, point)
+        F = _assemble_F_hour(
+            systems, areas, offsets, n_dof, triangles, h_e, point,
+            sky_view_factor=sky_view_factor, sun_visibility_grid=sun_visibility_grid,
+            occluder_intersector=occluder_intersector, centroids=centroids,
+        )
         b_free = (C_global / DT_SECONDS) @ T + F
 
         if mode == 'imposed':

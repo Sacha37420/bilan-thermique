@@ -56,6 +56,7 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
         paroi_ids = {t['paroi_model_id'] for t in triangles}
         paroi_layers = {p.pk: p.layers for p in ParoiModel.objects.filter(pk__in=paroi_ids)}
         sun_visibility = building.sun_visibility if building.sun_visibility.get('per_triangle') else None
+        environment_envelope = building.environment.envelope if building.environment_id else None
 
         # DB write throttlée (~1 % du run, jamais moins de 5s d'intervalle) —
         # un job de plusieurs milliers d'heures ne doit pas faire une écriture
@@ -71,7 +72,8 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
                 job.set_state(progress=pct, message=f"Résolution heure par heure… {done}/{total}")
 
         result = building_solver.run_building_simulation(
-            building.envelope, paroi_layers, sun_visibility, calcul_payload, progress_cb=progress_cb,
+            building.envelope, paroi_layers, sun_visibility, calcul_payload,
+            environment_envelope=environment_envelope, progress_cb=progress_cb,
         )
 
         job.result = {

@@ -195,6 +195,14 @@ class BuildingCalculView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        shadow_mode = serializer.validated_data.get('shadow_mode', 'precomputed')
+        if shadow_mode == 'precomputed' and building.sun_visibility_stale:
+            return Response(
+                {'detail': "L'ombrage précalculé est périmé (enveloppe ou environnement modifié depuis) — "
+                           "relancez le précalcul, ou choisissez le mode temps réel."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).exists():
             return Response({'detail': "Un calcul est déjà en cours pour le lab — réessayez plus tard."},
                              status=status.HTTP_409_CONFLICT)

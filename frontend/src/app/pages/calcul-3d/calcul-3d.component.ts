@@ -80,6 +80,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   tMin = 19;
   tMax = 26;
   tInit = 15;
+  shadowMode: 'precomputed' | 'realtime' = 'precomputed';
 
   // ── Météo ──────────────────────────────────────────────────────────
   weather = signal<WeatherPoint[]>([]);
@@ -186,6 +187,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
 
     const payload = {
       dx_max: this.dxMax, h_e: this.hE, interior, t_init: this.tInit, weather: this.weather(),
+      shadow_mode: this.shadowMode,
     };
 
     this.api.runBuildingCalcul(building.id, payload).subscribe({
