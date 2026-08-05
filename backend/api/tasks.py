@@ -79,6 +79,8 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
             'flux_negative_kwh': result['flux_negative_kwh'],
             't_air': result['t_air'],
             'envelope_flux_w': result['envelope_flux_w'],
+            'final_exterior_surface_temp': result['final_exterior_surface_temp'],
+            'final_interior_surface_temp': result['final_interior_surface_temp'],
         }
         job.save(update_fields=['result'])
         job.set_state(

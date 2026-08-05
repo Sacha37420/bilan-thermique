@@ -94,4 +94,8 @@ export class ApiService {
   deleteEnvironment(id: number): Observable<unknown> {
     return this.http.delete(`${this.base}/api/environnements/${id}/`);
   }
+
+  runBuildingCalcul(buildingId: number, payload: unknown): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/${buildingId}/calcul-3d/`, payload);
+  }
 }

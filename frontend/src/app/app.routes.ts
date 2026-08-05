@@ -18,5 +18,9 @@ export const routes: Routes = [
     path: 'environnement',
     loadComponent: () => import('./pages/environnement/environnement.component').then(m => m.EnvironnementComponent),
   },
+  {
+    path: 'calcul-3d',
+    loadComponent: () => import('./pages/calcul-3d/calcul-3d.component').then(m => m.Calcul3DComponent),
+  },
   { path: '**',        redirectTo: 'calcul-1d' },
 ];

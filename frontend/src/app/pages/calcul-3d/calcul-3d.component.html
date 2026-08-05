@@ -1,0 +1,217 @@
+<main class="page-calcul3d">
+
+  <div class="head">
+    <p class="eyebrow"><span class="dot"></span> Simulation bâtiment</p>
+    <h1>Calcul 3D</h1>
+    <p class="subtitle">
+      Régime transitoire heure par heure sur l'enveloppe complète d'un
+      <a routerLink="/batiment">bâtiment</a> — un système par triangle, tous couplés au même
+      nœud d'air. Détail de la généralisation dans le dépôt (api/building_solver.py).
+    </p>
+  </div>
+
+  <section class="form-card">
+    <h2>Bâtiment</h2>
+    <label>
+      <span>Choisir un bâtiment</span>
+      <select [(ngModel)]="selectedBuildingId" name="selectedBuildingId" (ngModelChange)="onBuildingChange()">
+        <option [ngValue]="null">— choisir —</option>
+        @for (b of buildings(); track b.id) {
+          <option [ngValue]="b.id">{{ b.name }}</option>
+        }
+      </select>
+    </label>
+
+    @if (loadingBuilding()) {
+      <p class="hint">Chargement…</p>
+    }
+    @if (currentBuilding(); as b) {
+      <p class="building-summary">
+        <strong>{{ b.envelope.triangles.length }}</strong> triangles.
+        @if (b.sun_visibility_stale) {
+          <span class="stale-badge">ombrage périmé ou non calculé — le calcul tournera sans occlusion précise (auto-ombrage seul si aucun précalcul n'existe).</span>
+        }
+      </p>
+    }
+  </section>
+
+  @if (currentBuilding(); as b) {
+    <section class="form-card">
+      <h2>Paramètres</h2>
+      <div class="field-grid">
+        <label>
+          <span>dx maximum (m)</span>
+          <input type="number" step="0.005" min="0.001" [(ngModel)]="dxMax" name="dxMax" />
+        </label>
+        <label>
+          <span>h_e (W/m²·K)</span>
+          <input type="number" step="0.5" min="0.1" [(ngModel)]="hE" name="hE" />
+        </label>
+        <label>
+          <span>Température initiale uniforme (°C)</span>
+          <input type="number" step="0.5" [(ngModel)]="tInit" name="tInit" />
+        </label>
+      </div>
+
+      <div class="mode-toggle" role="radiogroup" aria-label="Mode intérieur">
+        <label class="mode-option">
+          <input type="radio" name="interiorMode" value="imposed" [(ngModel)]="interiorMode" />
+          <span>Imposée</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="interiorMode" value="free" [(ngModel)]="interiorMode" />
+          <span>Libre</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="interiorMode" value="thermostat" [(ngModel)]="interiorMode" />
+          <span>Thermostat</span>
+        </label>
+      </div>
+
+      <div class="field-grid">
+        <label>
+          <span>h_i (W/m²·K)</span>
+          <input type="number" step="0.5" min="0.1" [(ngModel)]="hI" name="hI" />
+        </label>
+        @if (interiorMode === 'imposed') {
+          <label>
+            <span>T_int (°C)</span>
+            <input type="number" step="0.5" [(ngModel)]="tInt" name="tInt" />
+          </label>
+        } @else {
+          <label>
+            <span>C_air,int (J/K)</span>
+            <input type="number" step="10000" min="100" [(ngModel)]="cAirInt" name="cAirInt" />
+          </label>
+        }
+        @if (interiorMode === 'thermostat') {
+          <label>
+            <span>T_min chauffage (°C)</span>
+            <input type="number" step="0.5" [(ngModel)]="tMin" name="tMin" />
+          </label>
+          <label>
+            <span>T_max clim (°C)</span>
+            <input type="number" step="0.5" [(ngModel)]="tMax" name="tMax" />
+          </label>
+        }
+      </div>
+    </section>
+
+    <section class="form-card">
+      <h2>Météo — série horaire</h2>
+      <p class="hint">
+        Une ligne par heure : <code>T_ext, azimuth_soleil, élévation_soleil, E_dir, E_dif</code>
+        (°C, degrés [0..360], degrés, W/m², W/m²).
+      </p>
+
+      <div class="const-weather">
+        <p class="const-weather-title">Météo constante</p>
+        <div class="field-grid const-weather-grid">
+          <label><span>T_ext (°C)</span><input type="number" step="0.5" [(ngModel)]="constWeather.t_ext" name="cwTExt" /></label>
+          <label><span>Azimuth (°)</span><input type="number" step="1" [(ngModel)]="constWeather.sun_azimuth" name="cwAz" /></label>
+          <label><span>Élévation (°)</span><input type="number" step="1" [(ngModel)]="constWeather.sun_elevation" name="cwEl" /></label>
+          <label><span>E_dir (W/m²)</span><input type="number" step="10" min="0" [(ngModel)]="constWeather.e_dir" name="cwEdir" /></label>
+          <label><span>E_dif (W/m²)</span><input type="number" step="10" min="0" [(ngModel)]="constWeather.e_dif" name="cwEdif" /></label>
+          <label><span>Durée (h)</span><input type="number" step="1" min="1" [(ngModel)]="constWeather.hours" name="cwHours" /></label>
+        </div>
+        <button type="button" class="btn-secondary" (click)="loadConstant()">Générer cette série constante</button>
+      </div>
+
+      <textarea rows="8" [(ngModel)]="weatherRaw" name="weatherRaw" (blur)="parseWeather()"
+        placeholder="5.2,180,12,300,60&#10;4.8,190,18,410,70&#10;..."></textarea>
+
+      <div class="weather-actions">
+        <button type="button" class="btn-secondary" (click)="loadExample(48)">Charger un exemple (48 h)</button>
+        <button type="button" class="btn-secondary" (click)="loadExample(168)">Charger un exemple (7 j)</button>
+        @if (weather().length > 0) {
+          <span class="weather-count">{{ weather().length }} heure(s) chargée(s)</span>
+        }
+      </div>
+      @if (weatherError()) {
+        <p class="field-error">{{ weatherError() }}</p>
+      }
+    </section>
+
+    @if (error()) {
+      <div class="callout warn"><p>{{ error() }}</p></div>
+    }
+
+    <button type="button" class="btn-primary" (click)="submit()" [disabled]="!canSubmit">
+      @if (job(); as j) {
+        @if (j.status === 'PENDING' || j.status === 'RUNNING') {
+          Calcul en cours… {{ j.progress }}%
+        } @else {
+          Relancer le calcul
+        }
+      } @else {
+        Lancer le calcul
+      }
+    </button>
+
+    @if (job(); as j) {
+      <div class="job-status" [class]="j.status.toLowerCase()">
+        <span class="job-label">{{ j.status }}</span>
+        <span class="job-message">{{ j.message }}</span>
+      </div>
+    }
+
+    @if (result; as r) {
+      <section class="results">
+        <h2>Résultats — {{ r.hours }} heure(s)</h2>
+
+        <div class="stat-tiles">
+          <div class="tile">
+            <span class="tile-label">Température intérieure moyenne</span>
+            <span class="tile-value">{{ r.t_air_mean | number:'1.1-1' }}°C</span>
+          </div>
+          <div class="tile">
+            <span class="tile-label">Besoin chauffage</span>
+            <span class="tile-value">{{ r.heating_kwh | number:'1.1-1' }} kWh</span>
+          </div>
+          <div class="tile">
+            <span class="tile-label">Besoin climatisation</span>
+            <span class="tile-value">{{ r.cooling_kwh | number:'1.1-1' }} kWh</span>
+          </div>
+          <div class="tile">
+            <span class="tile-label">Flux entrant total (gains)</span>
+            <span class="tile-value positive">+{{ r.flux_positive_kwh | number:'1.1-1' }} kWh</span>
+          </div>
+          <div class="tile">
+            <span class="tile-label">Flux sortant total (pertes)</span>
+            <span class="tile-value negative">{{ r.flux_negative_kwh | number:'1.1-1' }} kWh</span>
+          </div>
+        </div>
+
+        <h3>Température intérieure — heure par heure</h3>
+        <div class="chart-wrap">
+          <svg [attr.viewBox]="'0 0 ' + chartW + ' ' + chartH" role="img" aria-label="Température intérieure heure par heure">
+            <path class="chart-line" [attr.d]="chartPath" />
+          </svg>
+        </div>
+
+        <h3>État final de l'enveloppe</h3>
+        <div class="viewer-toolbar">
+          <div class="mode-toggle" role="radiogroup" aria-label="Surface affichée">
+            <label class="mode-option">
+              <input type="radio" name="colorMode" value="interior" [(ngModel)]="colorMode" />
+              <span>Surface intérieure</span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="colorMode" value="exterior" [(ngModel)]="colorMode" />
+              <span>Surface extérieure</span>
+            </label>
+          </div>
+          <span class="temp-range">{{ resultTempRange().min | number:'1.1-1' }}°C → {{ resultTempRange().max | number:'1.1-1' }}°C</span>
+        </div>
+        <div class="viewer-wrap">
+          <app-mesh-viewer
+            [vertices]="b.envelope.vertices"
+            [triangles]="b.envelope.triangles"
+            [colorForTriangle]="colorForResultTriangle"
+            [pickable]="false"
+          />
+        </div>
+      </section>
+    }
+  }
+</main>

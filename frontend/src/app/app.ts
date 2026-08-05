@@ -37,6 +37,7 @@ export class AppComponent {
     { path: '/parois',        label: 'Modèles de paroi', abbr: 'Mp' },
     { path: '/batiment',      label: 'Bâtiment',         abbr: 'Bt' },
     { path: '/environnement', label: 'Environnement',    abbr: 'En' },
+    { path: '/calcul-3d',     label: 'Calcul 3D',        abbr: '3D' },
   ];
 
   @ViewChild('closeBtn') private closeBtnRef?: ElementRef<HTMLButtonElement>;

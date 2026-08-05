@@ -295,12 +295,25 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     positive_kwh = float(flux_arr[flux_arr > 0].sum()) * DT_SECONDS / 3.6e6
     negative_kwh = float(flux_arr[flux_arr < 0].sum()) * DT_SECONDS / 3.6e6
 
+    # État final par triangle (dernière heure), pour une visualisation 3D du
+    # résultat — pas toute la série temporelle par nœud (bien trop volumineux
+    # pour un an d'heures × des milliers de triangles).
+    final_exterior_surface_temp = []
+    final_interior_surface_temp = []
+    for i, (mesh, K, C, layers) in enumerate(systems):
+        off = offsets[i]
+        n = mesh['n_wall_nodes']
+        final_exterior_surface_temp.append(float(T[off]))
+        final_interior_surface_temp.append(float(T[off + n - 1]))
+
     return {
         'hours': len(weather),
         't_air': t_air_series,
         't_air_mean': float(t_air_arr.mean()),
         'heating_kwh': heating_j / 3.6e6,
         'cooling_kwh': cooling_j / 3.6e6,
+        'final_exterior_surface_temp': final_exterior_surface_temp,
+        'final_interior_surface_temp': final_interior_surface_temp,
         'envelope_flux_w': flux_series,
         'flux_positive_kwh': positive_kwh,
         'flux_negative_kwh': negative_kwh,
