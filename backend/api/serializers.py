@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Department, UserRecord, ParoiModel
+from .models import Department, UserRecord, ParoiModel, Building, Environment, Job
+from . import geometry
 
 
 class LayerSerializer(serializers.Serializer):
@@ -40,6 +41,177 @@ class ParoiModelSerializer(serializers.Serializer):
         return ParoiModel.objects.create(**validated_data)
 
     def update(self, instance, validated_data):
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+        return instance
+
+
+class TriangleInputSerializer(serializers.Serializer):
+    v = serializers.ListField(child=serializers.IntegerField(min_value=0), min_length=3, max_length=3)
+    group = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
+    paroi_model_id = serializers.IntegerField(required=False, allow_null=True, default=None)
+
+
+class EnvironmentTriangleInputSerializer(serializers.Serializer):
+    v = serializers.ListField(child=serializers.IntegerField(min_value=0), min_length=3, max_length=3)
+
+
+class EnvironmentSerializer(serializers.Serializer):
+    """Maillage d'environnement (obstacles) — géométrie brute uniquement, pas
+    d'assignation de paroi ni de champs calculés (voir api.shadow, seul
+    consommateur : trimesh calcule ses propres normales de face)."""
+
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(max_length=150)
+    description = serializers.CharField(allow_blank=True, required=False, default='')
+    vertices = serializers.ListField(
+        child=serializers.ListField(child=serializers.FloatField(), min_length=3, max_length=3),
+        min_length=3, max_length=geometry.MAX_VERTICES,
+        write_only=True, required=False, default=list,
+    )
+    triangles = EnvironmentTriangleInputSerializer(
+        many=True, write_only=True, required=False, default=list, max_length=geometry.MAX_TRIANGLES,
+    )
+    envelope = serializers.JSONField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+    def validate_name(self, value):
+        qs = Environment.objects.filter(name=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Un environnement porte déjà ce nom.")
+        return value
+
+    def _build_envelope(self, validated_data):
+        if 'vertices' not in validated_data and 'triangles' not in validated_data:
+            return None
+        existing = (self.instance.envelope if self.instance else None) or {}
+        vertices = validated_data.pop('vertices', None)
+        if vertices is None:
+            vertices = existing.get('vertices', [])
+        triangles = validated_data.pop('triangles', None)
+        if triangles is None:
+            triangles = [{'v': t['v']} for t in existing.get('triangles', [])]
+        else:
+            triangles = [dict(t) for t in triangles]
+        try:
+            geometry.validate_indices(vertices, triangles)
+        except geometry.GeometryError as exc:
+            raise serializers.ValidationError({'triangles': str(exc)})
+        return {'vertices': vertices, 'triangles': triangles}
+
+    def create(self, validated_data):
+        envelope = self._build_envelope(validated_data) or {'vertices': [], 'triangles': []}
+        return Environment.objects.create(envelope=envelope, **validated_data)
+
+    def update(self, instance, validated_data):
+        envelope = self._build_envelope(validated_data)
+        if envelope is not None:
+            instance.envelope = envelope
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+        return instance
+
+
+class JobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Job
+        fields = ['id', 'kind', 'status', 'progress', 'message', 'params', 'result', 'created_at', 'updated_at']
+        read_only_fields = fields
+
+
+class BuildingSerializer(serializers.Serializer):
+    """Bâtiment = enveloppe triangulaire + assignation d'un ParoiModel par triangle.
+
+    vertices/triangles sont en écriture seule (entrée brute du maillage importé
+    côté client) ; la lecture se fait via `envelope`, qui contient en plus les
+    champs géométriques (area/normal/tilt_deg/azimuth_deg) toujours recalculés
+    côté serveur — jamais pris tels quels depuis le client (voir api.geometry).
+    """
+
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(max_length=150)
+    description = serializers.CharField(allow_blank=True, required=False, default='')
+    vertices = serializers.ListField(
+        child=serializers.ListField(child=serializers.FloatField(), min_length=3, max_length=3),
+        min_length=3, max_length=geometry.MAX_VERTICES,
+        write_only=True, required=False, default=list,
+    )
+    triangles = TriangleInputSerializer(
+        many=True, write_only=True, required=False, default=list, max_length=geometry.MAX_TRIANGLES,
+    )
+    envelope = serializers.JSONField(read_only=True)
+    environment_id = serializers.PrimaryKeyRelatedField(
+        source='environment', queryset=Environment.objects.all(), required=False, allow_null=True,
+    )
+    sun_visibility_stale = serializers.BooleanField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+    def validate_name(self, value):
+        qs = Building.objects.filter(name=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Un bâtiment porte déjà ce nom.")
+        return value
+
+    def validate(self, data):
+        triangles = data.get('triangles') or []
+        ids = {t['paroi_model_id'] for t in triangles if t.get('paroi_model_id') is not None}
+        if ids:
+            existing = set(ParoiModel.objects.filter(pk__in=ids).values_list('pk', flat=True))
+            missing = ids - existing
+            if missing:
+                raise serializers.ValidationError(
+                    {'triangles': f"paroi_model_id inconnu(s) : {sorted(missing)}."}
+                )
+        return data
+
+    def _build_envelope(self, validated_data):
+        """vertices/triangles sont toujours un remplacement complet de l'un ou
+        l'autre quand fourni — pas de fusion par élément (les triangles n'ont
+        pas d'identifiant stable). Si un seul des deux est envoyé (cas courant :
+        PATCH triangles seul pour ne sauver que des changements d'assignation,
+        sans renvoyer tous les sommets), l'autre est repris de l'enveloppe
+        existante plutôt que vidé.
+        """
+        if 'vertices' not in validated_data and 'triangles' not in validated_data:
+            return None
+        existing = (self.instance.envelope if self.instance else None) or {}
+
+        vertices = validated_data.pop('vertices', None)
+        if vertices is None:
+            vertices = existing.get('vertices', [])
+
+        triangles = validated_data.pop('triangles', None)
+        if triangles is None:
+            triangles = [
+                {'v': t['v'], 'group': t.get('group'), 'paroi_model_id': t.get('paroi_model_id')}
+                for t in existing.get('triangles', [])
+            ]
+        try:
+            computed = geometry.compute_envelope_geometry(vertices, [dict(t) for t in triangles])
+        except geometry.GeometryError as exc:
+            raise serializers.ValidationError({'triangles': str(exc)})
+        return {'vertices': vertices, 'triangles': computed}
+
+    def create(self, validated_data):
+        envelope = self._build_envelope(validated_data) or {'vertices': [], 'triangles': []}
+        return Building.objects.create(envelope=envelope, sun_visibility_stale=True, **validated_data)
+
+    def update(self, instance, validated_data):
+        envelope = self._build_envelope(validated_data)
+        # L'ombrage précalculé ne reste valide que si ni l'enveloppe ni
+        # l'environnement associé n'ont changé depuis le dernier calcul.
+        if envelope is not None or 'environment' in validated_data:
+            instance.sun_visibility_stale = True
+        if envelope is not None:
+            instance.envelope = envelope
         for field, value in validated_data.items():
             setattr(instance, field, value)
         instance.save()

@@ -1,0 +1,156 @@
+<main class="page-batiment">
+
+  <div class="batiment-head">
+    <p class="eyebrow"><span class="dot"></span> Enveloppe 3D</p>
+    <h1>Bâtiment</h1>
+    <p class="subtitle">
+      Importez un maillage de l'enveloppe extérieure (OBJ ou STL) et assignez un modèle de
+      <a routerLink="/parois">paroi</a> à chaque partie. Sert de base au calcul 3D complet du bâtiment.
+    </p>
+  </div>
+
+  <section class="form-card">
+    <h2>Bâtiments enregistrés</h2>
+    @if (buildings().length === 0) {
+      <p class="hint">Aucun bâtiment enregistré pour l'instant — importez un fichier ci-dessous.</p>
+    } @else {
+      <div class="building-list">
+        @for (b of buildings(); track b.id) {
+          <div class="building-row" [class.active]="currentBuildingId() === b.id">
+            <span class="building-name">{{ b.name }}</span>
+            <div class="building-actions">
+              <button type="button" class="btn-secondary" (click)="loadBuilding(b)">Charger</button>
+              <button type="button" class="btn-secondary danger" (click)="removeBuilding(b)">Supprimer</button>
+            </div>
+          </div>
+        }
+      </div>
+    }
+    <button type="button" class="btn-secondary" (click)="newBuilding()">+ Nouveau bâtiment</button>
+  </section>
+
+  <section class="form-card">
+    <h2>{{ currentBuildingId() === null ? 'Nouveau bâtiment' : 'Modifier « ' + buildingName + ' »' }}</h2>
+
+    <div class="field-grid">
+      <label>
+        <span>Nom</span>
+        <input type="text" [(ngModel)]="buildingName" name="buildingName" />
+      </label>
+      <label>
+        <span>Description</span>
+        <input type="text" [(ngModel)]="buildingDescription" name="buildingDescription" />
+      </label>
+    </div>
+
+    <label class="file-label">
+      <span>Importer un maillage (.obj ou .stl)</span>
+      <input type="file" accept=".obj,.stl" (change)="onFileSelected($event)" />
+    </label>
+
+    @if (currentBuildingId() !== null) {
+      <div class="shadow-block">
+        <h3>Ombrage</h3>
+        <div class="shadow-row">
+          <label class="inline-label">
+            <span>Environnement (obstacles alentour)</span>
+            <select [(ngModel)]="selectedEnvironmentId" name="selectedEnvironmentId">
+              <option [ngValue]="null">— aucun (auto-ombrage seul) —</option>
+              @for (e of environments(); track e.id) {
+                <option [ngValue]="e.id">{{ e.name }}</option>
+              }
+            </select>
+          </label>
+          <button type="button" class="btn-secondary" (click)="triggerPrecompute()" [disabled]="shadowJob()?.status === 'PENDING' || shadowJob()?.status === 'RUNNING'">
+            Précalculer l'ombrage
+          </button>
+          @if (sunVisibilityStale()) {
+            <span class="stale-badge">périmé — à recalculer</span>
+          }
+        </div>
+        <p class="hint">
+          Change d'environnement ci-dessus, ré-enregistrez le bâtiment pour le lier, puis lancez le
+          précalcul. Gère aussi l'environnement lui-même : <a routerLink="/environnement">page Environnement</a>.
+        </p>
+        @if (shadowJob(); as job) {
+          <div class="job-status" [class]="job.status.toLowerCase()">
+            <span class="job-label">{{ job.status }}</span>
+            <span class="job-progress">{{ job.progress }}%</span>
+            <span class="job-message">{{ job.message }}</span>
+          </div>
+        }
+      </div>
+    }
+
+    @if (message()) {
+      <p class="feedback ok">{{ message() }}</p>
+    }
+    @if (error()) {
+      <p class="feedback error">{{ error() }}</p>
+    }
+
+    @if (totalCount > 0) {
+      <p class="summary">
+        <strong>{{ assignedCount }} / {{ totalCount }}</strong> triangles assignés à un modèle de paroi.
+      </p>
+
+      @if (groups().length > 0) {
+        <div class="group-assign">
+          <h3>Assignation par groupe (OBJ)</h3>
+          @for (g of groups(); track g) {
+            <div class="group-row">
+              <span class="group-name">{{ g }}</span>
+              <span class="group-count">{{ triangleCountForGroup(g) }} triangle(s)</span>
+              <select [(ngModel)]="groupAssignments[g]" name="group_{{g}}">
+                <option [ngValue]="null">— aucun modèle —</option>
+                @for (m of paroiModels(); track m.id) {
+                  <option [ngValue]="m.id">{{ m.name }}</option>
+                }
+              </select>
+              <button type="button" class="btn-secondary" (click)="assignGroup(g)">Assigner le groupe</button>
+            </div>
+          }
+        </div>
+      }
+
+      <div class="manual-assign">
+        <h3>Assignation manuelle</h3>
+        <p class="hint">
+          Cliquez un ou plusieurs triangles dans la vue 3D pour les sélectionner (surlignés en accent),
+          puis choisissez un modèle et validez. Utile pour les fichiers STL (sans groupes) ou pour
+          corriger une assignation par groupe.
+        </p>
+        <div class="manual-row">
+          <span class="selection-count">{{ selectedIndices().size }} triangle(s) sélectionné(s)</span>
+          <select [(ngModel)]="bulkAssignModelId" name="bulkAssignModelId">
+            <option [ngValue]="null">— aucun modèle —</option>
+            @for (m of paroiModels(); track m.id) {
+              <option [ngValue]="m.id">{{ m.name }}</option>
+            }
+          </select>
+          <button type="button" class="btn-secondary" (click)="assignSelection()" [disabled]="selectedIndices().size === 0">Assigner la sélection</button>
+          <button type="button" class="btn-secondary" (click)="clearSelection()" [disabled]="selectedIndices().size === 0">Vider la sélection</button>
+        </div>
+      </div>
+
+      <div class="viewer-wrap">
+        <app-mesh-viewer
+          [vertices]="vertices()"
+          [triangles]="triangles()"
+          [colorForTriangle]="colorForTriangle"
+          [pickable]="true"
+          (triangleClick)="onTriangleClick($event)"
+        />
+      </div>
+
+      <div class="legend">
+        <span class="legend-item"><span class="swatch" style="background: var(--warning)"></span> Non assigné</span>
+        <span class="legend-item"><span class="swatch" style="background: var(--accent)"></span> Sélectionné</span>
+      </div>
+
+      <button type="button" class="btn-primary" (click)="save()" [disabled]="saving() || !buildingName.trim()">
+        {{ saving() ? 'Enregistrement…' : 'Enregistrer le bâtiment' }}
+      </button>
+    }
+  </section>
+</main>

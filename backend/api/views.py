@@ -1,12 +1,15 @@
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import generics, status
 from rest_framework.response import Response
-from .models import Department, UserRecord, ParoiModel
+from .models import Department, UserRecord, ParoiModel, Building, Environment, Job
 from .serializers import (
     DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer, ParoiModelSerializer,
+    BuildingSerializer, EnvironmentSerializer, JobSerializer,
 )
 from . import solver
+from . import tasks
 
 
 class MeView(APIView):
@@ -65,6 +68,66 @@ class ParoiModelDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     queryset         = ParoiModel.objects.all()
     serializer_class = ParoiModelSerializer
+
+
+class BuildingListCreateView(generics.ListCreateAPIView):
+    """GET/POST /api/batiments/ — bâtiments (enveloppe maillée + assignation de parois)."""
+
+    queryset         = Building.objects.all()
+    serializer_class = BuildingSerializer
+
+
+class BuildingDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET/PUT/PATCH/DELETE /api/batiments/<id>/"""
+
+    queryset         = Building.objects.all()
+    serializer_class = BuildingSerializer
+
+
+class EnvironmentListCreateView(generics.ListCreateAPIView):
+    """GET/POST /api/environnements/ — maillages d'environnement (obstacles)."""
+
+    queryset         = Environment.objects.all()
+    serializer_class = EnvironmentSerializer
+
+
+class EnvironmentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET/PUT/PATCH/DELETE /api/environnements/<id>/"""
+
+    queryset         = Environment.objects.all()
+    serializer_class = EnvironmentSerializer
+
+
+class JobDetailView(generics.RetrieveAPIView):
+    """GET /api/jobs/<id>/ — état d'une tâche asynchrone (polling frontend)."""
+
+    queryset         = Job.objects.all()
+    serializer_class = JobSerializer
+
+
+class PrecomputeShadowsView(APIView):
+    """
+    POST /api/batiments/<id>/precalcul-ombrage/
+    Lance le précalcul de visibilité solaire (Lot C) pour ce bâtiment, en
+    tâche de fond. Un seul calcul d'ombrage à la fois pour tout le lab
+    (--concurrency=1 sur le worker) ; on renvoie 409 si un calcul est déjà
+    en cours plutôt que de le mettre en file silencieusement.
+    """
+
+    def post(self, request, pk):
+        building = get_object_or_404(Building, pk=pk)
+
+        if not building.envelope.get('triangles'):
+            return Response({'detail': "Ce bâtiment n'a pas encore de maillage importé."},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        if Job.objects.filter(kind='shadow_precompute', status__in=[Job.PENDING, Job.RUNNING]).exists():
+            return Response({'detail': "Un précalcul d'ombrage est déjà en cours pour le lab — réessayez plus tard."},
+                             status=status.HTTP_409_CONFLICT)
+
+        job = Job.objects.create(kind='shadow_precompute', params={'building_id': building.pk})
+        tasks.precompute_shadows.delay(job.id, building.pk)
+        return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
 class Calcul1DView(APIView):

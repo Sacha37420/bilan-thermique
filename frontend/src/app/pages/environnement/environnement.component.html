@@ -1,0 +1,73 @@
+<main class="page-env">
+
+  <div class="env-head">
+    <p class="eyebrow"><span class="dot"></span> Ombrage</p>
+    <h1>Environnement</h1>
+    <p class="subtitle">
+      Obstacles alentour (bâtiments voisins, relief) utilisés pour le calcul de visibilité
+      solaire d'un <a routerLink="/batiment">bâtiment</a>. Géométrie seule — pas d'assignation
+      de paroi ici. L'enveloppe du bâtiment lui-même s'ajoute automatiquement au calcul
+      (auto-ombrage), inutile de la dupliquer dans un environnement.
+    </p>
+  </div>
+
+  <section class="form-card">
+    <h2>Environnements enregistrés</h2>
+    @if (environments().length === 0) {
+      <p class="hint">Aucun environnement enregistré — importez un fichier ci-dessous (optionnel : un bâtiment peut n'avoir aucun environnement, seulement son auto-ombrage).</p>
+    } @else {
+      <div class="env-list">
+        @for (e of environments(); track e.id) {
+          <div class="env-row" [class.active]="currentId() === e.id">
+            <span class="env-name">{{ e.name }}</span>
+            <div class="env-actions">
+              <button type="button" class="btn-secondary" (click)="load(e)">Charger</button>
+              <button type="button" class="btn-secondary danger" (click)="remove(e)">Supprimer</button>
+            </div>
+          </div>
+        }
+      </div>
+    }
+    <button type="button" class="btn-secondary" (click)="newEnvironment()">+ Nouvel environnement</button>
+  </section>
+
+  <section class="form-card">
+    <h2>{{ currentId() === null ? 'Nouvel environnement' : 'Modifier « ' + name + ' »' }}</h2>
+
+    <div class="field-grid">
+      <label>
+        <span>Nom</span>
+        <input type="text" [(ngModel)]="name" name="envName" />
+      </label>
+      <label>
+        <span>Description</span>
+        <input type="text" [(ngModel)]="description" name="envDescription" />
+      </label>
+    </div>
+
+    <label class="file-label">
+      <span>Importer un maillage (.obj ou .stl)</span>
+      <input type="file" accept=".obj,.stl" (change)="onFileSelected($event)" />
+    </label>
+
+    @if (message()) { <p class="feedback ok">{{ message() }}</p> }
+    @if (error()) { <p class="feedback error">{{ error() }}</p> }
+
+    @if (triangles().length > 0) {
+      <p class="summary"><strong>{{ vertices().length }}</strong> sommets, <strong>{{ triangles().length }}</strong> triangles.</p>
+
+      <div class="viewer-wrap">
+        <app-mesh-viewer
+          [vertices]="vertices()"
+          [triangles]="triangles()"
+          [colorForTriangle]="colorForTriangle"
+          [pickable]="false"
+        />
+      </div>
+
+      <button type="button" class="btn-primary" (click)="save()" [disabled]="saving() || !name.trim()">
+        {{ saving() ? 'Enregistrement…' : 'Enregistrer l’environnement' }}
+      </button>
+    }
+  </section>
+</main>

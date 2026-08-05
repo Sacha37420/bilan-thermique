@@ -7,3 +7,12 @@ PyJWT>=2.8
 cryptography>=40.0
 django-cors-headers>=3.14.0
 numpy>=1.26,<2.0
+scipy>=1.11,<2.0
+
+# ── File de tâches asynchrones (précalcul d'ombrage, résolution FEM bâtiment) ──
+celery>=5.3
+redis>=5.0
+
+# ── Géométrie 3D (occlusion solaire, maillages bâtiment/environnement) ────────
+trimesh>=4.0
+rtree>=1.1

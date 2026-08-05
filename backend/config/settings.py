@@ -70,6 +70,14 @@ REST_FRAMEWORK = {
     ],
 }
 
+# ── Celery / file de tâches asynchrones ────────────────────────────────────────
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://redis:6379/0')
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://redis:6379/1')
+CELERY_TASK_TRACK_STARTED = True
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+
 # ── Keycloak ───────────────────────────────────────────────────────────────────
 KEYCLOAK_ISSUER_URI = config(
     'KEYCLOAK_ISSUER_URI',

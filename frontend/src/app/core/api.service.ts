@@ -46,4 +46,52 @@ export class ApiService {
   deleteParoiModele(id: number): Observable<unknown> {
     return this.http.delete(`${this.base}/api/paroi-modeles/${id}/`);
   }
+
+  getBuildings(): Observable<unknown[]> {
+    return this.http.get<unknown[]>(`${this.base}/api/batiments/`);
+  }
+
+  getBuilding(id: number): Observable<unknown> {
+    return this.http.get(`${this.base}/api/batiments/${id}/`);
+  }
+
+  createBuilding(payload: unknown): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/`, payload);
+  }
+
+  updateBuilding(id: number, payload: unknown): Observable<unknown> {
+    return this.http.patch(`${this.base}/api/batiments/${id}/`, payload);
+  }
+
+  deleteBuilding(id: number): Observable<unknown> {
+    return this.http.delete(`${this.base}/api/batiments/${id}/`);
+  }
+
+  precomputeShadows(buildingId: number): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/${buildingId}/precalcul-ombrage/`, {});
+  }
+
+  getJob(id: number): Observable<unknown> {
+    return this.http.get(`${this.base}/api/jobs/${id}/`);
+  }
+
+  getEnvironments(): Observable<unknown[]> {
+    return this.http.get<unknown[]>(`${this.base}/api/environnements/`);
+  }
+
+  getEnvironment(id: number): Observable<unknown> {
+    return this.http.get(`${this.base}/api/environnements/${id}/`);
+  }
+
+  createEnvironment(payload: unknown): Observable<unknown> {
+    return this.http.post(`${this.base}/api/environnements/`, payload);
+  }
+
+  updateEnvironment(id: number, payload: unknown): Observable<unknown> {
+    return this.http.patch(`${this.base}/api/environnements/${id}/`, payload);
+  }
+
+  deleteEnvironment(id: number): Observable<unknown> {
+    return this.http.delete(`${this.base}/api/environnements/${id}/`);
+  }
 }

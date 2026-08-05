@@ -7,6 +7,8 @@ networks:
   dev-net:
     external: true
     name: dev-net
+  bilan-thermique-net:
+    driver: bridge
 
 services:
 
@@ -20,10 +22,40 @@ services:
     networks:
       - sso-net
       - dev-net
+      - bilan-thermique-net
     labels:
       caddy: "${DOMAIN}"
       caddy.handle_path: "/bilan-thermique-api/*"
       caddy.handle_path.reverse_proxy: "{{upstreams 8000}}"
+
+  redis:
+    image: redis:7-alpine
+    container_name: bilan-thermique-redis
+    restart: unless-stopped
+    networks:
+      - bilan-thermique-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: ./backend
+    container_name: bilan-thermique-worker
+    restart: unless-stopped
+    env_file: .env
+    # Précalcul d'ombrage (lancers de rayons) et résolution FEM bâtiment sont
+    # les deux seuls jobs lourds de cette app — un seul à la fois (verrou DB
+    # applicatif dans les vues de lancement), même principe qu'atelier-3d/
+    # lab-admin pour la même raison (2 vCPU/16 Go partagés par tout le lab).
+    command: celery -A config worker --loglevel=info --concurrency=1
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - dev-net
+      - bilan-thermique-net
 
   frontend:
     build: ./frontend
