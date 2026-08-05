@@ -130,8 +130,14 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, sun_visibil
         n = mesh['n_wall_nodes']
         area = areas[i]
         geom = triangles_geom[i]
-        tilt = geom['tilt_deg']
-        f_ciel = (1.0 + math.cos(math.radians(tilt))) / 2.0
+        # Facteur de vue du ciel : la valeur précalculée par lancer de rayons
+        # (occlusion réelle par l'environnement + auto-ombrage, Lot C élargi)
+        # est utilisée si disponible, sinon repli sur la formule analytique
+        # du ciel isotrope sans obstacle (même formule que solver.py).
+        if sun_visibility is not None and 'sky_view_factor' in sun_visibility:
+            f_ciel = sun_visibility['sky_view_factor'][i]
+        else:
+            f_ciel = (1.0 + math.cos(math.radians(geom['tilt_deg']))) / 2.0
 
         cos_ti = 0.0
         if sun_up:

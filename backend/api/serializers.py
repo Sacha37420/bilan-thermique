@@ -218,6 +218,10 @@ class BuildingSerializer(serializers.Serializer):
         return instance
 
 
+class RefineMeshRequestSerializer(serializers.Serializer):
+    max_edge_length = serializers.FloatField(min_value=0.02, max_value=50.0)
+
+
 class WeatherPointSerializer(serializers.Serializer):
     t_ext = serializers.FloatField(min_value=-60.0, max_value=60.0)
     h_s = serializers.FloatField(min_value=-90.0, max_value=90.0)

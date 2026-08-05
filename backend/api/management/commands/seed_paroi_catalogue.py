@@ -1,5 +1,5 @@
 """Peuple la bibliothèque de modèles de paroi avec un catalogue de départ :
-fenêtres simple/double vitrage usuelles, et des exemples de murs ITE/ITI pour
+fenêtres simple/double vitrage usuelles, murs ITE/ITI et toitures pour
 chaque génération de réglementation thermique (RT2005, RT2012, RE2020).
 
 Idempotent (update_or_create par nom) — peut être relancé sans risque après un
@@ -36,6 +36,18 @@ def mur_ite(epaisseur_isolant):
 
 def mur_iti(epaisseur_isolant):
     return [dict(ENDUIT_EXT), dict(BLOC_BETON), isolant(epaisseur_isolant), dict(PLACO)]
+
+
+# Toiture (rampants/combles) : couverture (tuile, exposée au soleil) + support
+# bois + isolant + plâtre intérieur. Les toitures sont conventionnellement
+# bien plus isolées que les murs à réglementation égale — d'où des épaisseurs
+# nettement supérieures (200/300/400 mm contre 100/140/180 mm pour les murs).
+COUVERTURE_TUILE = {'e': 0.02, 'lam': 1.0, 'rho': 2000, 'c': 800, 'tau': 0, 'r': 0.3, 'alpha': 0.7}
+SUPPORT_TOITURE = {'e': 0.018, 'lam': 0.15, 'rho': 500, 'c': 1600, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+
+
+def toiture(epaisseur_isolant):
+    return [dict(COUVERTURE_TUILE), dict(SUPPORT_TOITURE), isolant(epaisseur_isolant), dict(PLACO)]
 
 
 # ── Vitrages ─────────────────────────────────────────────────────────────
@@ -125,11 +137,39 @@ CATALOGUE = [
         ),
         'layers': mur_iti(0.18),
     },
+    {
+        'name': 'Toiture — RT2005 (isolant 200 mm)',
+        'description': (
+            "Rampant/comble : couverture tuile + support bois + 200 mm laine "
+            "minérale + plâtre intérieur. U indicatif ≈ 0,16 W/m²·K, "
+            "représentatif d'une toiture RT2005 (les toitures sont "
+            "conventionnellement plus isolées que les murs à génération égale)."
+        ),
+        'layers': toiture(0.20),
+    },
+    {
+        'name': 'Toiture — RT2012 (isolant 300 mm)',
+        'description': (
+            "Rampant/comble : couverture tuile + support bois + 300 mm laine "
+            "minérale + plâtre intérieur. U indicatif ≈ 0,11 W/m²·K, "
+            "représentatif d'une toiture RT2012."
+        ),
+        'layers': toiture(0.30),
+    },
+    {
+        'name': 'Toiture — RE2020 (isolant 400 mm)',
+        'description': (
+            "Rampant/comble : couverture tuile + support bois + 400 mm laine "
+            "minérale + plâtre intérieur. U indicatif ≈ 0,08 W/m²·K, "
+            "représentatif d'une toiture RE2020."
+        ),
+        'layers': toiture(0.40),
+    },
 ]
 
 
 class Command(BaseCommand):
-    help = "Peuple la bibliothèque de modèles de paroi avec un catalogue de départ (vitrages, murs ITE/ITI RT2005/RT2012/RE2020)."
+    help = "Peuple la bibliothèque de modèles de paroi avec un catalogue de départ (vitrages, murs ITE/ITI, toitures RT2005/RT2012/RE2020)."
 
     def handle(self, *args, **options):
         for entry in CATALOGUE:

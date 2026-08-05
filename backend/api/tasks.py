@@ -17,12 +17,16 @@ def precompute_shadows(self, job_id: int, building_id: int):
         environment_envelope = building.environment.envelope if building.environment_id else None
 
         def progress_cb(done, total):
-            pct = int(1 + done * 98 / total)
+            # Grille de visibilité solaire : 0-79 % ; facteur de vue du ciel : 80-98 %.
+            pct = int(1 + done * 79 / total)
             job.set_state(progress=pct, message=f"Test de visibilité solaire… {done}/{total} positions")
 
         result = shadow.compute_visibility_grid(
             building.envelope, environment_envelope, progress_cb=progress_cb,
         )
+
+        job.set_state(progress=80, message="Facteur de vue du ciel (occlusion réelle)…")
+        result['sky_view_factor'] = shadow.compute_sky_view_factors(building.envelope, environment_envelope)
 
         building.sun_visibility = result
         building.sun_visibility_stale = False

@@ -67,6 +67,10 @@ export class ApiService {
     return this.http.delete(`${this.base}/api/batiments/${id}/`);
   }
 
+  refineBuildingMesh(buildingId: number, maxEdgeLength: number): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/${buildingId}/affiner-maillage/`, { max_edge_length: maxEdgeLength });
+  }
+
   precomputeShadows(buildingId: number): Observable<unknown> {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/precalcul-ombrage/`, {});
   }

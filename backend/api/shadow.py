@@ -134,6 +134,83 @@ def compute_visibility_grid(
     }
 
 
+DEFAULT_SKY_SAMPLES = 128
+
+
+def _fibonacci_sphere(n):
+    """n directions quasi uniformément réparties sur la sphère unité (spirale
+    de Fibonacci) — déterministe, bonne couverture même pour n modeste, pas
+    besoin d'aléatoire pour un résultat reproductible."""
+    points = np.empty((n, 3))
+    golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+    for i in range(n):
+        y = 1.0 - (i / (n - 1)) * 2.0 if n > 1 else 0.0
+        radius = math.sqrt(max(0.0, 1.0 - y * y))
+        theta = golden_angle * i
+        points[i] = (math.cos(theta) * radius, y, math.sin(theta) * radius)
+    return points
+
+
+def compute_sky_view_factors(building_envelope, environment_envelope=None, n_samples=DEFAULT_SKY_SAMPLES):
+    """Facteur de vue du ciel de chaque triangle, corrigé de l'occlusion
+    réelle par l'environnement (et l'auto-ombrage du bâtiment) — généralise
+    la formule analytique (1+cos(tilt))/2 (ciel isotrope, sans obstacle)
+    utilisée par défaut dans solver.py/building_solver.py.
+
+    Méthode : on échantillonne n_samples directions sur la sphère, pondérées
+    par cos(theta) par rapport à la normale du triangle (pondération de
+    Lambert, celle qui redonne exactement la formule analytique en l'absence
+    d'obstacle) et restreintes aux directions de "vrai ciel" (composante Z
+    positive). Le facteur retourné est :
+
+        F_ciel_obstrué = (poids visible / poids total) * (1+cos(tilt))/2
+
+    — un ratio d'occlusion (issu du lancer de rayons) multipliant la valeur
+    analytique exacte, plutôt qu'une intégrale Monte-Carlo brute : en
+    l'absence totale d'obstacle, AUCUN rayon n'est bloqué quel que soit
+    n_samples, donc le ratio vaut exactement 1 et le résultat est
+    EXACTEMENT la formule analytique, sans bruit de discrétisation.
+
+    Retourne une liste de floats, un par triangle de building_envelope.
+    """
+    triangles = building_envelope['triangles']
+    n_tri = len(triangles)
+    if n_tri == 0:
+        raise ShadowError("Le bâtiment n'a aucun triangle.")
+    if n_tri > MAX_TRIANGLES_FOR_SHADOW:
+        raise ShadowError(f"{n_tri} triangles, au-delà de la limite de {MAX_TRIANGLES_FOR_SHADOW}.")
+
+    occluder = build_occluder_mesh(building_envelope, environment_envelope)
+    intersector = trimesh.ray.ray_triangle.RayMeshIntersector(occluder)
+
+    sphere_dirs = _fibonacci_sphere(n_samples)
+    is_sky = sphere_dirs[:, 2] > 0.0  # "vrai ciel" : au-dessus de l'horizon réel (Z-up)
+
+    vertices = building_envelope['vertices']
+    factors = []
+    for tri in triangles:
+        p = np.array([vertices[j] for j in tri['v']])
+        centroid = p.mean(axis=0)
+        normal = np.array(tri['normal'])
+        f_ciel_flat = (1.0 + math.cos(math.radians(tri['tilt_deg']))) / 2.0
+
+        cos_normal = sphere_dirs @ normal
+        valid = is_sky & (cos_normal > 1e-9)
+        if not valid.any():
+            factors.append(0.0)
+            continue
+
+        weight = cos_normal[valid]
+        dirs_valid = sphere_dirs[valid]
+        origins = np.tile(centroid + normal * RAY_ORIGIN_EPSILON, (dirs_valid.shape[0], 1))
+        blocked = intersector.intersects_any(origins, dirs_valid)
+
+        visible_ratio = float(weight[~blocked].sum() / weight.sum())
+        factors.append(visible_ratio * f_ciel_flat)
+
+    return factors
+
+
 def lookup_visibility(sun_visibility, triangle_index, azimuth_deg, elevation_deg):
     """Consultation rapide (Lot D) : la case de grille la plus proche de
     (azimuth_deg, elevation_deg) pour un triangle donné. Retourne True/False.

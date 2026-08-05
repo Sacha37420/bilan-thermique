@@ -7,10 +7,12 @@ from .models import Department, UserRecord, ParoiModel, Building, Environment, J
 from .serializers import (
     DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer, ParoiModelSerializer,
     BuildingSerializer, EnvironmentSerializer, JobSerializer, BuildingCalculRequestSerializer,
+    RefineMeshRequestSerializer,
 )
 from . import solver
 from . import tasks
 from . import building_solver
+from . import geometry
 
 
 class MeView(APIView):
@@ -129,6 +131,39 @@ class PrecomputeShadowsView(APIView):
         job = Job.objects.create(kind='shadow_precompute', params={'building_id': building.pk})
         tasks.precompute_shadows.delay(job.id, building.pk)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+
+
+class BuildingRefineView(APIView):
+    """
+    POST /api/batiments/<id>/affiner-maillage/  {max_edge_length}
+    Subdivise les triangles dont un côté dépasse max_edge_length (api.geometry.
+    refine_envelope), en conservant l'assignation de paroi de chaque triangle
+    parent sur ses enfants. Marque l'ombrage précalculé comme périmé.
+    """
+
+    def post(self, request, pk):
+        building = get_object_or_404(Building, pk=pk)
+        serializer = RefineMeshRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        envelope = building.envelope
+        if not envelope.get('triangles'):
+            return Response({'detail': "Ce bâtiment n'a pas encore de maillage importé."},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            new_vertices, new_triangles = geometry.refine_envelope(
+                envelope['vertices'], envelope['triangles'], serializer.validated_data['max_edge_length'],
+            )
+            new_triangles = geometry.compute_envelope_geometry(new_vertices, new_triangles)
+        except geometry.GeometryError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        building.envelope = {'vertices': new_vertices, 'triangles': new_triangles}
+        building.sun_visibility_stale = True
+        building.save(update_fields=['envelope', 'sun_visibility_stale', 'updated_at'])
+
+        return Response(BuildingSerializer(building).data)
 
 
 class BuildingCalculView(APIView):

@@ -69,7 +69,7 @@ label {
   color: var(--text);
 }
 
-input[type="text"] {
+input[type="text"], input[type="number"] {
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   color: var(--text);

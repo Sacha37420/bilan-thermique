@@ -66,6 +66,10 @@ export class BatimentComponent implements OnInit, OnDestroy {
   selectedIndices = signal<Set<number>>(new Set());
   bulkAssignModelId: number | null = null;
 
+  // ── Raffinement du maillage ───────────────────────────────────────────
+  refineMaxEdge = 1.0;
+  refining = signal(false);
+
   loading = signal(false);
   saving = signal(false);
   error = signal('');
@@ -282,6 +286,35 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.stopPoll();
     this.error.set('');
     this.message.set('');
+  }
+
+  // ── Raffinement du maillage ───────────────────────────────────────────
+  refineMesh(): void {
+    const id = this.currentBuildingId();
+    if (id === null || this.refining()) return;
+    this.refining.set(true);
+    this.error.set('');
+    this.message.set('');
+
+    this.api.refineBuildingMesh(id, this.refineMaxEdge).subscribe({
+      next: (res) => {
+        const b = res as Building;
+        this.vertices.set(b.envelope.vertices);
+        this.triangles.set(b.envelope.triangles);
+        this.groups.set([...new Set(b.envelope.triangles.map(t => t.group).filter((g): g is string => !!g))]);
+        // Les indices de triangle changent après raffinement : la sélection
+        // manuelle en cours n'a plus de sens.
+        this.selectedIndices.set(new Set());
+        this.sunVisibilityStale.set(b.sun_visibility_stale);
+        this.refining.set(false);
+        this.message.set(`Maillage raffiné : ${b.envelope.triangles.length} triangles.`);
+        this.viewer?.repaint();
+      },
+      error: (err) => {
+        this.refining.set(false);
+        this.error.set(err?.error?.max_edge_length?.[0] ?? err?.error?.detail ?? "Échec du raffinement.");
+      },
+    });
   }
 
   // ── Précalcul d'ombrage ──────────────────────────────────────────────
