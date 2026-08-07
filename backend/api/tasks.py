@@ -197,23 +197,41 @@ def generate_environment_for_building(self, job_id, building_id, radius_m):
 
 @shared_task(bind=True)
 def fetch_weather(self, job_id, params):
-    """Lot L — récupère une série météo horaire réelle (Open-Meteo Archive) +
-    position solaire calculée, voir api.weather_source.build_weather_series. Ne
-    persiste rien sur un Building — job.result porte directement la série, le
+    """Lot L ('archive') + Lot S ('tmy') — récupère une série météo horaire réelle
+    (Open-Meteo Archive, ou PVGIS TMY avec repli automatique sur Open-Meteo Archive
+    hors couverture PVGIS) + position solaire calculée, voir api.weather_source.
+    Ne persiste rien sur un Building — job.result porte directement la série, le
     frontend la récupère et la met dans son propre état local (calcul-3d.component)."""
     job = Job.objects.get(pk=job_id)
     job.celery_task_id = self.request.id
     job.save(update_fields=['celery_task_id'])
 
+    source_label = {'archive': "Open-Meteo Archive", 'tmy': "PVGIS TMY"}.get(params.get('source', 'archive'))
     try:
-        job.set_state(status=Job.RUNNING, progress=10, message="Interrogation d'Open-Meteo Archive…")
-        series, n_missing = weather_source.build_weather_series(
-            params['lat'], params['lon'], str(params['start_date']), str(params['end_date']),
-            north_offset_deg=params.get('north_offset_deg', 0.0),
-        )
-        job.result = {'weather': series, 'n_hours': len(series), 'n_missing': n_missing, 'source': 'open-meteo-archive'}
+        job.set_state(status=Job.RUNNING, progress=10, message=f"Interrogation de {source_label}…")
+        north_offset_deg = params.get('north_offset_deg', 0.0)
+        if params.get('source') == 'tmy':
+            series, n_missing, source, warning = weather_source.build_tmy_or_fallback_series(
+                params['lat'], params['lon'], str(params['start_date']), str(params['end_date']),
+                north_offset_deg=north_offset_deg,
+            )
+        else:
+            series, n_missing = weather_source.build_weather_series(
+                params['lat'], params['lon'], str(params['start_date']), str(params['end_date']),
+                north_offset_deg=north_offset_deg,
+            )
+            source, warning = 'open-meteo-archive', None
+
+        job.result = {
+            'weather': series, 'n_hours': len(series), 'n_missing': n_missing,
+            'source': source, 'warning': warning,
+        }
         job.save(update_fields=['result'])
-        message = f"{len(series)} heure(s) récupérée(s) (Open-Meteo Archive)."
+
+        source_display = {'pvgis-tmy': "PVGIS TMY", 'open-meteo-archive': "Open-Meteo Archive"}[source]
+        message = f"{len(series)} heure(s) récupérée(s) ({source_display})."
+        if warning:
+            message += f" {warning}"
         if n_missing:
             message += f" {n_missing} heure(s) ignorée(s), donnée manquante."
         job.set_state(status=Job.DONE, progress=100, message=message)

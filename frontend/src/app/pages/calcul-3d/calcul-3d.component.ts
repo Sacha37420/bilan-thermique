@@ -121,15 +121,28 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   weatherError = signal('');
   constWeather = { t_ext: 5, sun_azimuth: 180, sun_elevation: 0, e_dir: 0, e_dif: 0, hours: 200 };
 
-  // ── Météo automatique (Lot L — Open-Meteo Archive + position solaire réelle) ──
+  // ── Météo automatique (Lot L — Open-Meteo Archive ; Lot S — année type PVGIS) ──
   weatherFetchLat: number | null = null;
   weatherFetchLon: number | null = null;
   weatherFetchNorthOffset = 0;
+  // 'tmy' (année type PVGIS, représentative) ou 'archive' (année réelle datée,
+  // Open-Meteo) — les dates ci-dessous servent toujours de repli si PVGIS ne
+  // couvre pas la zone en mode 'tmy' (voir to_do.md, Lot S).
+  weatherFetchSource: 'archive' | 'tmy' = 'tmy';
   weatherFetchStart = this.isoDateDaysAgo(7);
   weatherFetchEnd = this.isoDateDaysAgo(0);
   weatherJob = signal<Job | null>(null);
   private weatherPollHandle?: ReturnType<typeof setInterval>;
   weatherFetchError = signal('');
+  // Source de la météo actuellement chargée dans weatherRaw — affichée aussi sur
+  // le dashboard de résultats (to_do.md, Lot S étape 3 : ne jamais laisser la
+  // source ambiguë). Vide = CSV manuel / origine inconnue, mise à jour à chaque
+  // action qui remplit weatherRaw (fetch auto, exemple de démo, météo constante).
+  weatherSourceLabel = signal('');
+  // Capturée au lancement du calcul (submit()) — voir ce commentaire là-bas pour
+  // pourquoi ce n'est pas simplement une lecture de weatherSourceLabel() dans le
+  // template du dashboard.
+  submittedWeatherSourceLabel = signal('');
 
   private isoDateDaysAgo(days: number): string {
     const d = new Date();
@@ -185,6 +198,10 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   // ── Météo : parsing / génération ─────────────────────────────────────
   parseWeather(): void {
     this.weatherError.set('');
+    // Un appel direct (édition manuelle du CSV) invalide la provenance connue —
+    // les appelants qui SAVENT d'où vient la série (fetch auto, démo) réaffectent
+    // le label juste après cet appel, l'écrasant.
+    this.weatherSourceLabel.set('');
     const text = this.weatherRaw.trim();
     if (!text) { this.weather.set([]); return; }
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
@@ -218,6 +235,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     }
     this.weatherRaw = rows.join('\n');
     this.parseWeather();
+    this.weatherSourceLabel.set('Démonstration (sinusoïde synthétique)');
   }
 
   loadConstant(): void {
@@ -225,9 +243,10 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     const row = [w.t_ext, w.sun_azimuth, w.sun_elevation, w.e_dir, w.e_dif].join(',');
     this.weatherRaw = Array(Math.max(1, Math.round(w.hours))).fill(row).join('\n');
     this.parseWeather();
+    this.weatherSourceLabel.set('Démonstration (météo constante)');
   }
 
-  // ── Météo automatique (Lot L) ──────────────────────────────────────────
+  // ── Météo automatique (Lot L — Open-Meteo Archive ; Lot S — PVGIS TMY) ────
   get canFetchWeather(): boolean {
     return this.weatherFetchLat !== null && this.weatherFetchLon !== null &&
       !!this.weatherFetchStart && !!this.weatherFetchEnd &&
@@ -238,7 +257,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     if (!this.canFetchWeather || this.weatherFetchLat === null || this.weatherFetchLon === null) return;
     this.weatherFetchError.set('');
     this.api.fetchWeather({
-      lat: this.weatherFetchLat, lon: this.weatherFetchLon,
+      lat: this.weatherFetchLat, lon: this.weatherFetchLon, source: this.weatherFetchSource,
       start_date: this.weatherFetchStart, end_date: this.weatherFetchEnd,
       north_offset_deg: this.weatherFetchNorthOffset,
     }).subscribe({
@@ -264,11 +283,17 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
           if (updated.status === 'DONE' || updated.status === 'ERROR') {
             this.stopWeatherPoll();
             if (updated.status === 'DONE') {
-              const points = (updated.result as unknown as { weather: WeatherPoint[] }).weather;
-              this.weatherRaw = points
+              const result = updated.result as unknown as {
+                weather: WeatherPoint[]; source: 'pvgis-tmy' | 'open-meteo-archive'; warning: string | null;
+              };
+              this.weatherRaw = result.weather
                 .map(p => [p.t_ext, p.sun_azimuth, p.sun_elevation, p.e_dir, p.e_dif].join(','))
                 .join('\n');
               this.parseWeather();
+              const sourceLabel = result.source === 'pvgis-tmy'
+                ? 'Année type (PVGIS TMY)'
+                : `Année réelle (Open-Meteo Archive), ${this.weatherFetchStart} → ${this.weatherFetchEnd}`;
+              this.weatherSourceLabel.set(result.warning ? `${sourceLabel} — ${result.warning}` : sourceLabel);
             } else {
               this.weatherFetchError.set(updated.message || 'Échec de la récupération.');
             }
@@ -308,6 +333,12 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
       dx_max: this.dxMax, h_e: this.hE, interior, t_init: this.tInit, weather: this.weather(),
       shadow_mode: this.shadowMode, t_ground: this.tGround,
     };
+
+    // Capturé au moment du lancement (pas relu depuis weatherSourceLabel() dans le
+    // template) : si l'utilisateur recharge une autre météo pendant que ce calcul
+    // tourne, le dashboard doit continuer à afficher la source qui a VRAIMENT
+    // produit ce résultat, pas celle actuellement dans le formulaire.
+    this.submittedWeatherSourceLabel.set(this.weatherSourceLabel());
 
     this.api.runBuildingCalcul(building.id, payload).subscribe({
       next: (res) => {

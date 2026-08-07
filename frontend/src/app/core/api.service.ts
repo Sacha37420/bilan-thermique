@@ -112,7 +112,8 @@ export class ApiService {
   }
 
   fetchWeather(payload: {
-    lat: number; lon: number; start_date: string; end_date: string; north_offset_deg?: number;
+    lat: number; lon: number; source?: 'archive' | 'tmy';
+    start_date: string; end_date: string; north_offset_deg?: number;
   }): Observable<unknown> {
     return this.http.post(`${this.base}/api/meteo/recuperer/`, payload);
   }

@@ -191,26 +191,48 @@
       </p>
 
       <div class="const-weather">
-        <p class="const-weather-title">Récupérer depuis Open-Meteo (données réelles)</p>
+        <p class="const-weather-title">Récupérer une météo réelle</p>
         <p class="hint">
-          Historique météo réel (Open-Meteo Archive) + position solaire réelle calculée pour la
-          période — seule source ici représentant un vrai relevé, à privilégier pour un bâtiment
-          réel. Latitude/longitude pré-remplies depuis le géoréférencement du bâtiment si disponible
-          (page Bâtiment) ; la rotation Nord réoriente l'azimuth solaire dans le repère local si le
-          maillage ne pointe pas le nord vrai.
+          Position solaire réelle calculée pour la période, dans les deux cas. Latitude/longitude
+          pré-remplies depuis le géoréférencement du bâtiment si disponible (page Bâtiment) ; la
+          rotation Nord réoriente l'azimuth solaire dans le repère local si le maillage ne pointe
+          pas le nord vrai.
         </p>
+        <div class="mode-toggle" role="radiogroup" aria-label="Source météo">
+          <label class="mode-option">
+            <input type="radio" name="weatherFetchSource" value="tmy" [(ngModel)]="weatherFetchSource" />
+            <span>Année type (PVGIS TMY)</span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="weatherFetchSource" value="archive" [(ngModel)]="weatherFetchSource" />
+            <span>Année réelle datée (Open-Meteo)</span>
+          </label>
+        </div>
+        @if (weatherFetchSource === 'tmy') {
+          <p class="hint">
+            Année statistiquement représentative (méthode PVGIS, assemblée mois par mois depuis
+            plusieurs années d'historique) — pour un dimensionnement, pas pour étudier un épisode
+            réel précis. Ne couvre pas les zones polaires ni les océans : la période ci-dessous ne
+            sert alors QUE de repli automatique sur l'historique réel Open-Meteo.
+          </p>
+        } @else {
+          <p class="hint">
+            Historique réel d'Open-Meteo Archive sur la période choisie — pour étudier un épisode
+            précis (ex. une canicule réelle) plutôt qu'un dimensionnement représentatif.
+          </p>
+        }
         <div class="field-grid const-weather-grid">
           <label><span>Latitude</span><input type="number" step="0.0001" min="-90" max="90" [(ngModel)]="weatherFetchLat" name="wfLat" /></label>
           <label><span>Longitude</span><input type="number" step="0.0001" min="-180" max="180" [(ngModel)]="weatherFetchLon" name="wfLon" /></label>
           <label><span>Rotation nord (°)</span><input type="number" step="1" [(ngModel)]="weatherFetchNorthOffset" name="wfNorthOffset" /></label>
-          <label><span>Du</span><input type="date" [(ngModel)]="weatherFetchStart" name="wfStart" /></label>
-          <label><span>Au</span><input type="date" [(ngModel)]="weatherFetchEnd" name="wfEnd" /></label>
+          <label><span>Du{{ weatherFetchSource === 'tmy' ? ' (repli)' : '' }}</span><input type="date" [(ngModel)]="weatherFetchStart" name="wfStart" /></label>
+          <label><span>Au{{ weatherFetchSource === 'tmy' ? ' (repli)' : '' }}</span><input type="date" [(ngModel)]="weatherFetchEnd" name="wfEnd" /></label>
         </div>
         <button type="button" class="btn-secondary" [disabled]="!canFetchWeather" (click)="fetchWeatherFromOpenMeteo()">
           @if (weatherJob() && weatherJob()!.status !== 'DONE' && weatherJob()!.status !== 'ERROR') {
             Récupération en cours…
           } @else {
-            Récupérer depuis Open-Meteo
+            Récupérer
           }
         </button>
         @if (weatherJob(); as wj) {
@@ -244,6 +266,9 @@
           <span class="weather-count">{{ weather().length }} heure(s) chargée(s)</span>
         }
       </div>
+      @if (weatherSourceLabel()) {
+        <p class="hint">Source : <strong>{{ weatherSourceLabel() }}</strong></p>
+      }
       <p class="hint">
         Les exemples et la météo constante sont des données de <strong>démonstration</strong>
         (sinusoïde synthétique / valeur figée) — utiles pour tester rapidement l'outil, mais pas
@@ -281,6 +306,13 @@
     @if (result; as r) {
       <section class="results">
         <h2>Résultats — {{ r.hours }} heure(s)</h2>
+        @if (submittedWeatherSourceLabel()) {
+          <p class="hint">
+            Météo utilisée : <strong>{{ submittedWeatherSourceLabel() }}</strong> — un résultat en
+            kWh/m²/an n'a pas le même sens statistique selon la source (année type représentative vs
+            année réelle datée, voir données de démonstration).
+          </p>
+        }
 
         <div class="stat-tiles">
           <div class="tile">

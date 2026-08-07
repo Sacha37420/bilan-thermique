@@ -1,4 +1,5 @@
-"""Import météo automatique (Open-Meteo Archive) + position solaire réelle — Lot L.
+"""Import météo automatique (Open-Meteo Archive, PVGIS TMY) + position solaire
+réelle — Lot L (année réelle datée) et Lot S (année type).
 
 Module de logique pure comme geodata.py : pas de dépendance aux modèles Django, prend
 lat/lon/période, retourne des dicts/listes Python déjà dans le format attendu par
@@ -179,6 +180,22 @@ def fetch_open_meteo_archive(lat, lon, start_date, end_date):
     return data
 
 
+def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg):
+    """Position solaire + clamping vers les bornes de BuildingWeatherPointSerializer
+    pour UNE heure — partagé par les deux sources (Open-Meteo Archive, PVGIS TMY,
+    Lot S), qui n'ont en commun que cette physique, pas le format brut de leur
+    réponse (voir _assemble_weather_series et _assemble_tmy_series)."""
+    real_azimuth, elevation = solar_position(lat, lon, dt_utc)
+    local_azimuth = to_local_azimuth(real_azimuth, north_offset_deg)
+    return {
+        't_ext': max(T_EXT_MIN, min(T_EXT_MAX, t_ext)),
+        'sun_azimuth': local_azimuth,
+        'sun_elevation': elevation,
+        'e_dir': max(0.0, min(E_DIR_MAX, e_dir_raw)),
+        'e_dif': max(0.0, min(E_DIF_MAX, e_dif_raw)),
+    }
+
+
 def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
     """Partie pure (testable sans réseau) : transforme la réponse JSON brute
     d'Open-Meteo Archive en liste de dicts {t_ext, sun_azimuth, sun_elevation,
@@ -211,16 +228,7 @@ def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
             continue
 
         dt_utc = datetime.fromisoformat(t).replace(tzinfo=timezone.utc)
-        real_azimuth, elevation = solar_position(lat, lon, dt_utc)
-        local_azimuth = to_local_azimuth(real_azimuth, north_offset_deg)
-
-        series.append({
-            't_ext': max(T_EXT_MIN, min(T_EXT_MAX, t_ext)),
-            'sun_azimuth': local_azimuth,
-            'sun_elevation': elevation,
-            'e_dir': max(0.0, min(E_DIR_MAX, e_dir_raw)),
-            'e_dif': max(0.0, min(E_DIF_MAX, e_dif_raw)),
-        })
+        series.append(_enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg))
 
     if not series:
         raise WeatherSourceError("Toutes les heures de cette période ont une donnée manquante côté Open-Meteo.")
@@ -229,8 +237,125 @@ def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
 
 
 def build_weather_series(lat, lon, start_date, end_date, north_offset_deg=0.0):
-    """Point d'entrée principal — orchestration réseau + assemblage. Retourne
-    (series, n_missing) : series prête pour BuildingWeatherPointSerializer,
+    """Point d'entrée « année réelle datée » — orchestration réseau + assemblage.
+    Retourne (series, n_missing) : series prête pour BuildingWeatherPointSerializer,
     n_missing = nombre d'heures ignorées faute de donnée (0 la plupart du temps)."""
     data = fetch_open_meteo_archive(lat, lon, start_date, end_date)
     return _assemble_weather_series(lat, lon, data, north_offset_deg=north_offset_deg)
+
+
+# ── PVGIS TMY (Lot S — année type) ───────────────────────────────────────────────
+
+PVGIS_TMY_URL = 'https://re.jrc.ec.europa.eu/api/v5_2/tmy'
+
+
+def _parse_pvgis_timestamp(ts):
+    """'YYYYMMDD:HHMM' (format PVGIS) -> datetime UTC. L'année encodée n'est PAS
+    une vraie année calendaire unique : une TMY assemble des mois issus d'années
+    source différentes (voir outputs.months_selected de la réponse) — sans
+    incidence ici, seuls le jour/mois/heure comptent pour la position solaire
+    (déclinaison ne dépend que du jour de l'année), et l'année encodée est de
+    toute façon une vraie année réelle (celle du mois effectivement échantillonné),
+    jamais une date invalide."""
+    date_part, time_part = ts.split(':')
+    year, month, day = int(date_part[0:4]), int(date_part[4:6]), int(date_part[6:8])
+    hour, minute = int(time_part[0:2]), int(time_part[2:4])
+    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+
+
+def fetch_pvgis_tmy(lat, lon):
+    """lat/lon (°). Retourne la réponse JSON brute (dict) de PVGIS TMY (JRC,
+    Commission européenne — gratuite, sans clé). Lève WeatherSourceError si la
+    zone n'est pas couverte — vérifié en réel : PVGIS renvoie le même message
+    générique « Location over the sea » aussi bien pour un point réellement en
+    mer que pour une zone polaire non couverte (Svalbard, pôle Sud) — ou en cas
+    d'erreur réseau. À charge de l'appelant de replier sur Open-Meteo Archive
+    (voir build_tmy_or_fallback_series), PVGIS ne fournissant aucune notion de
+    « repli » lui-même."""
+    params = {'lat': lat, 'lon': lon, 'outputformat': 'json'}
+    try:
+        resp = _get_with_retry(PVGIS_TMY_URL, params)
+    except requests.RequestException as exc:
+        raise WeatherSourceError(f"PVGIS TMY injoignable ({exc}).") from exc
+
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise WeatherSourceError(f"Réponse PVGIS TMY invalide ({exc}).") from exc
+
+    if resp.status_code != 200 or 'outputs' not in data:
+        reason = data.get('message', f"HTTP {resp.status_code}")
+        raise WeatherSourceError(f"PVGIS TMY : {reason}.")
+
+    return data
+
+
+def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
+    """Partie pure (testable sans réseau) : transforme la réponse JSON brute de
+    PVGIS TMY en liste de dicts {t_ext, sun_azimuth, sun_elevation, e_dir, e_dif}
+    — Gb(n) (irradiance directe normale au rayon) et Gd(h) (irradiance diffuse
+    horizontale) sont exactement les mêmes grandeurs physiques que
+    direct_normal_irradiance/diffuse_radiation d'Open-Meteo, seuls les noms de
+    champ diffèrent."""
+    hourly = ((data.get('outputs') or {}).get('tmy_hourly')) or []
+
+    if not hourly:
+        raise WeatherSourceError("PVGIS TMY n'a retourné aucune donnée horaire.")
+    if len(hourly) > MAX_WEATHER_POINTS:
+        raise WeatherSourceError(
+            f"{len(hourly)} heures reçues de PVGIS TMY, au-delà de la limite de {MAX_WEATHER_POINTS}."
+        )
+
+    series = []
+    n_missing = 0
+    for row in hourly:
+        ts = row.get('time(UTC)')
+        t_ext = row.get('T2m')
+        e_dir_raw = row.get('Gb(n)')
+        e_dif_raw = row.get('Gd(h)')
+        if ts is None or t_ext is None or e_dir_raw is None or e_dif_raw is None:
+            n_missing += 1
+            continue
+
+        dt_utc = _parse_pvgis_timestamp(ts)
+        series.append(_enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg))
+
+    if not series:
+        raise WeatherSourceError("Toutes les heures TMY ont une donnée manquante côté PVGIS.")
+
+    return series, n_missing
+
+
+def build_tmy_series(lat, lon, north_offset_deg=0.0):
+    """Point d'entrée « année type » seul (sans repli) — orchestration réseau +
+    assemblage PVGIS TMY. Lève WeatherSourceError si la zone n'est pas couverte
+    (voir fetch_pvgis_tmy) ; utiliser build_tmy_or_fallback_series pour un repli
+    automatique sur une année réelle Open-Meteo Archive."""
+    data = fetch_pvgis_tmy(lat, lon)
+    return _assemble_tmy_series(lat, lon, data, north_offset_deg=north_offset_deg)
+
+
+def build_tmy_or_fallback_series(lat, lon, fallback_start_date, fallback_end_date, north_offset_deg=0.0):
+    """Point d'entrée principal du Lot S : tente PVGIS TMY (année type,
+    statistiquement représentative) en priorité ; si la zone n'est pas couverte
+    (ou toute autre erreur PVGIS), replie automatiquement sur une année réelle
+    Open-Meteo Archive (fallback_start_date/fallback_end_date, 'YYYY-MM-DD' —
+    mêmes bornes que build_weather_series).
+
+    Retourne (series, n_missing, source, warning) : source = 'pvgis-tmy' |
+    'open-meteo-archive', warning non None uniquement en cas de repli — à afficher
+    à l'utilisateur (to_do.md, Lot S étape 3 : ne jamais laisser la source
+    ambiguë, un résultat en kWh/m²/an n'a pas le même sens statistique selon la
+    source)."""
+    try:
+        series, n_missing = build_tmy_series(lat, lon, north_offset_deg=north_offset_deg)
+        return series, n_missing, 'pvgis-tmy', None
+    except WeatherSourceError as exc:
+        series, n_missing = build_weather_series(
+            lat, lon, fallback_start_date, fallback_end_date, north_offset_deg=north_offset_deg,
+        )
+        warning = (
+            f"PVGIS TMY indisponible pour cette zone ({exc}) — repli sur l'historique réel "
+            "Open-Meteo Archive."
+        )
+        return series, n_missing, 'open-meteo-archive', warning

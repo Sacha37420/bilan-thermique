@@ -250,13 +250,20 @@ class GenerateBuildingEnvironmentRequestSerializer(serializers.Serializer):
 
 
 class WeatherFetchRequestSerializer(serializers.Serializer):
-    """POST /api/meteo/recuperer/ (Lot L) — voir api.weather_source.build_weather_series.
+    """POST /api/meteo/recuperer/ (Lot L : 'archive' ; Lot S : 'tmy') — voir
+    api.weather_source.build_weather_series / build_tmy_or_fallback_series.
     Endpoint autonome (pas rattaché à un bâtiment) : lat/lon peuvent être ceux du
     géoréférencement d'un bâtiment (repris côté client) ou saisis librement — la
     météo n'est jamais persistée sur un Building, seulement renvoyée au client."""
 
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
     lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
+    # 'archive' (défaut, comportement du Lot L) : historique réel entre start_date
+    # et end_date. 'tmy' (Lot S) : année type PVGIS, statistiquement représentative
+    # — start_date/end_date ne servent alors QUE de repli si PVGIS ne couvre pas la
+    # zone (toujours requis : le contrat reste le même quel que soit source, plutôt
+    # que de rendre les dates conditionnellement obligatoires).
+    source = serializers.ChoiceField(choices=['archive', 'tmy'], required=False, default='archive')
     start_date = serializers.DateField()
     end_date = serializers.DateField()
     # Cap real->local azimuth (Building.georef_north_offset_deg si le bâtiment

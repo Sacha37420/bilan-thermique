@@ -12,6 +12,7 @@ testé — sinon un bug dans ces fonctions se reproduirait à l'identique côté
 """
 
 import math
+from unittest import mock
 
 from django.test import SimpleTestCase
 
@@ -656,3 +657,123 @@ class WeatherSeriesAssemblyTest(SimpleTestCase):
         for point in series:
             s = serializers.BuildingWeatherPointSerializer(data=point)
             self.assertTrue(s.is_valid(), s.errors)
+
+
+class PvgisTimestampTest(SimpleTestCase):
+    """Lot S — weather_source._parse_pvgis_timestamp ('YYYYMMDD:HHMM', format PVGIS,
+    différent du format ISO d'Open-Meteo)."""
+
+    databases = []
+
+    def test_parses_midnight(self):
+        dt = weather_source._parse_pvgis_timestamp('20050101:0000')
+        self.assertEqual((dt.year, dt.month, dt.day, dt.hour, dt.minute), (2005, 1, 1, 0, 0))
+
+    def test_parses_non_midnight_time(self):
+        dt = weather_source._parse_pvgis_timestamp('20081215:1430')
+        self.assertEqual((dt.year, dt.month, dt.day, dt.hour, dt.minute), (2008, 12, 15, 14, 30))
+
+
+class TmySeriesAssemblyTest(SimpleTestCase):
+    """Lot S — weather_source._assemble_tmy_series, partie pure (pas de réseau :
+    prend directement une réponse PVGIS TMY synthétique, même format que la vraie
+    API vérifiée en réel — voir project_bilan_thermique.md). Gb(n)/Gd(h) sont les
+    mêmes grandeurs physiques que direct_normal_irradiance/diffuse_radiation
+    d'Open-Meteo (irradiance directe normale au rayon / diffuse horizontale), donc
+    les mêmes tests de clamping/heures manquantes que WeatherSeriesAssemblyTest
+    s'appliquent, juste avec le format brut PVGIS en entrée."""
+
+    databases = []
+
+    def test_assembles_tmy_series_with_correct_shape_and_clamping(self):
+        data = {
+            'outputs': {
+                'tmy_hourly': [
+                    {'time(UTC)': '20050621:1000', 'T2m': 20.0, 'Gb(n)': 600.0, 'Gd(h)': 100.0},
+                    {'time(UTC)': '20060215:1200', 'T2m': 500.0, 'Gb(n)': 5000.0, 'Gd(h)': 5000.0},
+                    {'time(UTC)': '20081201:0000', 'T2m': -500.0, 'Gb(n)': -10.0, 'Gd(h)': -10.0},
+                ],
+            },
+        }
+        series, n_missing = weather_source._assemble_tmy_series(48.8566, 2.3522, data)
+        self.assertEqual(len(series), 3)
+        self.assertEqual(n_missing, 0)
+        self.assertEqual(series[1]['t_ext'], weather_source.T_EXT_MAX)
+        self.assertEqual(series[2]['t_ext'], weather_source.T_EXT_MIN)
+        self.assertEqual(series[1]['e_dir'], weather_source.E_DIR_MAX)
+        self.assertEqual(series[2]['e_dir'], 0.0)
+        for point in series:
+            self.assertTrue(0.0 <= point['sun_azimuth'] < 360.0)
+            self.assertTrue(-90.0 <= point['sun_elevation'] <= 90.0)
+
+    def test_skips_hours_with_missing_pvgis_data(self):
+        data = {
+            'outputs': {
+                'tmy_hourly': [
+                    {'time(UTC)': '20050621:1000', 'T2m': 20.0, 'Gb(n)': 600.0, 'Gd(h)': 100.0},
+                    {'time(UTC)': '20050621:1100', 'T2m': None, 'Gb(n)': 600.0, 'Gd(h)': 100.0},
+                ],
+            },
+        }
+        series, n_missing = weather_source._assemble_tmy_series(48.8566, 2.3522, data)
+        self.assertEqual(len(series), 1)
+        self.assertEqual(n_missing, 1)
+
+    def test_no_hourly_data_raises(self):
+        with self.assertRaises(weather_source.WeatherSourceError):
+            weather_source._assemble_tmy_series(48.8566, 2.3522, {'outputs': {'tmy_hourly': []}})
+
+    def test_series_points_validate_against_public_serializer(self):
+        data = {
+            'outputs': {
+                'tmy_hourly': [
+                    {'time(UTC)': f'20050621:{h:02d}00', 'T2m': 15.0 + h,
+                     'Gb(n)': 0.0 if h < 6 or h > 20 else 500.0, 'Gd(h)': 0.0 if h < 6 or h > 20 else 80.0}
+                    for h in range(24)
+                ],
+            },
+        }
+        series, _ = weather_source._assemble_tmy_series(48.8566, 2.3522, data, north_offset_deg=37.0)
+        for point in series:
+            s = serializers.BuildingWeatherPointSerializer(data=point)
+            self.assertTrue(s.is_valid(), s.errors)
+
+
+class TmyFallbackTest(SimpleTestCase):
+    """Lot S — weather_source.build_tmy_or_fallback_series doit replier sur
+    Open-Meteo Archive quand PVGIS échoue (zone non couverte ou autre erreur), et
+    retourner explicitement quelle source a produit le résultat (to_do.md, étape 3 :
+    ne jamais laisser la source ambiguë). build_tmy_series/build_weather_series
+    mockées : ce test vérifie le BRANCHEMENT, pas le réseau (déjà couvert par les
+    tests d'assemblage ci-dessus + vérification en réel, voir mémoire projet)."""
+
+    databases = []
+
+    def test_uses_pvgis_when_available(self):
+        fake_series = [{'t_ext': 10.0}]
+        with mock.patch.object(weather_source, 'build_tmy_series', return_value=(fake_series, 0)) as m_tmy, \
+                mock.patch.object(weather_source, 'build_weather_series') as m_archive:
+            series, n_missing, source, warning = weather_source.build_tmy_or_fallback_series(
+                48.8566, 2.3522, '2023-01-01', '2023-01-02',
+            )
+        self.assertEqual(series, fake_series)
+        self.assertEqual(n_missing, 0)
+        self.assertEqual(source, 'pvgis-tmy')
+        self.assertIsNone(warning)
+        m_tmy.assert_called_once()
+        m_archive.assert_not_called()
+
+    def test_falls_back_to_archive_when_pvgis_unavailable(self):
+        fake_series = [{'t_ext': 5.0}]
+        with mock.patch.object(
+            weather_source, 'build_tmy_series',
+            side_effect=weather_source.WeatherSourceError("PVGIS TMY : Location over the sea."),
+        ), mock.patch.object(weather_source, 'build_weather_series', return_value=(fake_series, 0)) as m_archive:
+            series, n_missing, source, warning = weather_source.build_tmy_or_fallback_series(
+                0.0, -160.0, '2023-01-01', '2023-01-02', north_offset_deg=15.0,
+            )
+        self.assertEqual(series, fake_series)
+        self.assertEqual(source, 'open-meteo-archive')
+        self.assertIsNotNone(warning)
+        self.assertIn('over the sea', warning)
+        m_archive.assert_called_once_with(0.0, -160.0, '2023-01-01', '2023-01-02', north_offset_deg=15.0)
