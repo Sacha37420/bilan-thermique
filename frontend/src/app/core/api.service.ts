@@ -110,4 +110,10 @@ export class ApiService {
   runBuildingCalcul(buildingId: number, payload: unknown): Observable<unknown> {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/calcul-3d/`, payload);
   }
+
+  fetchWeather(payload: {
+    lat: number; lon: number; start_date: string; end_date: string; north_offset_deg?: number;
+  }): Observable<unknown> {
+    return this.http.post(`${this.base}/api/meteo/recuperer/`, payload);
+  }
 }

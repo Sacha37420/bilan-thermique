@@ -15,7 +15,7 @@ import math
 
 from django.test import SimpleTestCase
 
-from . import building_solver, geometry, shadow, solver
+from . import building_solver, geometry, serializers, shadow, solver, weather_source
 
 DT_SECONDS = 3600.0
 
@@ -472,3 +472,187 @@ class ShadowOcclusionTest(SimpleTestCase):
         zenith_index = grid['elevations_deg'].index(90.0)
         self.assertTrue(all(grid['per_triangle'][0][ai][zenith_index] == 0
                              for ai in range(len(grid['azimuths_deg']))))
+
+
+def _angle_diff_deg(a, b):
+    """Écart angulaire signé minimal a-b, dans [-180, 180] — évite les faux
+    échecs 0 vs 360 quand on compare des azimuths modulo 360."""
+    return (a - b + 180.0) % 360.0 - 180.0
+
+
+class SolarEphemerisTest(SimpleTestCase):
+    """Lot L — déclinaison solaire et équation du temps (weather_source._declination_deg/
+    _equation_of_time_min, formules de Spencer 1971). Oracle : bornes et faits
+    astronomiques indépendants de la formule elle-même (inclinaison de l'axe terrestre
+    ≈23,44°, bien établie), PAS des valeurs de référence recopiées d'une autre
+    calculatrice solaire — pour ne pas simplement retester la même formule sous un
+    autre nom."""
+
+    databases = []
+
+    def test_declination_never_exceeds_axial_tilt(self):
+        for n in range(1, 366):
+            gamma = 2.0 * math.pi * (n - 1) / 365.0
+            self.assertLessEqual(abs(weather_source._declination_deg(gamma)), 23.6)
+
+    def test_declination_sign_matches_hemisphere_season(self):
+        # ~21 juin (jour 172) : été hémisphère nord, déclinaison nettement positive.
+        gamma_june = 2.0 * math.pi * (172 - 1) / 365.0
+        self.assertGreater(weather_source._declination_deg(gamma_june), 20.0)
+        # ~21 décembre (jour 355) : hiver hémisphère nord, déclinaison nettement négative.
+        gamma_dec = 2.0 * math.pi * (355 - 1) / 365.0
+        self.assertLess(weather_source._declination_deg(gamma_dec), -20.0)
+
+    def test_equation_of_time_bounded(self):
+        # Écart connu entre temps solaire vrai et temps solaire moyen : quelques
+        # dizaines de minutes au plus sur toute l'année (borne large et sûre,
+        # pas une valeur de référence précise à une date donnée).
+        for n in range(1, 366):
+            gamma = 2.0 * math.pi * (n - 1) / 365.0
+            self.assertLess(abs(weather_source._equation_of_time_min(gamma)), 20.0)
+
+
+class SolarElevationAzimuthTest(SimpleTestCase):
+    """Lot L — weather_source._elevation_azimuth (cœur géométrique, sans notion de
+    date/heure). Oracle : identités algébriques dérivées à la main à des angles
+    horaires remarquables (voir docstring de chaque test), jamais un second appel à
+    la fonction testée."""
+
+    databases = []
+
+    def test_solar_noon_azimuth_and_elevation_hand_derived(self):
+        # A l'angle horaire 0 (midi solaire vrai), la composante Est du vecteur
+        # soleil est nulle par construction (-cos(decl)*sin(0)=0) : l'azimuth ne
+        # peut valoir que 0 ou 180° selon le signe de (declinaison-latitude), et
+        # l'elevation vaut exactement 90-|latitude-declinaison| — deux identités
+        # dérivées à la main (voir weather_source._elevation_azimuth, pas une
+        # resolution numérique).
+        cases = [
+            (48.8566, 10.0),   # Paris, decl < lat -> soleil au sud
+            (10.0, 20.0),      # decl > lat -> soleil au nord
+            (-33.8688, -10.0),  # hémisphère sud, decl > lat -> soleil au nord
+        ]
+        for lat, decl in cases:
+            azimuth, elevation = weather_source._elevation_azimuth(lat, decl, 0.0)
+            expected_elevation = 90.0 - abs(lat - decl)
+            expected_azimuth = 180.0 if decl < lat else 0.0
+            self.assertAlmostEqual(elevation, expected_elevation, places=6)
+            self.assertAlmostEqual(azimuth, expected_azimuth, places=6)
+
+    def test_equinox_sunrise_sunset_due_east_west(self):
+        # A declinaison nulle (equinoxe), le lever (HA=-90) et le coucher (HA=+90)
+        # se produisent exactement a l'horizon plein est / plein ouest, a N'IMPORTE
+        # QUELLE latitude — fait astronomique elementaire independant de toute
+        # formule de position solaire.
+        for lat in (-60.0, -23.5, 0.0, 23.5, 60.0, 80.0):
+            az_rise, el_rise = weather_source._elevation_azimuth(lat, 0.0, -90.0)
+            az_set, el_set = weather_source._elevation_azimuth(lat, 0.0, 90.0)
+            self.assertAlmostEqual(el_rise, 0.0, places=6)
+            self.assertAlmostEqual(el_set, 0.0, places=6)
+            self.assertAlmostEqual(az_rise, 90.0, places=6)
+            self.assertAlmostEqual(az_set, 270.0, places=6)
+
+    def test_time_symmetry_around_solar_noon(self):
+        # L'elevation ne depend de H qu'au travers de cos(H) (fonction paire) :
+        # elevation(H) == elevation(-H) exactement. L'azimuth, lui, doit etre le
+        # miroir : azimuth(-H) == 360 - azimuth(H). Ces deux identites decoulent de
+        # la structure algebrique de _elevation_azimuth (Est est impaire en H, Nord
+        # est paire), independamment des valeurs numeriques choisies ici.
+        cases = [(48.8566, 15.0, 37.0), (-10.0, -5.0, 82.0), (60.0, -20.0, 150.0)]
+        for lat, decl, ha in cases:
+            az_pos, el_pos = weather_source._elevation_azimuth(lat, decl, ha)
+            az_neg, el_neg = weather_source._elevation_azimuth(lat, decl, -ha)
+            self.assertAlmostEqual(el_pos, el_neg, places=9)
+            self.assertAlmostEqual(_angle_diff_deg(az_neg, 360.0 - az_pos), 0.0, places=6)
+
+
+class LocalAzimuthRotationTest(SimpleTestCase):
+    """Lot L, point d'attention critique du to_do.md — weather_source.to_local_azimuth
+    doit appliquer EXACTEMENT la même rotation que geodata._rotate_xy (même
+    convention Building.georef_north_offset_deg), pour que météo et géométrie restent
+    dans le même repère. Oracle : géométrie vectorielle dérivée à la main, pas un
+    second appel à _rotate_xy (qui pourrait partager le même bug de signe)."""
+
+    databases = []
+
+    def test_zero_offset_is_identity(self):
+        for az in (0.0, 45.0, 90.0, 180.0, 270.0, 359.9):
+            self.assertAlmostEqual(
+                _angle_diff_deg(weather_source.to_local_azimuth(az, 0.0), az), 0.0, places=6,
+            )
+
+    def test_ninety_degree_offset_rotates_south_to_local_east_axis(self):
+        # Si l'axe +Y local pointe le Est reel (offset=90), alors l'axe +X local
+        # (90° horaire apres +Y, geometry.py) pointe le Sud reel : un soleil reel
+        # plein sud (azimuth reel 180°) doit donc avoir un azimuth LOCAL de 90°.
+        self.assertAlmostEqual(weather_source.to_local_azimuth(180.0, 90.0), 90.0, places=6)
+
+    def test_ninety_degree_offset_rotates_north_to_local_negative_x(self):
+        # Meme configuration : le Nord reel (azimuth reel 0°) devient l'axe -X
+        # local, soit un azimuth local de 270°.
+        self.assertAlmostEqual(weather_source.to_local_azimuth(0.0, 90.0), 270.0, places=6)
+
+
+class WeatherSeriesAssemblyTest(SimpleTestCase):
+    """Lot L — weather_source._assemble_weather_series, partie pure (pas de réseau :
+    prend directement une réponse Open-Meteo Archive synthétique, même format que la
+    vraie API vérifiée en réel — voir project_bilan_thermique.md)."""
+
+    databases = []
+
+    def test_assembles_series_with_correct_shape_and_clamping(self):
+        data = {
+            'hourly': {
+                'time': ['2023-06-21T10:00', '2023-06-21T11:00', '2023-06-21T12:00'],
+                'temperature_2m': [20.0, 500.0, -500.0],           # hors bornes exprès
+                'direct_normal_irradiance': [600.0, 5000.0, -10.0],  # hors bornes exprès
+                'diffuse_radiation': [100.0, 5000.0, -10.0],         # hors bornes exprès
+            },
+        }
+        series, n_missing = weather_source._assemble_weather_series(48.8566, 2.3522, data)
+        self.assertEqual(len(series), 3)
+        self.assertEqual(n_missing, 0)
+        self.assertEqual(series[1]['t_ext'], weather_source.T_EXT_MAX)
+        self.assertEqual(series[2]['t_ext'], weather_source.T_EXT_MIN)
+        self.assertEqual(series[1]['e_dir'], weather_source.E_DIR_MAX)
+        self.assertEqual(series[2]['e_dir'], 0.0)
+        self.assertEqual(series[1]['e_dif'], weather_source.E_DIF_MAX)
+        self.assertEqual(series[2]['e_dif'], 0.0)
+        for point in series:
+            self.assertTrue(0.0 <= point['sun_azimuth'] < 360.0)
+            self.assertTrue(-90.0 <= point['sun_elevation'] <= 90.0)
+
+    def test_skips_hours_with_missing_data(self):
+        data = {
+            'hourly': {
+                'time': ['2023-06-21T10:00', '2023-06-21T11:00'],
+                'temperature_2m': [20.0, None],
+                'direct_normal_irradiance': [600.0, 500.0],
+                'diffuse_radiation': [100.0, 90.0],
+            },
+        }
+        series, n_missing = weather_source._assemble_weather_series(48.8566, 2.3522, data)
+        self.assertEqual(len(series), 1)
+        self.assertEqual(n_missing, 1)
+
+    def test_no_hourly_data_raises(self):
+        with self.assertRaises(weather_source.WeatherSourceError):
+            weather_source._assemble_weather_series(48.8566, 2.3522, {'hourly': {'time': []}})
+
+    def test_series_points_validate_against_public_serializer(self):
+        # Integration avec le contrat public de l'app : chaque point assemblé doit
+        # etre accepté par BuildingWeatherPointSerializer (le meme serializer que
+        # celui utilisé au moment du calcul), pas seulement "dans les bornes"
+        # vérifiées à la main ci-dessus.
+        data = {
+            'hourly': {
+                'time': [f'2023-06-21T{h:02d}:00' for h in range(24)],
+                'temperature_2m': [15.0 + h for h in range(24)],
+                'direct_normal_irradiance': [0.0 if h < 6 or h > 20 else 500.0 for h in range(24)],
+                'diffuse_radiation': [0.0 if h < 6 or h > 20 else 80.0 for h in range(24)],
+            },
+        }
+        series, _ = weather_source._assemble_weather_series(48.8566, 2.3522, data, north_offset_deg=37.0)
+        for point in series:
+            s = serializers.BuildingWeatherPointSerializer(data=point)
+            self.assertTrue(s.is_valid(), s.errors)

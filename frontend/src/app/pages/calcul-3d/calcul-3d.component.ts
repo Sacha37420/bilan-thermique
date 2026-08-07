@@ -121,6 +121,22 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   weatherError = signal('');
   constWeather = { t_ext: 5, sun_azimuth: 180, sun_elevation: 0, e_dir: 0, e_dif: 0, hours: 200 };
 
+  // ── Météo automatique (Lot L — Open-Meteo Archive + position solaire réelle) ──
+  weatherFetchLat: number | null = null;
+  weatherFetchLon: number | null = null;
+  weatherFetchNorthOffset = 0;
+  weatherFetchStart = this.isoDateDaysAgo(7);
+  weatherFetchEnd = this.isoDateDaysAgo(0);
+  weatherJob = signal<Job | null>(null);
+  private weatherPollHandle?: ReturnType<typeof setInterval>;
+  weatherFetchError = signal('');
+
+  private isoDateDaysAgo(days: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+  }
+
   // ── Job / résultats ───────────────────────────────────────────────────
   job = signal<Job | null>(null);
   private pollHandle?: ReturnType<typeof setInterval>;
@@ -137,6 +153,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopPoll();
+    this.stopWeatherPoll();
   }
 
   onBuildingChange(): void {
@@ -146,8 +163,17 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     this.loadingBuilding.set(true);
     this.api.getBuilding(this.selectedBuildingId).subscribe({
       next: (b) => {
-        this.currentBuilding.set(b as Building);
+        const building = b as Building;
+        this.currentBuilding.set(building);
         this.loadingBuilding.set(false);
+        // Pré-remplit le panneau météo auto depuis le géoréférencement du bâtiment
+        // s'il existe — reste modifiable ensuite (bâtiment non géoréférencé, ou
+        // météo d'un autre point que le bâtiment lui-même).
+        if (building.georef_lat !== null && building.georef_lon !== null) {
+          this.weatherFetchLat = building.georef_lat;
+          this.weatherFetchLon = building.georef_lon;
+          this.weatherFetchNorthOffset = building.georef_north_offset_deg;
+        }
       },
       error: () => {
         this.loadingBuilding.set(false);
@@ -199,6 +225,61 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     const row = [w.t_ext, w.sun_azimuth, w.sun_elevation, w.e_dir, w.e_dif].join(',');
     this.weatherRaw = Array(Math.max(1, Math.round(w.hours))).fill(row).join('\n');
     this.parseWeather();
+  }
+
+  // ── Météo automatique (Lot L) ──────────────────────────────────────────
+  get canFetchWeather(): boolean {
+    return this.weatherFetchLat !== null && this.weatherFetchLon !== null &&
+      !!this.weatherFetchStart && !!this.weatherFetchEnd &&
+      (this.weatherJob() === null || this.weatherJob()!.status === 'DONE' || this.weatherJob()!.status === 'ERROR');
+  }
+
+  fetchWeatherFromOpenMeteo(): void {
+    if (!this.canFetchWeather || this.weatherFetchLat === null || this.weatherFetchLon === null) return;
+    this.weatherFetchError.set('');
+    this.api.fetchWeather({
+      lat: this.weatherFetchLat, lon: this.weatherFetchLon,
+      start_date: this.weatherFetchStart, end_date: this.weatherFetchEnd,
+      north_offset_deg: this.weatherFetchNorthOffset,
+    }).subscribe({
+      next: (res) => {
+        this.weatherJob.set(res as Job);
+        this.startWeatherPoll();
+      },
+      error: (err) => {
+        this.weatherFetchError.set(err?.error?.detail ?? err?.error?.non_field_errors?.[0] ?? "Échec du lancement de la récupération.");
+      },
+    });
+  }
+
+  private startWeatherPoll(): void {
+    this.stopWeatherPoll();
+    const job = this.weatherJob();
+    if (!job) return;
+    this.weatherPollHandle = setInterval(() => {
+      this.api.getJob(job.id).subscribe({
+        next: (res) => {
+          const updated = res as Job;
+          this.weatherJob.set(updated);
+          if (updated.status === 'DONE' || updated.status === 'ERROR') {
+            this.stopWeatherPoll();
+            if (updated.status === 'DONE') {
+              const points = (updated.result as unknown as { weather: WeatherPoint[] }).weather;
+              this.weatherRaw = points
+                .map(p => [p.t_ext, p.sun_azimuth, p.sun_elevation, p.e_dir, p.e_dif].join(','))
+                .join('\n');
+              this.parseWeather();
+            } else {
+              this.weatherFetchError.set(updated.message || 'Échec de la récupération.');
+            }
+          }
+        },
+      });
+    }, POLL_INTERVAL_MS);
+  }
+
+  private stopWeatherPoll(): void {
+    if (this.weatherPollHandle) { clearInterval(this.weatherPollHandle); this.weatherPollHandle = undefined; }
   }
 
   // ── Lancement + suivi ──────────────────────────────────────────────

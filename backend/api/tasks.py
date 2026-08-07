@@ -5,6 +5,7 @@ from .models import Job, Building, Environment, ParoiModel
 from . import shadow
 from . import building_solver
 from . import geodata
+from . import weather_source
 
 
 @shared_task(bind=True)
@@ -189,6 +190,34 @@ def generate_environment_for_building(self, job_id, building_id, radius_m):
                     f"{n_triangles} triangles (IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']}).",
         )
     except geodata.GeodataError as exc:
+        job.set_state(status=Job.ERROR, message=str(exc))
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=str(exc))
+
+
+@shared_task(bind=True)
+def fetch_weather(self, job_id, params):
+    """Lot L — récupère une série météo horaire réelle (Open-Meteo Archive) +
+    position solaire calculée, voir api.weather_source.build_weather_series. Ne
+    persiste rien sur un Building — job.result porte directement la série, le
+    frontend la récupère et la met dans son propre état local (calcul-3d.component)."""
+    job = Job.objects.get(pk=job_id)
+    job.celery_task_id = self.request.id
+    job.save(update_fields=['celery_task_id'])
+
+    try:
+        job.set_state(status=Job.RUNNING, progress=10, message="Interrogation d'Open-Meteo Archive…")
+        series, n_missing = weather_source.build_weather_series(
+            params['lat'], params['lon'], str(params['start_date']), str(params['end_date']),
+            north_offset_deg=params.get('north_offset_deg', 0.0),
+        )
+        job.result = {'weather': series, 'n_hours': len(series), 'n_missing': n_missing, 'source': 'open-meteo-archive'}
+        job.save(update_fields=['result'])
+        message = f"{len(series)} heure(s) récupérée(s) (Open-Meteo Archive)."
+        if n_missing:
+            message += f" {n_missing} heure(s) ignorée(s), donnée manquante."
+        job.set_state(status=Job.DONE, progress=100, message=message)
+    except weather_source.WeatherSourceError as exc:
         job.set_state(status=Job.ERROR, message=str(exc))
     except Exception as exc:
         job.set_state(status=Job.ERROR, message=str(exc))

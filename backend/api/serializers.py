@@ -249,6 +249,29 @@ class GenerateBuildingEnvironmentRequestSerializer(serializers.Serializer):
     radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
 
 
+class WeatherFetchRequestSerializer(serializers.Serializer):
+    """POST /api/meteo/recuperer/ (Lot L) — voir api.weather_source.build_weather_series.
+    Endpoint autonome (pas rattaché à un bâtiment) : lat/lon peuvent être ceux du
+    géoréférencement d'un bâtiment (repris côté client) ou saisis librement — la
+    météo n'est jamais persistée sur un Building, seulement renvoyée au client."""
+
+    lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
+    lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    # Cap real->local azimuth (Building.georef_north_offset_deg si le bâtiment
+    # d'origine est géoréférencé) — 0.0 = pas de rotation (comportement par défaut,
+    # correct pour un bâtiment non géoréférencé).
+    north_offset_deg = serializers.FloatField(required=False, default=0.0)
+
+    def validate(self, data):
+        if data['start_date'] > data['end_date']:
+            raise serializers.ValidationError("start_date doit être antérieure ou égale à end_date.")
+        if (data['end_date'] - data['start_date']).days > 366:
+            raise serializers.ValidationError("Période limitée à 366 jours (un an d'heures au plus).")
+        return data
+
+
 class WeatherPointSerializer(serializers.Serializer):
     t_ext = serializers.FloatField(min_value=-60.0, max_value=60.0)
     h_s = serializers.FloatField(min_value=-90.0, max_value=90.0)

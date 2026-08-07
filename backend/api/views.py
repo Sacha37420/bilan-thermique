@@ -8,7 +8,7 @@ from .serializers import (
     DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer, ParoiModelSerializer,
     BuildingSerializer, EnvironmentSerializer, JobSerializer, BuildingCalculRequestSerializer,
     RefineMeshRequestSerializer, GenerateEnvironmentRequestSerializer,
-    GenerateBuildingEnvironmentRequestSerializer,
+    GenerateBuildingEnvironmentRequestSerializer, WeatherFetchRequestSerializer,
 )
 from . import solver
 from . import tasks
@@ -144,6 +144,31 @@ class GenerateEnvironmentView(APIView):
 
         job = Job.objects.create(kind='generate_environment', params=serializer.validated_data)
         tasks.generate_environment.delay(job.id, serializer.validated_data)
+        return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+
+
+class FetchWeatherView(APIView):
+    """
+    POST /api/meteo/recuperer/  {lat, lon, start_date, end_date, north_offset_deg?}
+    Lot L — récupère en tâche de fond une série météo horaire réelle (Open-Meteo
+    Archive) + position solaire calculée (api.weather_source), directement dans la
+    convention azimuth interne de l'app. Endpoint autonome (pas de <id> bâtiment) :
+    la météo n'est jamais persistée côté serveur, seulement renvoyée via job.result
+    pour que le frontend la reprenne (page Calcul 3D).
+    """
+
+    def post(self, request):
+        serializer = WeatherFetchRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # dates -> ISO string : JSONField (Job.params) et la sérialisation Celery
+        # (JSON) ne savent pas encoder un datetime.date brut.
+        params = dict(serializer.validated_data)
+        params['start_date'] = params['start_date'].isoformat()
+        params['end_date'] = params['end_date'].isoformat()
+
+        job = Job.objects.create(kind='fetch_weather', params=params)
+        tasks.fetch_weather.delay(job.id, params)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 

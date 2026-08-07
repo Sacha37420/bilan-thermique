@@ -191,7 +191,38 @@
       </p>
 
       <div class="const-weather">
-        <p class="const-weather-title">Météo constante</p>
+        <p class="const-weather-title">Récupérer depuis Open-Meteo (données réelles)</p>
+        <p class="hint">
+          Historique météo réel (Open-Meteo Archive) + position solaire réelle calculée pour la
+          période — seule source ici représentant un vrai relevé, à privilégier pour un bâtiment
+          réel. Latitude/longitude pré-remplies depuis le géoréférencement du bâtiment si disponible
+          (page Bâtiment) ; la rotation Nord réoriente l'azimuth solaire dans le repère local si le
+          maillage ne pointe pas le nord vrai.
+        </p>
+        <div class="field-grid const-weather-grid">
+          <label><span>Latitude</span><input type="number" step="0.0001" min="-90" max="90" [(ngModel)]="weatherFetchLat" name="wfLat" /></label>
+          <label><span>Longitude</span><input type="number" step="0.0001" min="-180" max="180" [(ngModel)]="weatherFetchLon" name="wfLon" /></label>
+          <label><span>Rotation nord (°)</span><input type="number" step="1" [(ngModel)]="weatherFetchNorthOffset" name="wfNorthOffset" /></label>
+          <label><span>Du</span><input type="date" [(ngModel)]="weatherFetchStart" name="wfStart" /></label>
+          <label><span>Au</span><input type="date" [(ngModel)]="weatherFetchEnd" name="wfEnd" /></label>
+        </div>
+        <button type="button" class="btn-secondary" [disabled]="!canFetchWeather" (click)="fetchWeatherFromOpenMeteo()">
+          @if (weatherJob() && weatherJob()!.status !== 'DONE' && weatherJob()!.status !== 'ERROR') {
+            Récupération en cours…
+          } @else {
+            Récupérer depuis Open-Meteo
+          }
+        </button>
+        @if (weatherJob(); as wj) {
+          <p class="hint">{{ wj.message }}</p>
+        }
+        @if (weatherFetchError()) {
+          <p class="field-error">{{ weatherFetchError() }}</p>
+        }
+      </div>
+
+      <div class="const-weather">
+        <p class="const-weather-title">Météo constante <span class="hint">— donnée de démonstration, pas un relevé réel</span></p>
         <div class="field-grid const-weather-grid">
           <label><span>T_ext (°C)</span><input type="number" step="0.5" [(ngModel)]="constWeather.t_ext" name="cwTExt" /></label>
           <label><span>Azimuth (°)</span><input type="number" step="1" [(ngModel)]="constWeather.sun_azimuth" name="cwAz" /></label>
@@ -207,12 +238,18 @@
         placeholder="5.2,180,12,300,60&#10;4.8,190,18,410,70&#10;..."></textarea>
 
       <div class="weather-actions">
-        <button type="button" class="btn-secondary" (click)="loadExample(48)">Charger un exemple (48 h)</button>
-        <button type="button" class="btn-secondary" (click)="loadExample(168)">Charger un exemple (7 j)</button>
+        <button type="button" class="btn-secondary" (click)="loadExample(48)">Charger un exemple de démo (48 h)</button>
+        <button type="button" class="btn-secondary" (click)="loadExample(168)">Charger un exemple de démo (7 j)</button>
         @if (weather().length > 0) {
           <span class="weather-count">{{ weather().length }} heure(s) chargée(s)</span>
         }
       </div>
+      <p class="hint">
+        Les exemples et la météo constante sont des données de <strong>démonstration</strong>
+        (sinusoïde synthétique / valeur figée) — utiles pour tester rapidement l'outil, mais pas
+        représentatifs d'un vrai climat. Pour un bilan sur un bâtiment réel, utiliser la
+        récupération Open-Meteo ci-dessus.
+      </p>
       @if (weatherError()) {
         <p class="field-error">{{ weatherError() }}</p>
       }
