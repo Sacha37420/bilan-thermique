@@ -5,6 +5,7 @@ import { DecimalPipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
 import { Building, Job } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
+import { VENTILATION_PROFILES } from '../../core/ventilation-profiles';
 
 interface BuildingSummary {
   id: number;
@@ -81,6 +82,24 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   tMax = 26;
   tInit = 15;
   shadowMode: 'precomputed' | 'realtime' = 'precomputed';
+
+  // ── Renouvellement d'air (modes 'free'/'thermostat' uniquement) ──────
+  ventilationProfiles = VENTILATION_PROFILES;
+  selectedVentProfileId: string | null = null;
+  volumeM3 = 250;
+  debitVentM3h = 0;
+  etaRecupVent = 0;
+
+  applyVentProfile(): void {
+    const profile = this.ventilationProfiles.find((p) => p.id === this.selectedVentProfileId);
+    if (!profile) return;
+    this.debitVentM3h = Math.round(profile.tauxRenouvellementVolH * this.volumeM3 * 10) / 10;
+    this.etaRecupVent = profile.etaRecup;
+  }
+
+  ventProfileDescription(): string {
+    return this.ventilationProfiles.find((p) => p.id === this.selectedVentProfileId)?.description ?? '';
+  }
 
   // ── Météo ──────────────────────────────────────────────────────────
   weather = signal<WeatherPoint[]>([]);
@@ -182,7 +201,11 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
 
     const interior: Record<string, unknown> = { mode: this.interiorMode, h_i: this.hI };
     if (this.interiorMode === 'imposed') interior['t_int'] = this.tInt;
-    if (this.interiorMode === 'free' || this.interiorMode === 'thermostat') interior['c_air_int'] = this.cAirInt;
+    if (this.interiorMode === 'free' || this.interiorMode === 'thermostat') {
+      interior['c_air_int'] = this.cAirInt;
+      interior['debit_vent_m3h'] = this.debitVentM3h;
+      interior['eta_recup_vent'] = this.etaRecupVent;
+    }
     if (this.interiorMode === 'thermostat') { interior['t_min'] = this.tMin; interior['t_max'] = this.tMax; }
 
     const payload = {

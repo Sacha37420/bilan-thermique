@@ -122,6 +122,45 @@
           </label>
         }
       </div>
+
+      @if (interiorMode === 'free' || interiorMode === 'thermostat') {
+        <h3>Renouvellement d'air</h3>
+        <p class="hint">
+          Conductance directe entre l'air intérieur et l'extérieur, en plus de ce qui passe par les
+          parois — infiltrations et/ou VMC. Un profil ci-dessous ne fait que pré-remplir le débit et
+          le rendement de récupération à partir du volume du bâtiment ; les deux champs restent
+          modifiables ensuite.
+        </p>
+        <div class="field-grid">
+          <label>
+            <span>Volume du bâtiment (m³)</span>
+            <input type="number" step="1" min="0" [(ngModel)]="volumeM3" name="volumeM3" />
+          </label>
+          <label>
+            <span>Profil de ventilation</span>
+            <select [(ngModel)]="selectedVentProfileId" name="selectedVentProfileId" (ngModelChange)="applyVentProfile()">
+              <option [ngValue]="null">— choisir —</option>
+              @for (p of ventilationProfiles; track p.id) {
+                <option [ngValue]="p.id">{{ p.label }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        @if (selectedVentProfileId) {
+          <p class="hint">{{ ventProfileDescription() }}</p>
+        }
+        <div class="field-grid">
+          <label>
+            <span>Débit de ventilation (m³/h)</span>
+            <input type="number" step="1" min="0" [(ngModel)]="debitVentM3h" name="debitVentM3h" />
+          </label>
+          <label>
+            <span>Rendement de récupération (0-1)</span>
+            <input type="number" step="0.05" min="0" max="0.95" [(ngModel)]="etaRecupVent" name="etaRecupVent" />
+            <small>0 pour une VMC simple flux ou une ventilation naturelle ; ~0,7-0,9 pour une VMC double flux.</small>
+          </label>
+        </div>
+      }
     </section>
 
     <section class="form-card">

@@ -258,6 +258,12 @@ class InteriorSerializer(serializers.Serializer):
     h_i = serializers.FloatField(min_value=0.1, max_value=100.0)
     t_int = serializers.FloatField(required=False, min_value=-30.0, max_value=50.0)
     c_air_int = serializers.FloatField(required=False, min_value=100.0, max_value=10_000_000.0)
+    # Renouvellement d'air (mode 'free' uniquement — ignoré en 'imposed', voir
+    # solver.py) : conductance déjà ramenée au m² de la paroi étudiée, comme
+    # c_air_int — PAS un débit réel, le 1D ne connaît pas de volume de
+    # bâtiment (voir BuildingInteriorSerializer.debit_vent_m3h côté 3D pour
+    # l'équivalent en grandeur physique réelle).
+    g_vent = serializers.FloatField(required=False, min_value=0.0, max_value=100.0, default=0.0)
 
     def validate(self, data):
         if data['mode'] == 'imposed' and 't_int' not in data:
@@ -292,6 +298,12 @@ class BuildingInteriorSerializer(serializers.Serializer):
     c_air_int = serializers.FloatField(required=False, min_value=100.0, max_value=1_000_000_000.0)
     t_min = serializers.FloatField(required=False, min_value=-30.0, max_value=50.0)
     t_max = serializers.FloatField(required=False, min_value=-30.0, max_value=50.0)
+    # Renouvellement d'air (modes 'free'/'thermostat' — ignoré en 'imposed',
+    # voir building_solver.py) : grandeurs physiques réelles pour tout le
+    # bâtiment, converties en conductance absolue g_vent = 0,34 * debit_vent_m3h
+    # * (1 - eta_recup_vent) et ajoutée une seule fois au nœud d'air global.
+    debit_vent_m3h = serializers.FloatField(required=False, min_value=0.0, max_value=100_000.0, default=0.0)
+    eta_recup_vent = serializers.FloatField(required=False, min_value=0.0, max_value=0.95, default=0.0)
 
     def validate(self, data):
         mode = data['mode']

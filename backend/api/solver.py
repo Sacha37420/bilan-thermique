@@ -117,7 +117,7 @@ def _propagate_solar(layers, e_glo, mesh):
     return sources
 
 
-def _assemble_F(layers, mesh, h_e, weather_point, f_ciel, n_dof):
+def _assemble_F(layers, mesh, h_e, weather_point, f_ciel, n_dof, air_idx=None, g_vent=0.0):
     F = np.zeros(n_dof)
 
     t_ext = weather_point['t_ext']
@@ -150,6 +150,14 @@ def _assemble_F(layers, mesh, h_e, weather_point, f_ciel, n_dof):
                 contrib = s_vol * l_e / 2.0
                 F[el] += contrib
                 F[el + 1] += contrib
+
+    # Renouvellement d'air : source directe sur le nœud d'air, en plus de ce
+    # qui remonte par la paroi — un logement ventilé perd de la chaleur par
+    # les infiltrations/la VMC indépendamment de ce que la paroi modélisée
+    # laisse passer. Terme de bord symétrique à F[0] += h_e * t_ext, mais visé
+    # sur le nœud d'air plutôt que sur la surface extérieure.
+    if air_idx is not None and g_vent:
+        F[air_idx] += g_vent * t_ext
 
     return F
 
@@ -202,9 +210,26 @@ def run_simulation(payload):
         K[air, last] -= h_i
         K[air, air] += h_i
         C[air, air] += interior['c_air_int']
+
+        # Renouvellement d'air (infiltrations/VMC) : conductance directe
+        # air <-> extérieur, ramenée au m² de paroi comme le reste du système
+        # 1D (voir doc Théorie, section 01 — "toutes les grandeurs sont
+        # exprimées par unité de surface de paroi"). Ce n'est PAS un débit réel
+        # converti automatiquement : contrairement au solveur bâtiment 3D (qui
+        # connaît un vrai volume et une vraie surface totale), le 1D ne modélise
+        # qu'UNE paroi notionnelle de 1 m² — g_vent est donc déjà la conductance
+        # attribuable à ce m², à charge pour l'appelant de l'avoir réduite lui-même
+        # si elle vient d'un débit réel (voir api.building_solver côté 3D pour la
+        # conversion 0,34 * débit_m3h * (1-rendement), qui elle s'applique en
+        # absolu au nœud d'air unique du bâtiment, jamais par m² de paroi).
+        g_vent = interior.get('g_vent', 0.0)
+        K[air, air] += g_vent
+        air_idx = air
     else:
         n_dof = n_wall
         t_int = interior['t_int']
+        air_idx = None
+        g_vent = 0.0
 
     A = C / DT_SECONDS + K
 
@@ -212,7 +237,7 @@ def run_simulation(payload):
     temperatures = [T.copy()]
 
     for point in weather:
-        F = _assemble_F(layers, mesh, h_e, point, f_ciel, n_dof)
+        F = _assemble_F(layers, mesh, h_e, point, f_ciel, n_dof, air_idx=air_idx, g_vent=g_vent)
         if not has_air_node:
             F[last] += h_i * t_int  # T_int connue : forçage direct, symétrique à F[0] += h_e*T_ext
         b = (C / DT_SECONDS) @ T + F

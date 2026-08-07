@@ -47,17 +47,6 @@ class BuildingSimulationError(ValueError):
     pass
 
 
-def _sun_direction(azimuth_deg, elevation_deg):
-    """Même convention que api.shadow.sun_direction (Z-up, azimuth 0°=+Y)."""
-    az = math.radians(azimuth_deg)
-    el = math.radians(elevation_deg)
-    return np.array([
-        math.sin(az) * math.cos(el),
-        math.cos(az) * math.cos(el),
-        math.sin(el),
-    ])
-
-
 def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i):
     """Une entrée par triangle : (mesh, K, C, layers), K/C par unité de
     surface avec h_e/h_i déjà posés sur les nœuds 0/dernier (comme dans
@@ -121,7 +110,8 @@ def _assemble_global_kc(systems, areas, h_i):
 
 def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
                       sky_view_factor=None, sun_visibility_grid=None,
-                      occluder_intersector=None, centroids=None):
+                      occluder_intersector=None, centroids=None,
+                      air_idx=None, g_vent=0.0):
     """sky_view_factor : liste par triangle (précalculée OU recalculée en
     temps réel par l'appelant) ou None -> repli analytique par triangle.
     Occlusion du rayon direct — deux sources mutuellement exclusives :
@@ -138,7 +128,7 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
     e_dif = point['e_dif']
 
     sun_up = sun_el > 0.0
-    direction = _sun_direction(sun_az, sun_el) if sun_up else None
+    direction = shadow.sun_direction(sun_az, sun_el) if sun_up else None
 
     # Test d'occlusion en temps réel : un seul lot de rayons pour tous les
     # triangles faisant face au soleil à cette heure (même principe que
@@ -199,14 +189,23 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
 
         F[off:off + n] += f_local * area
 
+    # Renouvellement d'air : source directe sur le nœud d'air global, hors de
+    # la boucle par triangle — la ventilation n'appartient à aucune paroi en
+    # particulier, un seul terme pour tout le bâtiment (voir run_building_simulation).
+    if air_idx is not None and g_vent:
+        F[air_idx] += g_vent * t_ext
+
     return F
 
 
 def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibility, payload,
                              environment_envelope=None, progress_cb=None):
-    """payload : {dx_max, h_e, interior: {mode, h_i, c_air_int, t_int?, t_min?, t_max?},
-    t_init, weather: [{t_ext, sun_azimuth, sun_elevation, e_dir, e_dif}, ...],
-    shadow_mode: 'precomputed' | 'realtime' (défaut 'precomputed')}
+    """payload : {dx_max, h_e, interior: {mode, h_i, c_air_int, t_int?, t_min?, t_max?,
+    debit_vent_m3h?, eta_recup_vent?}, t_init, weather: [{t_ext, sun_azimuth, sun_elevation,
+    e_dir, e_dif}, ...], shadow_mode: 'precomputed' | 'realtime' (défaut 'precomputed')}
+
+    debit_vent_m3h/eta_recup_vent (modes 'free'/'thermostat' uniquement, ignorés en 'imposed') :
+    renouvellement d'air (infiltrations/VMC), voir le calcul de g_vent plus bas.
 
     'precomputed' : utilise la grille d'ombrage + facteur de vue du ciel déjà
     calculés (api.shadow, Lot C) — rapide, discrétisé sur une grille
@@ -265,18 +264,39 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i)
     K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(systems, areas, h_i)
 
+    g_vent = 0.0
+    if mode in ('free', 'thermostat'):
+        # Renouvellement d'air (infiltrations/VMC) : contribution UNIQUE au
+        # nœud d'air global, jamais répartie par triangle contrairement aux
+        # parois — un bâtiment n'a qu'un seul volume d'air réel, la
+        # ventilation n'appartient à aucune paroi en particulier (à la
+        # différence de g_vent côté 1D, ramené au m² de la paroi étudiée —
+        # voir solver.py — les deux ne se déduisent PAS l'un de l'autre par un
+        # facteur d'aire). 0,34 Wh/(m3.K) = capacité thermique volumique de
+        # l'air (valeur usuelle) ; (1 - eta_recup_vent) réduit la perte nette
+        # pour une VMC double flux à récupération de chaleur.
+        g_vent = 0.34 * interior.get('debit_vent_m3h', 0.0) * (1.0 - interior.get('eta_recup_vent', 0.0))
+
     if mode == 'free':
         C_global = C_global.tolil()
         C_global[air_idx, air_idx] += interior['c_air_int']
         C_global = C_global.tocsc()
+        K_global = K_global.tolil()
+        K_global[air_idx, air_idx] += g_vent
+        K_global = K_global.tocsc()
     elif mode == 'thermostat':
         C_global = C_global.tolil()
         C_global[air_idx, air_idx] += interior['c_air_int']
         C_global = C_global.tocsc()
+        K_global = K_global.tolil()
+        K_global[air_idx, air_idx] += g_vent
+        K_global = K_global.tocsc()
         t_min = interior['t_min']
         t_max = interior['t_max']
     elif mode == 'imposed':
-        pass
+        pass  # T_air figée par Dirichlet plus bas : sans nœud d'air libre, la
+              # ventilation n'a aucune incidence sur la solution (même
+              # raisonnement que le mode 'imposed' de solver.py).
     else:
         raise BuildingSimulationError(f"Mode intérieur inconnu : {mode!r}")
 
@@ -317,6 +337,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             systems, areas, offsets, n_dof, triangles, h_e, point,
             sky_view_factor=sky_view_factor, sun_visibility_grid=sun_visibility_grid,
             occluder_intersector=occluder_intersector, centroids=centroids,
+            air_idx=air_idx, g_vent=g_vent,
         )
         b_free = (C_global / DT_SECONDS) @ T + F
 

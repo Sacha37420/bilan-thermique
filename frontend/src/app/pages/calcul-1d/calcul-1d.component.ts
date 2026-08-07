@@ -118,6 +118,7 @@ export class Calcul1DComponent implements OnInit {
   tInt = 19;
   hI = 8;
   cAirInt = 50000;
+  gVent = 0;
   tInit = 18;
 
   // ── Météo ──────────────────────────────────────────────────────────
@@ -192,7 +193,7 @@ export class Calcul1DComponent implements OnInit {
 
     const interior = this.interiorMode === 'imposed'
       ? { mode: 'imposed', h_i: this.hI, t_int: this.tInt }
-      : { mode: 'free', h_i: this.hI, c_air_int: this.cAirInt };
+      : { mode: 'free', h_i: this.hI, c_air_int: this.cAirInt, g_vent: this.gVent };
 
     const payload = {
       layers: this.layers(),

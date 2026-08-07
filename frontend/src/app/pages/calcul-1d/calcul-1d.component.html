@@ -102,6 +102,15 @@
             <span>C_air,int — capacité air + mobilier (J/m²·K)</span>
             <input type="number" step="1000" min="100" [(ngModel)]="cAirInt" name="cAirInt" />
           </label>
+          <label>
+            <span>g_vent — renouvellement d'air (W/m²·K)</span>
+            <input type="number" step="0.1" min="0" [(ngModel)]="gVent" name="gVent" />
+            <small>
+              Conductance de ventilation ramenée au m² de paroi modélisée, même logique que
+              C_air,int — pas un débit réel (le calcul 3D en connaît un, voir la page Calcul 3D).
+              0 = pas d'infiltrations/VMC modélisées.
+            </small>
+          </label>
         }
       </div>
     </section>
