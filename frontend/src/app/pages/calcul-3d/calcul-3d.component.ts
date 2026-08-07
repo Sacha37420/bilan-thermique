@@ -82,6 +82,9 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   tMax = 26;
   tInit = 15;
   shadowMode: 'precomputed' | 'realtime' = 'precomputed';
+  // Lot K — température de sol constante, utilisée uniquement par les
+  // triangles marqués 'ground' (page Bâtiment) ; sans effet sinon.
+  tGround = 12;
 
   // ── Renouvellement d'air (modes 'free'/'thermostat' uniquement) ──────
   ventilationProfiles = VENTILATION_PROFILES;
@@ -89,6 +92,17 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   volumeM3 = 250;
   debitVentM3h = 0;
   etaRecupVent = 0;
+
+  // ── Apports internes (modes 'free'/'thermostat' uniquement) ──────────
+  apportsInternesW = 0;
+
+  // ── Aide au calcul de c_air_int (Lot P) — réutilise volumeM3 (même volume
+  // d'air que le renouvellement d'air ci-dessous, pas un champ dupliqué) :
+  // 1200 J/(m³·K), capacité thermique volumique usuelle de l'air à pression
+  // normale.
+  calcCAirFromVolume(): void {
+    this.cAirInt = Math.round(this.volumeM3 * 1200);
+  }
 
   applyVentProfile(): void {
     const profile = this.ventilationProfiles.find((p) => p.id === this.selectedVentProfileId);
@@ -205,12 +219,13 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
       interior['c_air_int'] = this.cAirInt;
       interior['debit_vent_m3h'] = this.debitVentM3h;
       interior['eta_recup_vent'] = this.etaRecupVent;
+      interior['apports_internes_w'] = this.apportsInternesW;
     }
     if (this.interiorMode === 'thermostat') { interior['t_min'] = this.tMin; interior['t_max'] = this.tMax; }
 
     const payload = {
       dx_max: this.dxMax, h_e: this.hE, interior, t_init: this.tInit, weather: this.weather(),
-      shadow_mode: this.shadowMode,
+      shadow_mode: this.shadowMode, t_ground: this.tGround,
     };
 
     this.api.runBuildingCalcul(building.id, payload).subscribe({
@@ -246,6 +261,25 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   get result(): BuildingCalculResult | null {
     const job = this.job();
     return job && job.status === 'DONE' ? (job.result as unknown as BuildingCalculResult) : null;
+  }
+
+  // ── Résultats normalisés (Lot M) — kWh/m²/an, seuls comparables aux seuils
+  // RT2012/RE2020 déjà cités dans le catalogue de parois. Null tant que le
+  // bâtiment n'a pas de surface_ref_m2 renseignée (page Bâtiment).
+  get surfaceRefM2(): number | null {
+    return this.currentBuilding()?.surface_ref_m2 ?? null;
+  }
+
+  get heatingKwhPerM2(): number | null {
+    const r = this.result;
+    const s = this.surfaceRefM2;
+    return r && s ? r.heating_kwh / s : null;
+  }
+
+  get coolingKwhPerM2(): number | null {
+    const r = this.result;
+    const s = this.surfaceRefM2;
+    return r && s ? r.cooling_kwh / s : null;
   }
 
   // ── Graphique T_air ──────────────────────────────────────────────────

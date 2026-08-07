@@ -51,6 +51,11 @@ class TriangleInputSerializer(serializers.Serializer):
     v = serializers.ListField(child=serializers.IntegerField(min_value=0), min_length=3, max_length=3)
     group = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
     paroi_model_id = serializers.IntegerField(required=False, allow_null=True, default=None)
+    # Lot K : un triangle 'ground' (plancher bas au contact du sol) échange avec
+    # t_ground plutôt qu'avec t_ext — le sol a une température bien plus stable/
+    # amortie que l'air extérieur. Défaut 'exterior_air' = comportement historique
+    # (mur/toiture face à l'air extérieur), inchangé pour tout maillage existant.
+    boundary = serializers.ChoiceField(choices=['exterior_air', 'ground'], required=False, default='exterior_air')
 
 
 class EnvironmentTriangleInputSerializer(serializers.Serializer):
@@ -154,6 +159,7 @@ class BuildingSerializer(serializers.Serializer):
                                          min_value=-180.0, max_value=180.0)
     georef_north_offset_deg = serializers.FloatField(required=False, default=0.0)
     georef_ground_z = serializers.FloatField(required=False, allow_null=True, default=None)
+    surface_ref_m2 = serializers.FloatField(required=False, allow_null=True, default=None, min_value=0.01)
     sun_visibility_stale = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
@@ -197,7 +203,8 @@ class BuildingSerializer(serializers.Serializer):
         triangles = validated_data.pop('triangles', None)
         if triangles is None:
             triangles = [
-                {'v': t['v'], 'group': t.get('group'), 'paroi_model_id': t.get('paroi_model_id')}
+                {'v': t['v'], 'group': t.get('group'), 'paroi_model_id': t.get('paroi_model_id'),
+                 'boundary': t.get('boundary', 'exterior_air')}
                 for t in existing.get('triangles', [])
             ]
         try:
@@ -304,6 +311,11 @@ class BuildingInteriorSerializer(serializers.Serializer):
     # * (1 - eta_recup_vent) et ajoutée une seule fois au nœud d'air global.
     debit_vent_m3h = serializers.FloatField(required=False, min_value=0.0, max_value=100_000.0, default=0.0)
     eta_recup_vent = serializers.FloatField(required=False, min_value=0.0, max_value=0.95, default=0.0)
+    # Apports internes (Lot H) : occupants + éclairage + électroménager, une seule
+    # puissance constante pour tout le run (pas de profil horaire — voir Lot Q du
+    # to_do.md racine) — ignorée en mode 'imposed' pour la même raison que
+    # debit_vent_m3h (Dirichlet écrase la ligne du nœud d'air, voir building_solver.py).
+    apports_internes_w = serializers.FloatField(required=False, min_value=0.0, max_value=1_000_000.0, default=0.0)
 
     def validate(self, data):
         mode = data['mode']
@@ -329,6 +341,11 @@ class BuildingCalculRequestSerializer(serializers.Serializer):
     # 'realtime' : lancer de rayons réel à chaque heure (précis, plus lent) —
     # voir building_solver.run_building_simulation.
     shadow_mode = serializers.ChoiceField(choices=['precomputed', 'realtime'], required=False, default='precomputed')
+    # Lot K : température de sol constante, utilisée uniquement par les triangles
+    # marqués boundary='ground' (défaut ignoré sinon). 12°C = moyenne annuelle
+    # usuelle en France (10-14°C) — dérivation automatique depuis la météo
+    # reportée au Lot L (météo réelle datée), voir to_do.md racine.
+    t_ground = serializers.FloatField(required=False, min_value=-10.0, max_value=30.0, default=12.0)
 
 
 class DepartmentSerializer(serializers.ModelSerializer):

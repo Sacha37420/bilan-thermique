@@ -128,6 +128,12 @@ class Building(models.Model):
     georef_north_offset_deg = models.FloatField(default=0.0)
     georef_ground_z = models.FloatField(null=True, blank=True)
 
+    # Surface de référence (m², Lot M) — saisie directe par l'utilisateur, sert
+    # uniquement à normaliser l'affichage du dashboard (heating_kwh/surface_ref_m2,
+    # comparable aux seuils RT2012/RE2020 du catalogue de parois) : ne participe à
+    # aucun calcul du solveur lui-même.
+    surface_ref_m2 = models.FloatField(null=True, blank=True)
+
     sun_visibility = models.JSONField(default=dict, blank=True)
     sun_visibility_stale = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

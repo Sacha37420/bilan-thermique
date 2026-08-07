@@ -1,7 +1,10 @@
+export type TriangleBoundary = 'exterior_air' | 'ground';
+
 export interface Triangle {
   v: [number, number, number];
   group: string | null;
   paroi_model_id: number | null;
+  boundary: TriangleBoundary;
   area: number;
   normal: [number, number, number];
   tilt_deg: number;
@@ -15,6 +18,7 @@ export interface WorkingTriangle {
   v: [number, number, number];
   group: string | null;
   paroi_model_id: number | null;
+  boundary?: TriangleBoundary;
   area?: number;
   normal?: [number, number, number];
   tilt_deg?: number;
@@ -36,6 +40,7 @@ export interface Building {
   georef_lon: number | null;
   georef_north_offset_deg: number;
   georef_ground_z: number | null;
+  surface_ref_m2: number | null;
   sun_visibility_stale: boolean;
   created_at: string;
   updated_at: string;

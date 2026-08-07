@@ -41,7 +41,15 @@
         <span>Description</span>
         <input type="text" [(ngModel)]="buildingDescription" name="buildingDescription" />
       </label>
+      <label>
+        <span>Surface de référence (m², optionnel)</span>
+        <input type="number" step="1" min="0.01" [(ngModel)]="surfaceRefM2" name="surfaceRefM2" />
+      </label>
     </div>
+    <p class="hint">
+      Utilisée uniquement pour normaliser l'affichage des résultats (kWh/m²/an) sur le dashboard
+      du calcul 3D — ne change rien au calcul lui-même.
+    </p>
 
     <div class="shadow-block">
       <h3>Géoréférencement (optionnel)</h3>
@@ -188,9 +196,19 @@
                 }
               </select>
               <button type="button" class="btn-secondary" (click)="assignGroup(g)">Assigner le groupe</button>
+              <select [(ngModel)]="groupBoundaryAssignments[g]" name="groupBoundary_{{g}}">
+                <option value="exterior_air">Air extérieur (défaut)</option>
+                <option value="ground">Sol (dallage)</option>
+              </select>
+              <button type="button" class="btn-secondary" (click)="assignGroupBoundary(g)">Assigner la condition limite</button>
             </div>
           }
         </div>
+        <p class="hint">
+          Condition limite : un groupe marqué « Sol » échange avec la température de sol constante
+          (réglable sur la page Calcul 3D), pas avec la météo — pour un plancher bas au contact du
+          terrain. {{ groundTriangleCount() }} triangle(s) actuellement marqué(s) « Sol ».
+        </p>
       }
 
       <div class="manual-assign">

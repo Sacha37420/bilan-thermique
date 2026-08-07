@@ -245,6 +245,58 @@ class BuildingAirNodeEnergyBalanceTest(SimpleTestCase):
         result_no_vent = building_solver.run_building_simulation(envelope, paroi_layers, None, payload_no_vent)
         self.assertLess(result['t_air'][-1], result_no_vent['t_air'][-1])
 
+    def test_free_mode_air_node_conserves_energy_with_apports_internes(self):
+        # Meme identite que test_free_mode_air_node_conserves_energy, avec un
+        # terme d'apports internes constant en plus (Lot H) : C_air*dT_air =
+        # Sigma(flux + apports_internes_w)*dt — pas de dependance a T_ext/T_air
+        # contrairement a g_vent, donc pas de zip avec t_air necessaire ici.
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=25)
+        c_air_int = 300_000.0
+        apports_internes_w = 250.0
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': c_air_int,
+                         'apports_internes_w': apports_internes_w},
+            't_init': 15.0, 'weather': weather,
+        }
+        result = building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+
+        t_air = result['t_air']
+        flux = result['envelope_flux_w']
+
+        energy_stored = c_air_int * (t_air[-1] - t_air[0])
+        energy_from_walls_and_gains = sum((f + apports_internes_w) * DT_SECONDS for f in flux)
+        self.assertAlmostEqual(
+            energy_stored, energy_from_walls_and_gains,
+            delta=abs(energy_from_walls_and_gains) * 1e-6 + 1e-3,
+        )
+        # Non-regression : des apports internes doivent laisser le batiment
+        # plus chaud, toutes choses egales par ailleurs (memes murs/meteo).
+        payload_no_gains = dict(payload)
+        payload_no_gains['interior'] = {**payload['interior'], 'apports_internes_w': 0.0}
+        result_no_gains = building_solver.run_building_simulation(envelope, paroi_layers, None, payload_no_gains)
+        self.assertGreater(result['t_air'][-1], result_no_gains['t_air'][-1])
+
+    def test_imposed_mode_ignores_apports_internes(self):
+        # Meme raisonnement que test_imposed_mode_ignores_ventilation : sans
+        # noeud d'air libre, Dirichlet ecrase la ligne du noeud d'air, donc
+        # apports_internes_w ne doit avoir strictement aucun effet.
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=10)
+
+        def run(apports):
+            payload = {
+                'dx_max': 0.02, 'h_e': 25.0,
+                'interior': {'mode': 'imposed', 'h_i': 8.0, 't_int': 19.0,
+                             'apports_internes_w': apports},
+                't_init': 19.0, 'weather': weather,
+            }
+            return building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+
+        r0 = run(0.0)
+        r1 = run(5000.0)
+        self.assertEqual(r0['flux_positive_kwh'], r1['flux_positive_kwh'])
+        self.assertEqual(r0['flux_negative_kwh'], r1['flux_negative_kwh'])
+
     def test_thermostat_mode_hvac_matches_residual_energy_balance(self):
         # Amplitude volontairement large (-5°C a +35°C) et t_min/t_max serrés :
         # force le thermostat a chauffer ET climatiser dans la meme serie, pas
@@ -298,6 +350,72 @@ class BuildingAirNodeEnergyBalanceTest(SimpleTestCase):
         r1 = run(500.0)
         self.assertEqual(r0['flux_positive_kwh'], r1['flux_positive_kwh'])
         self.assertEqual(r0['flux_negative_kwh'], r1['flux_negative_kwh'])
+
+
+class GroundBoundaryTest(SimpleTestCase):
+    """Lot K — un triangle marqué boundary='ground' doit échanger avec
+    payload['t_ground'] (constant), jamais avec weather[h]['t_ext'] — vérifié
+    par une identité EXACTE (pas une convergence de régime permanent) : le
+    triangle 'ground' voit une météo t_ext très différente et variable, mais
+    doit reproduire au chiffre près un mur 1D alimenté par une météo
+    CONSTANTE égale à t_ground (même dx_max/h_e/h_i/t_int/t_init/heures)."""
+
+    databases = []
+
+    def test_ground_triangle_uses_t_ground_not_weather_t_ext(self):
+        layers = [_flat_wall_layer(e=0.1, lam=1.0), _flat_wall_layer(e=0.08, lam=0.035, rho=25.0, c=1030.0)]
+        h_e, h_i, t_int, dx_max = 25.0, 8.0, 19.0, 0.02
+        hours = 20
+        t_ground = 13.0
+
+        vertices = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        triangles = geometry.compute_envelope_geometry(
+            vertices, [{'v': [0, 1, 2], 'paroi_model_id': 1, 'boundary': 'ground'}],
+        )
+        envelope_ground = {'vertices': vertices, 'triangles': triangles}
+        # t_ext délibérément très différent de t_ground et variable dans le
+        # temps : ne doit avoir strictement aucune influence sur ce triangle.
+        t_ext_series = [-10.0 + 40.0 * math.sin(h / 3.0) for h in range(hours)]
+        payload_ground = {
+            'dx_max': dx_max, 'h_e': h_e,
+            'interior': {'mode': 'imposed', 'h_i': h_i, 't_int': t_int},
+            't_init': 15.0, 'weather': _no_sun_weather_3d(t_ext_series), 't_ground': t_ground,
+        }
+        result_ground = building_solver.run_building_simulation(envelope_ground, {1: layers}, None, payload_ground)
+
+        payload_ref = {
+            'layers': layers, 'dx_max': dx_max, 'h_e': h_e,
+            'interior': {'mode': 'imposed', 'h_i': h_i, 't_int': t_int},
+            't_init': 15.0, 'weather': _no_sun_weather_1d([t_ground] * hours),
+        }
+        result_ref = solver.run_simulation(payload_ref)
+
+        self.assertAlmostEqual(
+            result_ground['final_exterior_surface_temp'][0], result_ref['temperatures'][-1][0], places=6,
+        )
+        self.assertAlmostEqual(
+            result_ground['final_interior_surface_temp'][0], result_ref['temperatures'][-1][-1], places=6,
+        )
+
+    def test_exterior_air_boundary_unaffected_by_t_ground(self):
+        # Non-régression : un triangle par défaut ('exterior_air', comportement
+        # historique) ne doit jamais être influencé par t_ground.
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _single_triangle_envelope(area=2.0)
+        weather = _no_sun_weather_3d([5.0] * 20)
+
+        def run(t_ground):
+            payload = {
+                'dx_max': 0.02, 'h_e': 25.0,
+                'interior': {'mode': 'imposed', 'h_i': 8.0, 't_int': 19.0},
+                't_init': 10.0, 'weather': weather, 't_ground': t_ground,
+            }
+            return building_solver.run_building_simulation(envelope, {1: layers}, None, payload)
+
+        r0 = run(12.0)
+        r1 = run(-50.0)
+        self.assertEqual(r0['final_exterior_surface_temp'], r1['final_exterior_surface_temp'])
+        self.assertEqual(r0['final_interior_surface_temp'], r1['final_interior_surface_temp'])
 
 
 class ShadowSkyViewFactorTest(SimpleTestCase):

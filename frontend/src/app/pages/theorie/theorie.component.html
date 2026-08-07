@@ -88,6 +88,18 @@
             Le résultat des deux bilans se combine en un seul terme source, injecté au bon endroit
             dans l'équation de la chaleur — c'est tout l'objet des sections 05 à 07.
           </p>
+          <p>
+            Le solveur bâtiment 3D (généralisation multi-triangle du même modèle : chaque triangle
+            de l'enveloppe est sa propre paroi 1D, tous couplés à un même nœud d'air partagé) ajoute
+            deux termes supplémentaires sur ce nœud d'air, absents du bilan 1D d'une paroi isolée :
+            le renouvellement d'air (infiltrations/VMC) et les <strong>apports internes</strong>
+            (occupants, éclairage, électroménager) — une puissance <span class="sym">Q_int</span>
+            (W) injectée directement, <span class="sym">F[air] += Q_int</span>, sans dépendre de la
+            géométrie d'un triangle en particulier. Hypothèse assumée : une valeur
+            <strong>constante sur toute la durée du calcul</strong>, alors qu'un logement réel a des
+            apports qui varient dans la journée (présence, usages) — un profil horaire est une
+            extension possible (section 12).
+          </p>
         </div>
         <div class="callout">
           <span class="callout-label">Hors périmètre de ce document</span>

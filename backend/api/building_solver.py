@@ -111,7 +111,7 @@ def _assemble_global_kc(systems, areas, h_i):
 def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
                       sky_view_factor=None, sun_visibility_grid=None,
                       occluder_intersector=None, centroids=None,
-                      air_idx=None, g_vent=0.0):
+                      air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None):
     """sky_view_factor : liste par triangle (précalculée OU recalculée en
     temps réel par l'appelant) ou None -> repli analytique par triangle.
     Occlusion du rayon direct — deux sources mutuellement exclusives :
@@ -171,8 +171,14 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
                         cos_ti = 0.0
         e_glo = e_dir * cos_ti + e_dif * f_ciel
 
+        # Lot K : un triangle 'ground' échange avec la température de sol
+        # constante plutôt qu'avec l'air extérieur — même conductance h_e
+        # (voir to_do.md, un h_e distinct pour le sol reste une extension
+        # possible), seule la température cible change.
+        t_boundary = t_ground if (geom.get('boundary') == 'ground' and t_ground is not None) else t_ext
+
         f_local = np.zeros(n)
-        f_local[0] += h_e * t_ext
+        f_local[0] += h_e * t_boundary
         for kind, ref, value in wall_solver._propagate_solar(layers, e_glo, mesh):
             if kind == 'surface':
                 f_local[ref] += value
@@ -189,11 +195,18 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
 
         F[off:off + n] += f_local * area
 
-    # Renouvellement d'air : source directe sur le nœud d'air global, hors de
-    # la boucle par triangle — la ventilation n'appartient à aucune paroi en
-    # particulier, un seul terme pour tout le bâtiment (voir run_building_simulation).
-    if air_idx is not None and g_vent:
-        F[air_idx] += g_vent * t_ext
+    # Renouvellement d'air + apports internes : deux sources directes sur le
+    # nœud d'air global, hors de la boucle par triangle — ni la ventilation ni
+    # les apports internes (occupants, éclairage, électroménager, Lot H)
+    # n'appartiennent à une paroi en particulier, un seul terme de chaque pour
+    # tout le bâtiment (voir run_building_simulation). apports_internes_w est
+    # une puissance directe (W), pas une conductance : pas de multiplication
+    # par t_ext, contrairement à g_vent.
+    if air_idx is not None:
+        if g_vent:
+            F[air_idx] += g_vent * t_ext
+        if apports_internes_w:
+            F[air_idx] += apports_internes_w
 
     return F
 
@@ -201,11 +214,21 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
 def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibility, payload,
                              environment_envelope=None, progress_cb=None):
     """payload : {dx_max, h_e, interior: {mode, h_i, c_air_int, t_int?, t_min?, t_max?,
-    debit_vent_m3h?, eta_recup_vent?}, t_init, weather: [{t_ext, sun_azimuth, sun_elevation,
-    e_dir, e_dif}, ...], shadow_mode: 'precomputed' | 'realtime' (défaut 'precomputed')}
+    debit_vent_m3h?, eta_recup_vent?, apports_internes_w?}, t_init, weather: [{t_ext,
+    sun_azimuth, sun_elevation, e_dir, e_dif}, ...], shadow_mode: 'precomputed' | 'realtime'
+    (défaut 'precomputed')}
 
     debit_vent_m3h/eta_recup_vent (modes 'free'/'thermostat' uniquement, ignorés en 'imposed') :
     renouvellement d'air (infiltrations/VMC), voir le calcul de g_vent plus bas.
+
+    apports_internes_w (modes 'free'/'thermostat' uniquement, ignoré en 'imposed' — Lot H) :
+    puissance constante (occupants, éclairage, électroménager) injectée directement au nœud
+    d'air global via F[air_idx], une seule valeur pour tout le run (pas de profil horaire —
+    voir Lot Q du to_do.md racine).
+
+    t_ground (payload, Lot K) : température de sol constante — utilisée à la place de
+    weather[h]['t_ext'] pour tout triangle dont envelope.triangles[i]['boundary'] == 'ground'.
+    Sans effet sur les triangles 'exterior_air' (comportement historique, défaut).
 
     'precomputed' : utilise la grille d'ombrage + facteur de vue du ciel déjà
     calculés (api.shadow, Lot C) — rapide, discrétisé sur une grille
@@ -229,6 +252,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     t_init = payload['t_init']
     weather = payload['weather']
     shadow_mode = payload.get('shadow_mode', 'precomputed')
+    t_ground = payload.get('t_ground')
 
     if len(weather) > MAX_WEATHER_POINTS:
         raise BuildingSimulationError(f"{len(weather)} pas horaires, au-delà de la limite de {MAX_WEATHER_POINTS}.")
@@ -265,6 +289,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(systems, areas, h_i)
 
     g_vent = 0.0
+    apports_internes_w = 0.0
     if mode in ('free', 'thermostat'):
         # Renouvellement d'air (infiltrations/VMC) : contribution UNIQUE au
         # nœud d'air global, jamais répartie par triangle contrairement aux
@@ -276,6 +301,10 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         # l'air (valeur usuelle) ; (1 - eta_recup_vent) réduit la perte nette
         # pour une VMC double flux à récupération de chaleur.
         g_vent = 0.34 * interior.get('debit_vent_m3h', 0.0) * (1.0 - interior.get('eta_recup_vent', 0.0))
+        # Apports internes (Lot H) : même traitement que g_vent (contribution
+        # unique au nœud d'air global, sans effet en mode 'imposed' où
+        # Dirichlet écrase la ligne du nœud d'air — voir plus bas).
+        apports_internes_w = interior.get('apports_internes_w', 0.0)
 
     if mode == 'free':
         C_global = C_global.tolil()
@@ -337,7 +366,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             systems, areas, offsets, n_dof, triangles, h_e, point,
             sky_view_factor=sky_view_factor, sun_visibility_grid=sun_visibility_grid,
             occluder_intersector=occluder_intersector, centroids=centroids,
-            air_idx=air_idx, g_vent=g_vent,
+            air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w, t_ground=t_ground,
         )
         b_free = (C_global / DT_SECONDS) @ T + F
 

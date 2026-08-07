@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
-import { Building, Job, WorkingTriangle } from '../../core/building.types';
+import { Building, Job, TriangleBoundary, WorkingTriangle } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 
 interface ParoiModelSummary {
@@ -60,6 +60,9 @@ export class BatimentComponent implements OnInit, OnDestroy {
   georefNorthOffset = 0;
   georefGroundZ: number | null = null;
 
+  // ── Surface de référence (m², Lot M — normalisation kWh/m²/an du dashboard) ──
+  surfaceRefM2: number | null = null;
+
   // ── Précalcul d'ombrage (Celery, cf. api/tasks.py) ────────────────────
   shadowJob = signal<Job | null>(null);
   private pollHandle?: ReturnType<typeof setInterval>;
@@ -74,6 +77,9 @@ export class BatimentComponent implements OnInit, OnDestroy {
   triangles = signal<WorkingTriangle[]>([]);
   groups = signal<string[]>([]);
   groupAssignments: Record<string, number | null> = {};
+  // Lot K — assignation de la condition limite ('exterior_air'/'ground') par
+  // groupe OBJ, même patron que groupAssignments (paroi_model_id) ci-dessus.
+  groupBoundaryAssignments: Record<string, TriangleBoundary> = {};
 
   selectedIndices = signal<Set<number>>(new Set());
   bulkAssignModelId: number | null = null;
@@ -139,6 +145,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
       this.triangles.set(parsed.triangles);
       this.groups.set(parsed.groups);
       this.groupAssignments = {};
+      this.groupBoundaryAssignments = {};
       this.selectedIndices.set(new Set());
       this.modelColorMap.clear();
       this.message.set(
@@ -181,6 +188,16 @@ export class BatimentComponent implements OnInit, OnDestroy {
     return this.triangles().filter(t => t.group === group).length;
   }
 
+  assignGroupBoundary(group: string): void {
+    const boundary = this.groupBoundaryAssignments[group] ?? 'exterior_air';
+    this.triangles.update(list => list.map(t => (t.group === group ? { ...t, boundary } : t)));
+    this.viewer?.repaint();
+  }
+
+  groundTriangleCount(): number {
+    return this.triangles().filter(t => t.boundary === 'ground').length;
+  }
+
   // ── Sélection manuelle (clic dans le viewer, STL ou triangles isolés) ─
   onTriangleClick(index: number): void {
     this.selectedIndices.update(set => {
@@ -221,13 +238,16 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.error.set('');
     this.message.set('');
 
-    const triangles = this.triangles().map(t => ({ v: t.v, group: t.group, paroi_model_id: t.paroi_model_id }));
+    const triangles = this.triangles().map(t => ({
+      v: t.v, group: t.group, paroi_model_id: t.paroi_model_id, boundary: t.boundary ?? 'exterior_air',
+    }));
     const id = this.currentBuildingId();
     const payload: Record<string, unknown> = {
       name, description: this.buildingDescription, triangles,
       environment_id: this.selectedEnvironmentId,
       georef_lat: this.georefLat, georef_lon: this.georefLon,
       georef_north_offset_deg: this.georefNorthOffset, georef_ground_z: this.georefGroundZ,
+      surface_ref_m2: this.surfaceRefM2,
     };
     // Les sommets ne sont renvoyés que lors d'un nouvel import (nouveau
     // bâtiment, ou fichier rechargé) — sinon on les laisse tels quels côté
@@ -270,6 +290,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
         this.triangles.set(b.envelope.triangles);
         this.groups.set([...new Set(b.envelope.triangles.map(t => t.group).filter((g): g is string => !!g))]);
         this.groupAssignments = {};
+        this.groupBoundaryAssignments = {};
         this.selectedIndices.set(new Set());
         this.modelColorMap.clear();
         this.selectedEnvironmentId = b.environment_id;
@@ -277,6 +298,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
         this.georefLon = b.georef_lon;
         this.georefNorthOffset = b.georef_north_offset_deg;
         this.georefGroundZ = b.georef_ground_z;
+        this.surfaceRefM2 = b.surface_ref_m2;
         this.sunVisibilityStale.set(b.sun_visibility_stale);
         this.shadowJob.set(null);
         this.stopPoll();
@@ -299,6 +321,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.triangles.set([]);
     this.groups.set([]);
     this.groupAssignments = {};
+    this.groupBoundaryAssignments = {};
     this.selectedIndices.set(new Set());
     this.modelColorMap.clear();
     this.selectedEnvironmentId = null;
@@ -306,6 +329,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.georefLon = null;
     this.georefNorthOffset = 0;
     this.georefGroundZ = null;
+    this.surfaceRefM2 = null;
     this.sunVisibilityStale.set(true);
     this.shadowJob.set(null);
     this.stopPoll();
