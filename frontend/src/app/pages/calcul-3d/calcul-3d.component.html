@@ -172,7 +172,8 @@
         <h3>Apports internes</h3>
         <p class="hint">
           Puissance constante (occupants, éclairage, électroménager) injectée directement au nœud
-          d'air — une seule valeur pour toute la durée du calcul, pas de profil horaire.
+          d'air — valeur de base pour toute la durée du calcul (voir planning horaire ci-dessous
+          pour la faire varier heure par heure).
         </p>
         <div class="field-grid">
           <label>
@@ -180,6 +181,43 @@
             <input type="number" step="10" min="0" [(ngModel)]="apportsInternesW" name="apportsInternesW" />
           </label>
         </div>
+
+        <h3>Planning horaire (optionnel)</h3>
+        <p class="hint">
+          Fait varier le renouvellement d'air ET les apports internes heure par heure au lieu d'une
+          valeur constante — une présence occupée le soir/week-end a des apports internes ET un
+          besoin de ventilation qui varient ensemble. Un planning est une variation AUTOUR des
+          valeurs constantes ci-dessus, pas un remplacement complet : celles-ci restent le point de
+          départ (bouton d'exemple), actif seulement si la case ci-dessous est cochée.
+        </p>
+        <label class="mode-option">
+          <input type="checkbox" [(ngModel)]="usePlanning" name="usePlanning" />
+          <span>Utiliser un planning horaire plutôt que les valeurs constantes ci-dessus</span>
+        </label>
+        @if (usePlanning) {
+          <div class="field-grid">
+            <label>
+              <span>Heure de début de la météo (0-23)</span>
+              <input type="number" step="1" min="0" max="23" [(ngModel)]="heureDebut" name="heureDebut" />
+              <small>Heure du premier point de la série météo ci-dessous (0 = minuit) — sert à aligner le planning.</small>
+            </label>
+          </div>
+          <p class="hint">
+            24 lignes, une par heure de la journée (index 0 = minuit) :
+            <code>débit_m3h, eta_recup, apports_w</code>.
+          </p>
+          <textarea rows="6" [(ngModel)]="planningRaw" name="planningRaw" (blur)="parsePlanning()"
+            placeholder="30,0.6,40&#10;30,0.6,40&#10;...(24 lignes)"></textarea>
+          <div class="weather-actions">
+            <button type="button" class="btn-secondary" (click)="loadPlanningExample()">Charger un exemple (jour type résidentiel)</button>
+            @if (planning().length > 0) {
+              <span class="weather-count">{{ planning().length }} / 24 heure(s) valides</span>
+            }
+          </div>
+          @if (planningError()) {
+            <p class="field-error">{{ planningError() }}</p>
+          }
+        }
       }
     </section>
 

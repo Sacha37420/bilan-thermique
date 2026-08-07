@@ -777,3 +777,173 @@ class TmyFallbackTest(SimpleTestCase):
         self.assertIsNotNone(warning)
         self.assertIn('over the sea', warning)
         m_archive.assert_called_once_with(0.0, -160.0, '2023-01-01', '2023-01-02', north_offset_deg=15.0)
+
+
+class HourlyPlanningTest(SimpleTestCase):
+    """Lot Q — plannings horaires (ventilation + apports internes). Point dur
+    vérifié : g_vent variable par heure change K_global (pas seulement F), donc
+    la factorisation LU doit être refaite par valeur DISTINCTE de g_vent
+    rencontrée (voir building_solver._factorize_for_g_vent) — ces tests portent
+    sur le résultat physique produit, jamais sur l'implémentation de la
+    factorisation elle-même."""
+
+    databases = []
+
+    def _envelope_and_weather(self, hours, area=2.5):
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _single_triangle_envelope(area=area)
+        t_ext_series = [2.0 + 10.0 * math.sin(h / 6.0) for h in range(hours)]
+        return envelope, {1: layers}, _no_sun_weather_3d(t_ext_series)
+
+    def test_constant_planning_matches_constant_interior_all_modes(self):
+        # Un planning dont les 24 entrées sont toutes identiques aux constantes
+        # équivalentes de `interior` doit produire un résultat identique au
+        # chemin sans planning, dans les trois modes — non-régression sur le
+        # nouveau mécanisme de bundles factorisés par g_vent.
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=50)
+        debit, eta, apports = 80.0, 0.6, 250.0
+        base_variants = [
+            {'mode': 'imposed', 'h_i': 8.0, 't_int': 19.0},
+            {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            {'mode': 'thermostat', 'h_i': 8.0, 'c_air_int': 300_000.0, 't_min': 18.0, 't_max': 21.0},
+        ]
+        planning = [{'debit_vent_m3h': debit, 'eta_recup_vent': eta, 'apports_internes_w': apports}] * 24
+
+        for base in base_variants:
+            with self.subTest(mode=base['mode']):
+                payload_constant = {
+                    'dx_max': 0.02, 'h_e': 25.0,
+                    'interior': {**base, 'debit_vent_m3h': debit, 'eta_recup_vent': eta, 'apports_internes_w': apports},
+                    't_init': 15.0, 'weather': weather,
+                }
+                result_constant = building_solver.run_building_simulation(envelope, paroi_layers, None, payload_constant)
+
+                payload_planning = {
+                    'dx_max': 0.02, 'h_e': 25.0,
+                    'interior': dict(base),
+                    't_init': 15.0, 'weather': weather, 'planning': planning,
+                }
+                result_planning = building_solver.run_building_simulation(envelope, paroi_layers, None, payload_planning)
+
+                self.assertEqual(result_constant['t_air'], result_planning['t_air'])
+                self.assertEqual(result_constant['heating_kwh'], result_planning['heating_kwh'])
+                self.assertEqual(result_constant['cooling_kwh'], result_planning['cooling_kwh'])
+
+    def test_heure_debut_selects_correct_planning_slot(self):
+        # Un planning avec une forte ventilation au seul index 5 : heure_debut=5
+        # doit faire utiliser CET index dès hour_idx=0.
+        envelope, paroi_layers, _ = self._envelope_and_weather(hours=1)
+        weather_one_hour = _no_sun_weather_3d([5.0])
+        planning = [{'debit_vent_m3h': 0.0, 'eta_recup_vent': 0.0, 'apports_internes_w': 0.0} for _ in range(24)]
+        planning[5] = {'debit_vent_m3h': 500.0, 'eta_recup_vent': 0.0, 'apports_internes_w': 0.0}
+
+        def run(heure_debut):
+            payload = {
+                'dx_max': 0.02, 'h_e': 25.0,
+                'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+                't_init': 19.0, 'weather': weather_one_hour, 'planning': planning, 'heure_debut': heure_debut,
+            }
+            return building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+
+        result_slot5 = run(heure_debut=5)  # hour_idx=0 -> slot (5+0)%24=5 -> forte ventilation
+        result_slot0 = run(heure_debut=0)  # hour_idx=0 -> slot 0 -> ventilation nulle
+
+        # t_init=19°C > t_ext=5°C, sans soleil : plus de ventilation doit
+        # refroidir davantage (même raisonnement que le test de non-régression
+        # du Lot G).
+        self.assertLess(result_slot5['t_air'][-1], result_slot0['t_air'][-1])
+
+    def test_free_mode_conserves_energy_with_varying_planning(self):
+        # Identité de conservation (même famille que Lot F/G), généralisée à un
+        # g_vent/apports_internes_w VARIABLE heure par heure : le planning ci-
+        # dessous a jusqu'à 12 combinaisons (débit, rendement) distinctes sur 24
+        # heures (lcm(3,4)), exerçant réellement plusieurs bundles factorisés.
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=50)
+        c_air_int = 300_000.0
+        planning = [
+            {'debit_vent_m3h': 20.0 + 10.0 * (h % 3), 'eta_recup_vent': 0.1 * (h % 4),
+             'apports_internes_w': 50.0 * (h % 5)}
+            for h in range(24)
+        ]
+        heure_debut = 7
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': c_air_int},
+            't_init': 15.0, 'weather': weather, 'planning': planning, 'heure_debut': heure_debut,
+        }
+        result = building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+
+        t_air = result['t_air']
+        flux = result['envelope_flux_w']
+        energy_stored = c_air_int * (t_air[-1] - t_air[0])
+
+        energy_from_walls_vent_gains = 0.0
+        for h, (f, point, t_air_next) in enumerate(zip(flux, weather, t_air[1:])):
+            entry = planning[(heure_debut + h) % 24]
+            g_vent = 0.34 * entry['debit_vent_m3h'] * (1.0 - entry['eta_recup_vent'])
+            energy_from_walls_vent_gains += (
+                f + g_vent * (point['t_ext'] - t_air_next) + entry['apports_internes_w']
+            ) * DT_SECONDS
+
+        self.assertAlmostEqual(
+            energy_stored, energy_from_walls_vent_gains,
+            delta=abs(energy_from_walls_vent_gains) * 1e-6 + 1e-3,
+        )
+
+    def test_imposed_mode_ignores_planning(self):
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=10)
+        planning_high = [
+            {'debit_vent_m3h': 5000.0, 'eta_recup_vent': 0.0, 'apports_internes_w': 100_000.0} for _ in range(24)
+        ]
+
+        def run(planning):
+            payload = {
+                'dx_max': 0.02, 'h_e': 25.0,
+                'interior': {'mode': 'imposed', 'h_i': 8.0, 't_int': 19.0},
+                't_init': 19.0, 'weather': weather,
+            }
+            if planning is not None:
+                payload['planning'] = planning
+            return building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+
+        r0 = run(None)
+        r1 = run(planning_high)
+        self.assertEqual(r0['flux_positive_kwh'], r1['flux_positive_kwh'])
+        self.assertEqual(r0['flux_negative_kwh'], r1['flux_negative_kwh'])
+
+
+class PlanningSerializerTest(SimpleTestCase):
+    """Lot Q — validation de BuildingCalculRequestSerializer.planning/heure_debut."""
+
+    databases = []
+
+    def _base_payload(self, **overrides):
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0,
+            'weather': [{'t_ext': 5.0, 'sun_azimuth': 0.0, 'sun_elevation': -10.0, 'e_dir': 0.0, 'e_dif': 0.0}],
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_planning_must_have_exactly_24_entries(self):
+        entry = {'debit_vent_m3h': 10.0, 'eta_recup_vent': 0.5, 'apports_internes_w': 100.0}
+        s = serializers.BuildingCalculRequestSerializer(data=self._base_payload(planning=[entry] * 23))
+        self.assertFalse(s.is_valid())
+        self.assertIn('planning', s.errors)
+
+    def test_planning_with_24_entries_and_heure_debut_valid(self):
+        entry = {'debit_vent_m3h': 10.0, 'eta_recup_vent': 0.5, 'apports_internes_w': 100.0}
+        s = serializers.BuildingCalculRequestSerializer(
+            data=self._base_payload(planning=[entry] * 24, heure_debut=5),
+        )
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertEqual(len(s.validated_data['planning']), 24)
+        self.assertEqual(s.validated_data['heure_debut'], 5)
+
+    def test_planning_omitted_defaults_absent_and_heure_debut_to_zero(self):
+        s = serializers.BuildingCalculRequestSerializer(data=self._base_payload())
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertNotIn('planning', s.validated_data)
+        self.assertEqual(s.validated_data['heure_debut'], 0)

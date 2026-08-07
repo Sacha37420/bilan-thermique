@@ -342,9 +342,10 @@ class BuildingInteriorSerializer(serializers.Serializer):
     debit_vent_m3h = serializers.FloatField(required=False, min_value=0.0, max_value=100_000.0, default=0.0)
     eta_recup_vent = serializers.FloatField(required=False, min_value=0.0, max_value=0.95, default=0.0)
     # Apports internes (Lot H) : occupants + éclairage + électroménager, une seule
-    # puissance constante pour tout le run (pas de profil horaire — voir Lot Q du
-    # to_do.md racine) — ignorée en mode 'imposed' pour la même raison que
-    # debit_vent_m3h (Dirichlet écrase la ligne du nœud d'air, voir building_solver.py).
+    # puissance constante pour tout le run si aucun `planning` (Lot Q,
+    # BuildingCalculRequestSerializer) n'est fourni — ignorée en mode 'imposed'
+    # pour la même raison que debit_vent_m3h (Dirichlet écrase la ligne du nœud
+    # d'air, voir building_solver.py).
     apports_internes_w = serializers.FloatField(required=False, min_value=0.0, max_value=1_000_000.0, default=0.0)
 
     def validate(self, data):
@@ -359,6 +360,15 @@ class BuildingInteriorSerializer(serializers.Serializer):
             if data['t_min'] >= data['t_max']:
                 raise serializers.ValidationError("t_min doit être strictement inférieur à t_max.")
         return data
+
+
+class PlanningEntrySerializer(serializers.Serializer):
+    """Une heure d'un `planning` (Lot Q) — mêmes bornes que les champs constants
+    équivalents de BuildingInteriorSerializer, qu'elle remplace heure par heure."""
+
+    debit_vent_m3h = serializers.FloatField(required=False, min_value=0.0, max_value=100_000.0, default=0.0)
+    eta_recup_vent = serializers.FloatField(required=False, min_value=0.0, max_value=0.95, default=0.0)
+    apports_internes_w = serializers.FloatField(required=False, min_value=0.0, max_value=1_000_000.0, default=0.0)
 
 
 class BuildingCalculRequestSerializer(serializers.Serializer):
@@ -376,6 +386,22 @@ class BuildingCalculRequestSerializer(serializers.Serializer):
     # usuelle en France (10-14°C) — dérivation automatique depuis la météo
     # reportée au Lot L (météo réelle datée), voir to_do.md racine.
     t_ground = serializers.FloatField(required=False, min_value=-10.0, max_value=30.0, default=12.0)
+    # Lot Q : profil "jour type" (24 heures, index 0 = minuit) qui remplace heure
+    # par heure debit_vent_m3h/eta_recup_vent/apports_internes_w de `interior` —
+    # modes 'free'/'thermostat' uniquement (ignoré en 'imposed', comme les
+    # constantes qu'il remplace). Absent -> comportement inchangé (constantes de
+    # `interior`).
+    planning = PlanningEntrySerializer(many=True, required=False)
+    # Heure du premier point de `weather` (0=minuit) — sert à indexer le planning
+    # (planning[(heure_debut + hour_idx) % 24]), sans effet si `planning` absent.
+    heure_debut = serializers.IntegerField(required=False, min_value=0, max_value=23, default=0)
+
+    def validate_planning(self, value):
+        if len(value) != 24:
+            raise serializers.ValidationError(
+                f"planning doit contenir exactement 24 entrées (une par heure de la journée), {len(value)} reçue(s)."
+            )
+        return value
 
 
 class DepartmentSerializer(serializers.ModelSerializer):

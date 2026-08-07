@@ -20,6 +20,12 @@ interface WeatherPoint {
   e_dif: number;
 }
 
+interface PlanningEntry {
+  debit_vent_m3h: number;
+  eta_recup_vent: number;
+  apports_internes_w: number;
+}
+
 interface BuildingCalculResult {
   hours: number;
   t_air_mean: number;
@@ -95,6 +101,52 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
 
   // ── Apports internes (modes 'free'/'thermostat' uniquement) ──────────
   apportsInternesW = 0;
+
+  // ── Planning horaire (Lot Q — variation AUTOUR des constantes ci-dessus,
+  // pas un remplacement : actif, il prime heure par heure sur debit_vent_m3h/
+  // eta_recup_vent/apports_internes_w constants) ─────────────────────────
+  usePlanning = false;
+  planningRaw = '';
+  planning = signal<PlanningEntry[]>([]);
+  planningError = signal('');
+  heureDebut = 0;
+
+  parsePlanning(): void {
+    this.planningError.set('');
+    const text = this.planningRaw.trim();
+    if (!text) { this.planning.set([]); return; }
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    const entries: PlanningEntry[] = [];
+    for (const line of lines) {
+      const delim = line.includes(';') ? ';' : ',';
+      const cells = line.split(delim).map(c => c.trim());
+      if (cells.length < 3) continue;
+      const nums = cells.slice(0, 3).map(c => Number(c.replace(',', '.')));
+      if (nums.some(n => Number.isNaN(n))) continue;
+      const [debit_vent_m3h, eta_recup_vent, apports_internes_w] = nums;
+      entries.push({ debit_vent_m3h, eta_recup_vent, apports_internes_w });
+    }
+    if (entries.length !== 24) {
+      this.planningError.set(
+        `24 lignes attendues (une par heure de la journée) — ${entries.length} ligne(s) valide(s) trouvée(s).`,
+      );
+    }
+    this.planning.set(entries);
+  }
+
+  loadPlanningExample(): void {
+    // Profil "jour type" résidentiel plausible : creux nocturne, pointes
+    // matin/soir — un point de départ à ajuster, pas une vérité universelle.
+    const rows: string[] = [];
+    for (let h = 0; h < 24; h++) {
+      const occupied = h < 7 || h >= 19; // présent tôt le matin et le soir
+      const debit = this.debitVentM3h > 0 ? this.debitVentM3h * (occupied ? 1.0 : 0.5) : (occupied ? 60 : 30);
+      const apports = occupied ? 400 : (h >= 7 && h < 19 ? 80 : 40);
+      rows.push([debit.toFixed(1), this.etaRecupVent.toFixed(2), apports.toFixed(0)].join(','));
+    }
+    this.planningRaw = rows.join('\n');
+    this.parsePlanning();
+  }
 
   // ── Aide au calcul de c_air_int (Lot P) — réutilise volumeM3 (même volume
   // d'air que le renouvellement d'air ci-dessous, pas un champ dupliqué) :
@@ -311,6 +363,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   get canSubmit(): boolean {
     const b = this.currentBuilding();
     return b !== null && this.weather().length > 0 &&
+      (!this.usePlanning || this.planning().length === 24) &&
       (this.job() === null || this.job()!.status === 'DONE' || this.job()!.status === 'ERROR');
   }
 
@@ -329,10 +382,17 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     }
     if (this.interiorMode === 'thermostat') { interior['t_min'] = this.tMin; interior['t_max'] = this.tMax; }
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       dx_max: this.dxMax, h_e: this.hE, interior, t_init: this.tInit, weather: this.weather(),
       shadow_mode: this.shadowMode, t_ground: this.tGround,
     };
+    // Planning horaire (Lot Q) : n'est envoyé QUE s'il est actif et complet —
+    // sinon comportement inchangé (constantes de `interior` ci-dessus).
+    if ((this.interiorMode === 'free' || this.interiorMode === 'thermostat') &&
+        this.usePlanning && this.planning().length === 24) {
+      payload['planning'] = this.planning();
+      payload['heure_debut'] = this.heureDebut;
+    }
 
     // Capturé au moment du lancement (pas relu depuis weatherSourceLabel() dans le
     // template) : si l'utilisateur recharge une autre météo pendant que ce calcul
