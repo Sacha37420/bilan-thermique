@@ -1,8 +1,10 @@
 from celery import shared_task
+from django.utils import timezone
 
-from .models import Job, Building, ParoiModel
+from .models import Job, Building, Environment, ParoiModel
 from . import shadow
 from . import building_solver
+from . import geodata
 
 
 @shared_task(bind=True)
@@ -95,6 +97,98 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
                     f"chauffage {result['heating_kwh']:.0f} kWh, clim {result['cooling_kwh']:.0f} kWh.",
         )
     except building_solver.BuildingSimulationError as exc:
+        job.set_state(status=Job.ERROR, message=str(exc))
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=str(exc))
+
+
+@shared_task(bind=True)
+def generate_environment(self, job_id, params):
+    job = Job.objects.get(pk=job_id)
+    job.celery_task_id = self.request.id
+    job.save(update_fields=['celery_task_id'])
+
+    stage_messages = {
+        'bbox': "Préparation de la zone…",
+        'ign': "Interrogation de l'IGN (BD TOPO)…",
+        'osm': "Repli sur OpenStreetMap…",
+        'extrude': "Extrusion des bâtiments…",
+        'done': "Assemblage du maillage…",
+    }
+
+    def progress_cb(stage, pct):
+        job.set_state(status=Job.RUNNING, progress=pct, message=stage_messages.get(stage, ''))
+
+    try:
+        job.set_state(status=Job.RUNNING, progress=0, message=stage_messages['bbox'])
+        result = geodata.generate_environment_mesh(
+            params['lat'], params['lon'], params['radius_m'], progress_cb=progress_cb,
+        )
+        job.result = result
+        job.save(update_fields=['result'])
+        n_triangles = len(result['triangles'])
+        stats = result['stats']
+        job.set_state(
+            status=Job.DONE, progress=100,
+            message=f"{stats['buildings_used']} bâtiment(s), {n_triangles} triangles "
+                    f"(IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']}).",
+        )
+    except geodata.GeodataError as exc:
+        job.set_state(status=Job.ERROR, message=str(exc))
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=str(exc))
+
+
+@shared_task(bind=True)
+def generate_environment_for_building(self, job_id, building_id, radius_m):
+    """Comme generate_environment, mais génère directement dans le repère local du
+    Building (via ses champs georef_*) et crée/lie l'Environment résultant — pas
+    d'étape de relecture manuelle nécessaire, contrairement à la génération autonome :
+    le repère est correct par construction dès lors que le bâtiment est géoréférencé."""
+    job = Job.objects.get(pk=job_id)
+    job.celery_task_id = self.request.id
+    job.save(update_fields=['celery_task_id'])
+
+    stage_messages = {
+        'bbox': "Préparation de la zone…",
+        'ign': "Interrogation de l'IGN (BD TOPO)…",
+        'osm': "Repli sur OpenStreetMap…",
+        'extrude': "Extrusion des bâtiments…",
+        'done': "Assemblage du maillage…",
+    }
+
+    def progress_cb(stage, pct):
+        job.set_state(status=Job.RUNNING, progress=pct, message=stage_messages.get(stage, ''))
+
+    try:
+        job.set_state(status=Job.RUNNING, progress=0, message=stage_messages['bbox'])
+        building = Building.objects.get(pk=building_id)
+        result = geodata.generate_environment_mesh(
+            building.georef_lat, building.georef_lon, radius_m, progress_cb=progress_cb,
+            north_offset_deg=building.georef_north_offset_deg, ground_z_ref=building.georef_ground_z,
+        )
+
+        env = Environment.objects.create(
+            name=f"Auto — {building.name} — {timezone.now():%Y-%m-%d %H:%M}",
+            envelope={'vertices': result['vertices'], 'triangles': result['triangles']},
+        )
+        building.environment = env
+        building.sun_visibility_stale = True
+        building.save(update_fields=['environment', 'sun_visibility_stale', 'updated_at'])
+
+        job.result = {
+            'environment_id': env.id, 'environment_name': env.name,
+            'stats': result['stats'], 'warnings': result['warnings'],
+        }
+        job.save(update_fields=['result'])
+        stats = result['stats']
+        n_triangles = len(result['triangles'])
+        job.set_state(
+            status=Job.DONE, progress=100,
+            message=f"« {env.name} » créé et lié — {stats['buildings_used']} bâtiment(s), "
+                    f"{n_triangles} triangles (IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']}).",
+        )
+    except geodata.GeodataError as exc:
         job.set_state(status=Job.ERROR, message=str(exc))
     except Exception as exc:
         job.set_state(status=Job.ERROR, message=str(exc))

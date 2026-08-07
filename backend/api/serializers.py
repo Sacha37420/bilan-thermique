@@ -148,6 +148,12 @@ class BuildingSerializer(serializers.Serializer):
     environment_id = serializers.PrimaryKeyRelatedField(
         source='environment', queryset=Environment.objects.all(), required=False, allow_null=True,
     )
+    georef_lat = serializers.FloatField(required=False, allow_null=True, default=None,
+                                         min_value=-90.0, max_value=90.0)
+    georef_lon = serializers.FloatField(required=False, allow_null=True, default=None,
+                                         min_value=-180.0, max_value=180.0)
+    georef_north_offset_deg = serializers.FloatField(required=False, default=0.0)
+    georef_ground_z = serializers.FloatField(required=False, allow_null=True, default=None)
     sun_visibility_stale = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
@@ -220,6 +226,20 @@ class BuildingSerializer(serializers.Serializer):
 
 class RefineMeshRequestSerializer(serializers.Serializer):
     max_edge_length = serializers.FloatField(min_value=0.02, max_value=50.0)
+
+
+class GenerateEnvironmentRequestSerializer(serializers.Serializer):
+    """POST /api/environnements/generer/ — voir api.geodata.generate_environment_mesh."""
+
+    lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
+    lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
+    radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
+
+
+class GenerateBuildingEnvironmentRequestSerializer(serializers.Serializer):
+    """POST /api/batiments/<id>/generer-environnement/ — voir tasks.generate_environment_for_building."""
+
+    radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
 
 
 class WeatherPointSerializer(serializers.Serializer):

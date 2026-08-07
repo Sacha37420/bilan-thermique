@@ -7,7 +7,8 @@ from .models import Department, UserRecord, ParoiModel, Building, Environment, J
 from .serializers import (
     DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer, ParoiModelSerializer,
     BuildingSerializer, EnvironmentSerializer, JobSerializer, BuildingCalculRequestSerializer,
-    RefineMeshRequestSerializer,
+    RefineMeshRequestSerializer, GenerateEnvironmentRequestSerializer,
+    GenerateBuildingEnvironmentRequestSerializer,
 )
 from . import solver
 from . import tasks
@@ -87,6 +88,34 @@ class BuildingDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = BuildingSerializer
 
 
+class GenerateBuildingEnvironmentView(APIView):
+    """
+    POST /api/batiments/<id>/generer-environnement/  {radius_m}
+    Génère en tâche de fond un environnement dans le repère local de ce bâtiment
+    géoréférencé (api.geodata + Building.georef_*), crée l'Environment et le lie
+    directement au bâtiment — voir tasks.generate_environment_for_building.
+    """
+
+    def post(self, request, pk):
+        building = get_object_or_404(Building, pk=pk)
+        if building.georef_lat is None or building.georef_lon is None:
+            return Response(
+                {'detail': "Ce bâtiment n'a pas de géoréférencement — renseignez latitude/longitude "
+                           "avant de générer un environnement."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = GenerateBuildingEnvironmentRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        job = Job.objects.create(
+            kind='generate_environment_for_building',
+            params={'building_id': building.pk, **serializer.validated_data},
+        )
+        tasks.generate_environment_for_building.delay(job.id, building.pk, serializer.validated_data['radius_m'])
+        return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+
+
 class EnvironmentListCreateView(generics.ListCreateAPIView):
     """GET/POST /api/environnements/ — maillages d'environnement (obstacles)."""
 
@@ -99,6 +128,23 @@ class EnvironmentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     queryset         = Environment.objects.all()
     serializer_class = EnvironmentSerializer
+
+
+class GenerateEnvironmentView(APIView):
+    """
+    POST /api/environnements/generer/  {lat, lon, radius_m}
+    Génère en tâche de fond un maillage d'obstacles depuis l'IGN (BD TOPO, France)
+    avec repli OpenStreetMap (api.geodata), à réviser puis enregistrer via le flux
+    d'upload existant — ne crée pas d'Environment directement.
+    """
+
+    def post(self, request):
+        serializer = GenerateEnvironmentRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        job = Job.objects.create(kind='generate_environment', params=serializer.validated_data)
+        tasks.generate_environment.delay(job.id, serializer.validated_data)
+        return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
 class JobDetailView(generics.RetrieveAPIView):

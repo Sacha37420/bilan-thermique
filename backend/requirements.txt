@@ -16,3 +16,8 @@ redis>=5.0
 # ── Géométrie 3D (occlusion solaire, maillages bâtiment/environnement) ────────
 trimesh>=4.0
 rtree>=1.1
+shapely>=2.0
+mapbox_earcut>=1.0
+
+# ── Génération auto d'environnement (IGN Géoplateforme WFS / Overpass OSM) ────
+requests>=2.31

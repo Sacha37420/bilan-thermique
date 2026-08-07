@@ -1,9 +1,9 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
-import { EnvironmentMesh } from '../../core/building.types';
+import { EnvironmentMesh, Job } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 
 interface EnvironmentSummary {
@@ -13,6 +13,15 @@ interface EnvironmentSummary {
   updated_at: string;
 }
 
+interface GenerateEnvironmentResult {
+  vertices: number[][];
+  triangles: { v: [number, number, number] }[];
+  warnings: string[];
+  stats: { buildings_used: number; buildings_ign: number; buildings_osm: number; buildings_skipped: number };
+}
+
+const POLL_INTERVAL_MS = 2000;
+
 @Component({
   selector: 'app-environnement',
   standalone: true,
@@ -20,7 +29,7 @@ interface EnvironmentSummary {
   templateUrl: './environnement.component.html',
   styleUrl: './environnement.component.scss',
 })
-export class EnvironnementComponent implements OnInit {
+export class EnvironnementComponent implements OnInit, OnDestroy {
   private api = inject(ApiService);
 
   environments = signal<EnvironmentSummary[]>([]);
@@ -36,10 +45,21 @@ export class EnvironnementComponent implements OnInit {
   error = signal('');
   message = signal('');
 
+  genLat = 48.8566;
+  genLon = 2.3522;
+  genRadius = 150;
+  generating = signal(false);
+  generateJob = signal<Job | null>(null);
+  private pollHandle?: ReturnType<typeof setInterval>;
+
   colorForTriangle = (): string => '--text-mute';
 
   ngOnInit(): void {
     this.refresh();
+  }
+
+  ngOnDestroy(): void {
+    this.stopGeneratePoll();
   }
 
   private refresh(): void {
@@ -141,5 +161,73 @@ export class EnvironnementComponent implements OnInit {
       },
       error: () => this.error.set('Échec de la suppression (peut-être encore lié à un bâtiment).'),
     });
+  }
+
+  // ── Génération automatique depuis IGN (BD TOPO) / OpenStreetMap ──────────────
+  generateFromCoordinates(): void {
+    this.error.set('');
+    this.message.set('');
+    this.generating.set(true);
+    this.generateJob.set(null);
+
+    this.api.generateEnvironment({ lat: this.genLat, lon: this.genLon, radius_m: this.genRadius }).subscribe({
+      next: (res) => {
+        this.generateJob.set(res as Job);
+        this.startGeneratePoll();
+      },
+      error: (err) => {
+        this.generating.set(false);
+        this.error.set(
+          err?.error?.radius_m?.[0] ?? err?.error?.lat?.[0] ?? err?.error?.lon?.[0]
+          ?? err?.error?.detail ?? "Échec du lancement de la génération.",
+        );
+      },
+    });
+  }
+
+  private startGeneratePoll(): void {
+    this.stopGeneratePoll();
+    const job = this.generateJob();
+    if (!job) return;
+    this.pollHandle = setInterval(() => {
+      this.api.getJob(job.id).subscribe({
+        next: (res) => {
+          const updated = res as Job;
+          this.generateJob.set(updated);
+          if (updated.status === 'DONE' || updated.status === 'ERROR') {
+            this.stopGeneratePoll();
+            this.generating.set(false);
+            if (updated.status === 'DONE') {
+              this.applyGeneratedResult(updated.result as unknown as GenerateEnvironmentResult);
+            } else {
+              this.error.set(updated.message || 'Échec de la génération.');
+            }
+          }
+        },
+      });
+    }, POLL_INTERVAL_MS);
+  }
+
+  private stopGeneratePoll(): void {
+    if (this.pollHandle) {
+      clearInterval(this.pollHandle);
+      this.pollHandle = undefined;
+    }
+  }
+
+  private applyGeneratedResult(result: GenerateEnvironmentResult): void {
+    this.currentId.set(null);
+    this.name = `Environnement (${this.genLat.toFixed(4)}, ${this.genLon.toFixed(4)})`;
+    this.description = '';
+    this.vertices.set(result.vertices);
+    this.triangles.set(result.triangles);
+
+    const stats = result.stats;
+    const parts = [`${stats.buildings_used} bâtiment(s)`, `${result.triangles.length} triangles`];
+    if (stats.buildings_ign > 0) parts.push(`IGN : ${stats.buildings_ign}`);
+    if (stats.buildings_osm > 0) parts.push(`OSM : ${stats.buildings_osm}`);
+    let msg = `Généré — ${parts.join(', ')}.`;
+    if (result.warnings.length > 0) msg += ' ' + result.warnings.join(' ');
+    this.message.set(msg);
   }
 }

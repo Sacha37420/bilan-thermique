@@ -68,7 +68,7 @@ label {
   color: var(--text);
 }
 
-input[type="text"] {
+input[type="text"], input[type="number"] {
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   color: var(--text);
@@ -79,6 +79,33 @@ input[type="text"] {
   min-height: 40px;
 
   &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
+
+.generate-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  background: var(--bg);
+
+  h3 { font-size: var(--text-base); margin: 0 0 var(--space-2); }
+}
+
+.job-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin-top: var(--space-3);
+
+  .job-label { font-weight: 700; text-transform: uppercase; }
+  .job-progress { font-variant-numeric: tabular-nums; }
+  .job-message { color: var(--text-mute); }
+
+  &.done .job-label { color: var(--success); }
+  &.error .job-label { color: var(--danger); }
+  &.running .job-label, &.pending .job-label { color: var(--accent); }
 }
 
 .file-label {

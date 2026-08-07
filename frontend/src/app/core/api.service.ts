@@ -75,6 +75,10 @@ export class ApiService {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/precalcul-ombrage/`, {});
   }
 
+  generateBuildingEnvironment(buildingId: number, radiusM: number): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/${buildingId}/generer-environnement/`, { radius_m: radiusM });
+  }
+
   getJob(id: number): Observable<unknown> {
     return this.http.get(`${this.base}/api/jobs/${id}/`);
   }
@@ -97,6 +101,10 @@ export class ApiService {
 
   deleteEnvironment(id: number): Observable<unknown> {
     return this.http.delete(`${this.base}/api/environnements/${id}/`);
+  }
+
+  generateEnvironment(payload: { lat: number; lon: number; radius_m: number }): Observable<unknown> {
+    return this.http.post(`${this.base}/api/environnements/generer/`, payload);
   }
 
   runBuildingCalcul(buildingId: number, payload: unknown): Observable<unknown> {

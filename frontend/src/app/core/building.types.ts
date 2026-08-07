@@ -32,6 +32,10 @@ export interface Building {
   description: string;
   envelope: Envelope;
   environment_id: number | null;
+  georef_lat: number | null;
+  georef_lon: number | null;
+  georef_north_offset_deg: number;
+  georef_ground_z: number | null;
   sun_visibility_stale: boolean;
   created_at: string;
   updated_at: string;

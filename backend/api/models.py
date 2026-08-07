@@ -118,6 +118,16 @@ class Building(models.Model):
     environment = models.ForeignKey(
         Environment, null=True, blank=True, on_delete=models.SET_NULL, related_name='buildings',
     )
+
+    # Géoréférencement (optionnel) — ancre le repère local du bâtiment (0,0 = ce point,
+    # +Y = ce cap réel) dans le monde réel, pour que la génération automatique
+    # d'environnement (api.geodata) place les obstacles dans le même repère que le
+    # bâtiment plutôt que de laisser l'alignement à la charge de l'utilisateur.
+    georef_lat = models.FloatField(null=True, blank=True)
+    georef_lon = models.FloatField(null=True, blank=True)
+    georef_north_offset_deg = models.FloatField(default=0.0)
+    georef_ground_z = models.FloatField(null=True, blank=True)
+
     sun_visibility = models.JSONField(default=dict, blank=True)
     sun_visibility_stale = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

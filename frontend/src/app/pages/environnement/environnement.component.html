@@ -50,6 +50,45 @@
       <input type="file" accept=".obj,.stl" (change)="onFileSelected($event)" />
     </label>
 
+    <div class="generate-block">
+      <h3>Ou générer depuis des coordonnées</h3>
+      <p class="hint">
+        Bâtiments voisins extrudés automatiquement depuis l'IGN (BD TOPO, France) — repli sur
+        OpenStreetMap hors de France ou si l'IGN est indisponible. Terrain supposé plat.
+      </p>
+      <p class="hint">
+        Génération exploratoire — ne garantit <strong>pas</strong> l'alignement (position, rotation,
+        altitude) avec un bâtiment existant. Pour un résultat aligné automatiquement, utilisez
+        l'action dédiée sur la page <a routerLink="/batiment">Bâtiment</a> (nécessite de géoréférencer
+        le bâtiment au préalable).
+      </p>
+      <div class="field-grid">
+        <label>
+          <span>Latitude</span>
+          <input type="number" step="0.0001" min="-90" max="90" [(ngModel)]="genLat" name="genLat" />
+        </label>
+        <label>
+          <span>Longitude</span>
+          <input type="number" step="0.0001" min="-180" max="180" [(ngModel)]="genLon" name="genLon" />
+        </label>
+        <label>
+          <span>Rayon (m)</span>
+          <input type="number" step="10" min="10" max="400" [(ngModel)]="genRadius" name="genRadius" />
+        </label>
+      </div>
+      <button type="button" class="btn-secondary" (click)="generateFromCoordinates()" [disabled]="generating()">
+        {{ generating() ? 'Génération…' : 'Générer' }}
+      </button>
+
+      @if (generateJob(); as job) {
+        <div class="job-status" [class]="job.status.toLowerCase()">
+          <span class="job-label">{{ job.status }}</span>
+          <span class="job-progress">{{ job.progress }}%</span>
+          <span class="job-message">{{ job.message }}</span>
+        </div>
+      }
+    </div>
+
     @if (message()) { <p class="feedback ok">{{ message() }}</p> }
     @if (error()) { <p class="feedback error">{{ error() }}</p> }
 

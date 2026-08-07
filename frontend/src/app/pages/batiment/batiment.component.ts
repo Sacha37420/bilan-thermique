@@ -54,9 +54,21 @@ export class BatimentComponent implements OnInit, OnDestroy {
   selectedEnvironmentId: number | null = null;
   sunVisibilityStale = signal(true);
 
+  // ── Géoréférencement (optionnel) ──────────────────────────────────────
+  georefLat: number | null = null;
+  georefLon: number | null = null;
+  georefNorthOffset = 0;
+  georefGroundZ: number | null = null;
+
   // ── Précalcul d'ombrage (Celery, cf. api/tasks.py) ────────────────────
   shadowJob = signal<Job | null>(null);
   private pollHandle?: ReturnType<typeof setInterval>;
+
+  // ── Génération d'environnement pour ce bâtiment ───────────────────────
+  envGenJob = signal<Job | null>(null);
+  envGenerating = signal(false);
+  envGenRadius = 150;
+  private envGenPollHandle?: ReturnType<typeof setInterval>;
 
   vertices = signal<number[][]>([]);
   triangles = signal<WorkingTriangle[]>([]);
@@ -85,6 +97,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopPoll();
+    this.stopEnvGenPoll();
   }
 
   private refreshParoiModels(): void {
@@ -213,6 +226,8 @@ export class BatimentComponent implements OnInit, OnDestroy {
     const payload: Record<string, unknown> = {
       name, description: this.buildingDescription, triangles,
       environment_id: this.selectedEnvironmentId,
+      georef_lat: this.georefLat, georef_lon: this.georefLon,
+      georef_north_offset_deg: this.georefNorthOffset, georef_ground_z: this.georefGroundZ,
     };
     // Les sommets ne sont renvoyés que lors d'un nouvel import (nouveau
     // bâtiment, ou fichier rechargé) — sinon on les laisse tels quels côté
@@ -241,7 +256,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
     });
   }
 
-  loadBuilding(summary: BuildingSummary): void {
+  loadBuilding(summary: { id: number }): void {
     this.loading.set(true);
     this.error.set('');
     this.message.set('');
@@ -258,9 +273,15 @@ export class BatimentComponent implements OnInit, OnDestroy {
         this.selectedIndices.set(new Set());
         this.modelColorMap.clear();
         this.selectedEnvironmentId = b.environment_id;
+        this.georefLat = b.georef_lat;
+        this.georefLon = b.georef_lon;
+        this.georefNorthOffset = b.georef_north_offset_deg;
+        this.georefGroundZ = b.georef_ground_z;
         this.sunVisibilityStale.set(b.sun_visibility_stale);
         this.shadowJob.set(null);
         this.stopPoll();
+        this.envGenJob.set(null);
+        this.stopEnvGenPoll();
         this.loading.set(false);
       },
       error: () => {
@@ -281,9 +302,15 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.selectedIndices.set(new Set());
     this.modelColorMap.clear();
     this.selectedEnvironmentId = null;
+    this.georefLat = null;
+    this.georefLon = null;
+    this.georefNorthOffset = 0;
+    this.georefGroundZ = null;
     this.sunVisibilityStale.set(true);
     this.shadowJob.set(null);
     this.stopPoll();
+    this.envGenJob.set(null);
+    this.stopEnvGenPoll();
     this.error.set('');
     this.message.set('');
   }
@@ -355,6 +382,58 @@ export class BatimentComponent implements OnInit, OnDestroy {
     if (this.pollHandle) {
       clearInterval(this.pollHandle);
       this.pollHandle = undefined;
+    }
+  }
+
+  // ── Génération d'environnement pour ce bâtiment (aligné via georef_*) ────
+  generateEnvironmentForBuilding(): void {
+    const id = this.currentBuildingId();
+    if (id === null || this.georefLat === null || this.georefLon === null) return;
+    this.error.set('');
+    this.message.set('');
+    this.envGenerating.set(true);
+    this.api.generateBuildingEnvironment(id, this.envGenRadius).subscribe({
+      next: (res) => {
+        this.envGenJob.set(res as Job);
+        this.startEnvGenPoll();
+      },
+      error: (err) => {
+        this.envGenerating.set(false);
+        this.error.set(err?.error?.detail ?? err?.error?.radius_m?.[0] ?? "Échec du lancement de la génération.");
+      },
+    });
+  }
+
+  private startEnvGenPoll(): void {
+    this.stopEnvGenPoll();
+    const job = this.envGenJob();
+    const buildingId = this.currentBuildingId();
+    if (!job || buildingId === null) return;
+    this.envGenPollHandle = setInterval(() => {
+      this.api.getJob(job.id).subscribe({
+        next: (res) => {
+          const updated = res as Job;
+          this.envGenJob.set(updated);
+          if (updated.status === 'DONE' || updated.status === 'ERROR') {
+            this.stopEnvGenPoll();
+            this.envGenerating.set(false);
+            if (updated.status === 'DONE') {
+              this.refreshEnvironments();
+              this.loadBuilding({ id: buildingId });
+              this.message.set(updated.message);
+            } else {
+              this.error.set(updated.message || 'Échec de la génération.');
+            }
+          }
+        },
+      });
+    }, POLL_INTERVAL_MS);
+  }
+
+  private stopEnvGenPoll(): void {
+    if (this.envGenPollHandle) {
+      clearInterval(this.envGenPollHandle);
+      this.envGenPollHandle = undefined;
     }
   }
 
