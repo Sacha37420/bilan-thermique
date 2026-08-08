@@ -32,6 +32,27 @@
   <section class="form-card">
     <h2>{{ currentBuildingId() === null ? 'Nouveau bâtiment' : 'Modifier « ' + buildingName + ' »' }}</h2>
 
+    @if (currentBuildingId() !== null) {
+      <div class="checklist">
+        @for (item of checklist; track item.label) {
+          <a class="checklist-item" [class.done]="item.done" [href]="item.anchor" [title]="item.hint">
+            <span class="status-badge" [class.done]="item.done" [class.todo]="!item.done">
+              {{ item.done ? '✓' : '—' }}
+            </span>
+            <span class="checklist-label">{{ item.label }}</span>
+          </a>
+        }
+        <a class="checklist-item next-step" routerLink="/calcul-3d">
+          <span class="status-badge todo">→</span>
+          <span class="checklist-label">Construire la météo et lancer le calcul (Calcul 3D)</span>
+        </a>
+      </div>
+      <p class="hint">
+        Étape météo non trackée ci-dessus : elle n'est jamais enregistrée avec le bâtiment (Lot L),
+        elle se construit à chaque fois sur la page Calcul 3D.
+      </p>
+    }
+
     <div class="field-grid">
       <label>
         <span>Nom</span>
@@ -51,7 +72,7 @@
       du calcul 3D — ne change rien au calcul lui-même.
     </p>
 
-    <div class="shadow-block">
+    <div class="shadow-block" id="section-georef">
       <h3>Géoréférencement (optionnel)</h3>
       <p class="hint">
         Ancre le repère local de ce bâtiment dans le monde réel, pour que la génération
@@ -108,7 +129,7 @@
         </div>
       </div>
 
-      <div class="shadow-block">
+      <div class="shadow-block" id="section-ombrage">
         <h3>Ombrage</h3>
         <div class="shadow-row">
           <label class="inline-label">
@@ -124,7 +145,7 @@
             Précalculer l'ombrage
           </button>
           @if (sunVisibilityStale()) {
-            <span class="stale-badge">périmé — à recalculer</span>
+            <span class="status-badge todo">périmé — à recalculer</span>
           }
         </div>
         <p class="hint">
@@ -178,7 +199,7 @@
     }
 
     @if (totalCount > 0) {
-      <p class="summary">
+      <p class="summary" id="section-assignation">
         <strong>{{ assignedCount }} / {{ totalCount }}</strong> triangles assignés à un modèle de paroi.
       </p>
 

@@ -230,6 +230,44 @@ export class BatimentComponent implements OnInit, OnDestroy {
     return this.triangles().length;
   }
 
+  // ── Checklist de progression (Lot N) — généralise le badge "ombrage
+  // périmé" existant à l'ensemble du parcours. Dérivée uniquement de l'état
+  // déjà chargé côté client (aucun nouvel appel réseau). La météo n'y figure
+  // volontairement pas : elle n'est jamais persistée côté serveur (Lot L,
+  // décision assumée), donc aucun état de "bâtiment" ne peut refléter si une
+  // météo a été chargée sur la page Calcul 3D — un lien de suite (dans le
+  // template) reste possible, un item coché/décoché non.
+  get checklist(): { label: string; done: boolean; hint: string; anchor: string }[] {
+    return [
+      {
+        label: 'Parois assignées',
+        done: this.totalCount > 0 && this.assignedCount === this.totalCount,
+        hint: this.totalCount === 0
+          ? 'Importez un maillage pour commencer.'
+          : `${this.assignedCount} / ${this.totalCount} triangles assignés.`,
+        anchor: '#section-assignation',
+      },
+      {
+        label: 'Géoréférencement',
+        done: this.georefLat !== null && this.georefLon !== null,
+        hint: 'Optionnel — nécessaire pour aligner automatiquement un environnement et une météo.',
+        anchor: '#section-georef',
+      },
+      {
+        label: 'Environnement lié',
+        done: this.selectedEnvironmentId !== null,
+        hint: "Optionnel — sans lui, seul l'auto-ombrage du bâtiment sur lui-même compte.",
+        anchor: '#section-ombrage',
+      },
+      {
+        label: 'Ombrage à jour',
+        done: !this.sunVisibilityStale(),
+        hint: this.sunVisibilityStale() ? 'Périmé ou jamais calculé — relancez le précalcul.' : 'À jour.',
+        anchor: '#section-ombrage',
+      },
+    ];
+  }
+
   // ── Sauvegarde / chargement ──────────────────────────────────────────
   save(): void {
     const name = this.buildingName.trim();
