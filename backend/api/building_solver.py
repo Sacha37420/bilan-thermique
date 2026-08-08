@@ -12,9 +12,14 @@ insertion dans le système global.
 Nombre de triangles pouvant monter à quelques milliers, le système global
 (quelques milliers à dizaines de milliers de degrés de liberté, mais
 extrêmement creux — chaque triangle n'est couplé qu'à lui-même et au nœud
-d'air partagé) est résolu en creux (scipy.sparse), avec factorisation LU une
-seule fois (les matrices ne changent pas d'une heure à l'autre, seul le
-second membre change).
+d'air partagé) est résolu en creux (scipy.sparse), avec factorisation LU en
+principe une seule fois — les matrices ne changent pas d'une heure à l'autre
+dans le cas de base, seul le second membre change. Deux paramètres, s'ils
+varient dans le temps, entrent néanmoins dans la matrice elle-même plutôt que
+dans le seul second membre : g_vent (Lot Q, jusqu'à 24 valeurs via un planning
+horaire) et h_e (Lot R, jusqu'à quelques dizaines de valeurs via le vent réel)
+— la factorisation est alors refaite une fois PAR COMBINAISON DISTINCTE des
+deux réellement rencontrée, jamais par heure simulée (voir _factorize_for).
 
 Rayonnement solaire : chaque triangle a sa propre orientation (tilt_deg,
 azimuth_deg, normal — calculés par api.geometry à l'import) et sa propre
@@ -41,17 +46,62 @@ MAX_WEATHER_POINTS = 8784
 # une fois pour toutes) : au-delà, le calcul monopoliserait le worker du lab
 # (--concurrency=1) trop longtemps.
 MAX_REALTIME_RAYCAST_OPS = 2_000_000
+# Nombre de combinaisons DISTINCTES (g_vent, h_e) — chacune une factorisation
+# LU (Lot Q + Lot R) — au-delà duquel on refuse plutôt que de laisser un run
+# pathologique (météo artificiellement bruitée) monopoliser le worker. Mesuré
+# en réel (to_do.md, Lot R) : ~340 au pire sur un an de vent réel (Paris/Brest)
+# combiné à un planning de ventilation à 24 valeurs toutes distinctes — marge
+# large.
+MAX_DISTINCT_BOUNDARY_COMBOS = 2000
 
 
 class BuildingSimulationError(ValueError):
     pass
 
 
-def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i):
-    """Une entrée par triangle : (mesh, K, C, layers), K/C par unité de
-    surface avec h_e/h_i déjà posés sur les nœuds 0/dernier (comme dans
-    solver.run_simulation) — mise en cache par (paroi_model_id, dx_max),
-    beaucoup de triangles partageant le même modèle de paroi."""
+# ── Lot R : h_e dynamique (vent) et h_i par orientation ──────────────────────
+
+# Corrélation de Jürges — h_e (W/m²K) depuis la vitesse de vent à 10 m (m/s).
+# Choisie plutôt que McAdams (5,7 + 3,8·v, très proche numériquement, écart
+# <5% sur la plage usuelle) car plus couramment citée en physique du bâtiment
+# française — voir to_do.md, Lot R. Une seule valeur pour tout le bâtiment à
+# une heure donnée : l'orientation de chaque façade par rapport à la direction
+# du vent (face au vent / sous le vent) n'est volontairement PAS modélisée —
+# simplification assumée, pas un oubli.
+JURGES_A = 5.8
+JURGES_B = 3.94
+
+
+def h_e_from_wind(wind_m_s):
+    return JURGES_A + JURGES_B * max(wind_m_s, 0.0)
+
+
+# ISO 6946 (Rsi) — résistance superficielle intérieure selon la direction du
+# flux de chaleur : classée par TYPE d'élément (mur/plafond/plancher), pas par
+# le signe instantané du flux à un instant donné — même convention que la
+# norme elle-même, cohérent avec le fait que h_i n'a jamais varié dans le
+# temps dans ce solveur (seulement, désormais, d'un triangle à l'autre).
+H_I_WALL = 7.7      # flux horizontal (mur, tilt_deg proche de 90°)
+H_I_CEILING = 10.0  # flux montant (plafond/toiture, tilt_deg proche de 0°)
+H_I_FLOOR = 5.9     # flux descendant (plancher/sol, tilt_deg proche de 180°)
+
+
+def h_i_from_tilt(tilt_deg):
+    if tilt_deg <= 60.0:
+        return H_I_CEILING
+    if tilt_deg >= 120.0:
+        return H_I_FLOOR
+    return H_I_WALL
+
+
+def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max):
+    """Une entrée par triangle : (mesh, K, C, layers), K/C « nues » — par unité
+    de surface, SANS h_e ni h_i (posés par _assemble_global_kc/run_building_simulation,
+    voir Lot R : h_e varie par HEURE, h_i par TRIANGLE, ni l'un ni l'autre n'est
+    plus une constante unique bakeable ici une fois pour toutes). Mise en cache
+    par (paroi_model_id, dx_max) uniquement — ce cache ne dépend donc plus des
+    coefficients de convection, beaucoup de triangles partageant le même
+    modèle de paroi."""
     cache = {}
     systems = []
     total_nodes = 0
@@ -66,9 +116,6 @@ def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i):
             layers = paroi_layers_by_id[pid]
             mesh = wall_solver._build_mesh(layers, dx_max)
             K, C = wall_solver._assemble_kc(mesh)
-            K = K.copy()
-            K[0, 0] += h_e
-            K[-1, -1] += h_i
             cache[key] = (mesh, K, C, layers)
         systems.append(cache[key])
         total_nodes += cache[key][0]['n_wall_nodes']
@@ -80,13 +127,24 @@ def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i):
     return systems
 
 
-def _assemble_global_kc(systems, areas, h_i, frame_g=None):
-    """frame_g : liste optionnelle (une par triangle, Lot I) — conductance directe
-    du cadre de fenêtre vers le nœud d'air, ajoutée à K_global[air_idx,air_idx]
-    exactement comme g_vent (Lot G), mais PAR TRIANGLE plutôt qu'un terme global
-    unique (des fenêtres différentes peuvent avoir des cadres différents). Le
-    cadre n'a pas de nœud de surface propre (pas de comportement optique, capacité
-    négligeable — voir ParoiModel.frame_u/frame_fraction)."""
+def _assemble_global_kc(systems, areas, h_i_list, frame_g=None):
+    """h_i_list : une valeur PAR TRIANGLE (Lot R — ISO 6946 par orientation via
+    h_i_from_tilt, ou la même constante répétée pour tous si h_i_auto est
+    désactivé — voir run_building_simulation) : remplace l'ancien h_i scalaire
+    unique. frame_g : liste optionnelle (une par triangle, Lot I) — conductance
+    directe du cadre de fenêtre vers le nœud d'air, ajoutée à
+    K_global[air_idx,air_idx] exactement comme g_vent (Lot G), mais PAR TRIANGLE
+    plutôt qu'un terme global unique (des fenêtres différentes peuvent avoir des
+    cadres différents). Le cadre n'a pas de nœud de surface propre (pas de
+    comportement optique, capacité négligeable — voir ParoiModel.frame_u/
+    frame_fraction).
+
+    Retourne aussi K_e_pattern (Lot R) : motif de sensibilité à h_e, +area_i sur
+    la diagonale du PREMIER nœud (extérieur) de chaque triangle. h_e varie par
+    HEURE (vent), pas par triangle : plutôt que reconstruire tout K_global à
+    chaque valeur distincte de h_e rencontrée, K_global_final = K_global + h_e *
+    K_e_pattern (relation linéaire, addition creuse peu coûteuse) — voir
+    _factorize_for."""
     offsets = []
     total = 0
     for mesh, K, C, layers in systems:
@@ -97,16 +155,20 @@ def _assemble_global_kc(systems, areas, h_i, frame_g=None):
 
     K_global = sp.lil_matrix((n_dof, n_dof))
     C_global = sp.lil_matrix((n_dof, n_dof))
+    K_e_pattern = sp.lil_matrix((n_dof, n_dof))
 
     for i, (mesh, K, C, layers) in enumerate(systems):
         off = offsets[i]
         n = mesh['n_wall_nodes']
         area = areas[i]
         last = off + n - 1
+        h_i = h_i_list[i]
 
         K_global[off:off + n, off:off + n] += K * area
         C_global[off:off + n, off:off + n] += C * area
+        K_e_pattern[off, off] += area
 
+        K_global[last, last] += h_i * area
         K_global[last, air_idx] -= h_i * area
         K_global[air_idx, last] -= h_i * area
         K_global[air_idx, air_idx] += h_i * area
@@ -114,7 +176,7 @@ def _assemble_global_kc(systems, areas, h_i, frame_g=None):
         if frame_g is not None and frame_g[i]:
             K_global[air_idx, air_idx] += frame_g[i]
 
-    return K_global.tocsc(), C_global.tocsc(), offsets, air_idx, n_dof
+    return K_global.tocsc(), C_global.tocsc(), K_e_pattern.tocsc(), offsets, air_idx, n_dof
 
 
 def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
@@ -122,7 +184,10 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
                       occluder_intersector=None, centroids=None,
                       air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None,
                       frame_g=None):
-    """sky_view_factor : liste par triangle (précalculée OU recalculée en
+    """h_e : la valeur DE CETTE HEURE (Lot R — constante du run, ou dérivée du
+    vent via h_e_from_wind par l'appelant), une seule pour tout le bâtiment
+    (pas par triangle, voir h_e_from_wind).
+    sky_view_factor : liste par triangle (précalculée OU recalculée en
     temps réel par l'appelant) ou None -> repli analytique par triangle.
     Occlusion du rayon direct — deux sources mutuellement exclusives :
       - sun_visibility_grid : lookup dans la grille précalculée (Lot C).
@@ -236,12 +301,19 @@ def _g_vent_from(source):
     return 0.34 * source.get('debit_vent_m3h', 0.0) * (1.0 - source.get('eta_recup_vent', 0.0))
 
 
-def _factorize_for_g_vent(K_global_no_vent, C_global, air_idx, mode, g_vent):
-    """Construit K_global[air_idx,air_idx] += g_vent puis factorise (spla.splu,
-    l'opération coûteuse) le(s) système(s) linéaire(s) nécessaires au mode donné —
-    à appeler une fois PAR VALEUR DISTINCTE de g_vent rencontrée dans un `planning`
-    (Lot Q), jamais une fois par heure simulée (K_global_no_vent/C_global ne sont
-    pas mutées : `.tolil()` en crée toujours une copie).
+def _factorize_for(K_global_base, K_e_pattern, C_global, air_idx, mode, g_vent, h_e):
+    """Construit K_global = K_global_base + h_e*K_e_pattern (Lot R — relation
+    linéaire, voir _assemble_global_kc) puis K_global[air_idx,air_idx] += g_vent
+    (Lot Q), puis factorise (spla.splu, l'opération coûteuse) le(s) système(s)
+    linéaire(s) nécessaires au mode donné — à appeler une fois PAR COMBINAISON
+    DISTINCTE (g_vent, h_e) rencontrée dans le run (jamais une fois par heure
+    simulée : K_global_base/C_global ne sont pas mutées, `.tolil()`/l'addition
+    creuse en créent toujours une copie). g_vent : Lot Q (jusqu'à 24 valeurs
+    distinctes via `planning`, sinon une seule constante). h_e : Lot R (jusqu'à
+    quelques dizaines de valeurs distinctes via le vent réel arrondi au m/s
+    près, sinon une seule constante) — vérifié en réel (to_do.md, Lot R) que le
+    produit des deux reste largement absorbable sur un an de données réelles
+    (quelques centaines de combinaisons au pire, ~30 s de calcul).
 
     Retourne un dict :
       'imposed'    : {'solver', 'col_saved', 'dirichlet_row'}
@@ -249,7 +321,7 @@ def _factorize_for_g_vent(K_global_no_vent, C_global, air_idx, mode, g_vent):
       'thermostat' : {'solver', 'pinned_solver', 'A_free', 'col_saved_pinned'}
                       (A_free conservée pour le résidu HVAC, voir la boucle horaire)
     """
-    K_global = K_global_no_vent.tolil()
+    K_global = (K_global_base + h_e * K_e_pattern).tolil()
     K_global[air_idx, air_idx] += g_vent
     K_global = K_global.tocsc()
     A_free = (C_global / DT_SECONDS + K_global).tocsc()
@@ -283,10 +355,11 @@ def _factorize_for_g_vent(K_global_no_vent, C_global, air_idx, mode, g_vent):
 
 def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibility, payload,
                              environment_envelope=None, progress_cb=None, paroi_frame_by_id=None):
-    """payload : {dx_max, h_e, interior: {mode, h_i, c_air_int, t_int?, t_min?, t_max?,
-    debit_vent_m3h?, eta_recup_vent?, apports_internes_w?}, t_init, weather: [{t_ext,
-    sun_azimuth, sun_elevation, e_dir, e_dif}, ...], shadow_mode: 'precomputed' | 'realtime'
-    (défaut 'precomputed')}
+    """payload : {dx_max, h_e, h_e_dynamic?, interior: {mode, h_i?, h_i_auto?, c_air_int,
+    t_int?, t_min?, t_max?, debit_vent_m3h?, eta_recup_vent?, apports_internes_w?}, t_init,
+    weather: [{t_ext, sun_azimuth, sun_elevation, e_dir, e_dif, wind_m_s?}, ...],
+    shadow_mode: 'precomputed' | 'realtime' (défaut 'precomputed')} — h_e_dynamic/h_i_auto :
+    voir plus bas (Lot R).
 
     paroi_frame_by_id (Lot I, optionnel) : {paroi_model_id: (frame_u, frame_fraction)} pour
     les seuls modèles de paroi qui ont un cadre (voir ParoiModel.frame_u/frame_fraction —
@@ -318,12 +391,33 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     (défaut) -> comportement inchangé (valeurs constantes de `interior`).
     heure_debut (payload, 0-23, défaut 0) : heure du premier point de `weather`,
     utilisée pour indexer le planning (`planning[(heure_debut + hour_idx) % 24]`).
-    Point dur traité : g_vent entre dans K_global (pas seulement F), sa
-    factorisation LU (spla.splu, l'étape coûteuse) est donc refaite une fois PAR
-    VALEUR DISTINCTE de g_vent rencontrée dans le planning (24 au plus pour un
-    profil "jour type", jamais une par heure simulée) — voir
-    _factorize_for_g_vent. apports_internes_w, lui, n'affecte que F (déjà
-    recalculé à chaque heure) : aucun problème de factorisation de ce côté.
+
+    h_e_dynamic (payload, optionnel booléen, défaut False — Lot R) : si True,
+    h_e de chaque heure est dérivé de weather[h]['wind_m_s'] (requis pour
+    CHAQUE heure dans ce cas — voir BuildingCalculRequestSerializer) via
+    h_e_from_wind (corrélation de Jürges), plutôt que la constante `h_e` du
+    payload (alors ignorée). Le vent est arrondi au m/s le plus proche avant
+    conversion — indispensable pour borner le nombre de valeurs DISTINCTES de
+    h_e rencontrées (vérifié en réel : 14-21 sur une année complète, Paris et
+    Brest — voir to_do.md) plutôt qu'une par heure si le vent brut (continu)
+    était utilisé tel quel.
+
+    h_i_auto (payload.interior, optionnel booléen, défaut False — Lot R) : si
+    True, h_i de chaque triangle est dérivé de son tilt_deg (déjà calculé par
+    api.geometry) via h_i_from_tilt (ISO 6946 : mur/plafond/plancher), plutôt
+    que la constante `interior.h_i` (alors ignorée, et non requise). Contrairement
+    à h_e, h_i_auto ne varie jamais dans le temps (seulement d'un triangle à
+    l'autre) : aucun impact sur le nombre de factorisations.
+
+    Point dur traité : g_vent (Lot Q) ET h_e (Lot R) entrent dans K_global (pas
+    seulement F), donc la factorisation LU (spla.splu, l'étape coûteuse) est
+    refaite une fois PAR COMBINAISON DISTINCTE (g_vent, h_e) rencontrée — au
+    plus 24 valeurs de g_vent (planning) x quelques dizaines de valeurs de h_e
+    (vent réel arrondi), jamais une par heure simulée — voir _factorize_for
+    (bundles construits PARESSEUSEMENT, seulement les combinaisons réellement
+    rencontrées, pas le produit cartésien complet) et MAX_DISTINCT_BOUNDARY_COMBOS
+    pour le garde-fou. apports_internes_w, lui, n'affecte que F (déjà recalculé
+    à chaque heure) : aucun problème de factorisation de ce côté.
 
     'precomputed' : utilise la grille d'ombrage + facteur de vue du ciel déjà
     calculés (api.shadow, Lot C) — rapide, discrétisé sur une grille
@@ -340,9 +434,10 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         raise BuildingSimulationError("Le bâtiment n'a aucun triangle.")
 
     dx_max = payload['dx_max']
-    h_e = payload['h_e']
+    h_e_constant = payload['h_e']
+    h_e_dynamic = payload.get('h_e_dynamic', False)
     interior = payload['interior']
-    h_i = interior['h_i']
+    h_i_auto = interior.get('h_i_auto', False)
     mode = interior['mode']
     t_init = payload['t_init']
     weather = payload['weather']
@@ -360,6 +455,16 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             f"{len(triangles)} triangles × {len(weather)} heures dépasse la limite du mode temps réel "
             f"({MAX_REALTIME_RAYCAST_OPS} — utiliser le mode précalculé, ou réduire le maillage/la période)."
         )
+    if h_e_dynamic:
+        # Garde-fou défensif — le serializer valide déjà ceci, mais
+        # run_building_simulation reste appelable directement (voir tests.py).
+        missing = [i for i, p in enumerate(weather) if p.get('wind_m_s') is None]
+        if missing:
+            raise BuildingSimulationError(
+                f"h_e_dynamic actif : vent manquant pour {len(missing)} heure(s) (ex. index {missing[0]})."
+            )
+    if not h_i_auto and 'h_i' not in interior:
+        raise BuildingSimulationError("interior.h_i est requis sauf si interior.h_i_auto est activé.")
 
     areas = [tri['area'] for tri in triangles]
 
@@ -404,8 +509,18 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         sun_visibility_grid = sun_visibility
         if 'sky_view_factor' in sun_visibility:
             sky_view_factor = sun_visibility['sky_view_factor']
-    systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i)
-    K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(systems, areas, h_i, frame_g=frame_g)
+    # h_i (Lot R) : soit une constante répétée pour tous les triangles (défaut,
+    # comportement historique), soit dérivée de tilt_deg par triangle (ISO 6946
+    # via h_i_from_tilt) si interior.h_i_auto est activé.
+    if h_i_auto:
+        h_i_list = [h_i_from_tilt(tri['tilt_deg']) for tri in triangles]
+    else:
+        h_i_list = [interior['h_i']] * len(triangles)
+
+    systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max)
+    K_global, C_global, K_e_pattern, offsets, air_idx, n_dof = _assemble_global_kc(
+        systems, areas, h_i_list, frame_g=frame_g,
+    )
 
     planning = payload.get('planning')
     heure_debut = payload.get('heure_debut', 0)
@@ -444,11 +559,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # ventilation n'a aucune incidence sur la solution (même raisonnement que le
     # mode 'imposed' de solver.py).
 
-    # Factorisation LU (spla.splu, l'étape coûteuse) : une fois PAR VALEUR
-    # DISTINCTE de g_vent rencontrée (24 au plus avec un planning, jamais une par
-    # heure simulée) — voir _factorize_for_g_vent et le to_do.md, Lot Q.
-    distinct_g_vents = sorted(set(g_vent_by_slot)) if g_vent_by_slot is not None else [g_vent_constant]
-    bundles_by_g_vent = {g: _factorize_for_g_vent(K_global, C_global, air_idx, mode, g) for g in distinct_g_vents}
+    # Factorisation LU (spla.splu, l'étape coûteuse) : une fois PAR COMBINAISON
+    # DISTINCTE (g_vent, h_e) rencontrée — construite PARESSEUSEMENT (au premier
+    # usage, mise en cache) plutôt que le produit cartésien complet à l'avance :
+    # sur un an de données réelles, les combinaisons RÉELLEMENT rencontrées sont
+    # nettement moins nombreuses que g_vent_classes x h_e_classes (vérifié en
+    # réel, to_do.md Lot R) — voir _factorize_for.
+    bundles = {}
 
     T = np.full(n_dof, float(t_init))
     t_air_series = [float(T[air_idx])]
@@ -465,7 +582,26 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         else:
             g_vent = g_vent_constant
             apports_internes_w = apports_constant
-        bundle = bundles_by_g_vent[g_vent]
+
+        if h_e_dynamic:
+            # Arrondi au m/s le plus proche AVANT la formule de Jürges : c'est ce
+            # qui borne le nombre de valeurs distinctes de h_e (14-21 sur un an
+            # réel, vérifié) plutôt qu'une par heure si le vent continu brut
+            # entrait directement dans h_e_from_wind.
+            h_e = h_e_from_wind(round(point['wind_m_s']))
+        else:
+            h_e = h_e_constant
+
+        key = (g_vent, h_e)
+        bundle = bundles.get(key)
+        if bundle is None:
+            if len(bundles) >= MAX_DISTINCT_BOUNDARY_COMBOS:
+                raise BuildingSimulationError(
+                    f"Plus de {MAX_DISTINCT_BOUNDARY_COMBOS} combinaisons distinctes "
+                    "(ventilation x vent) rencontrées — série météo anormalement bruitée."
+                )
+            bundle = _factorize_for(K_global, K_e_pattern, C_global, air_idx, mode, g_vent, h_e)
+            bundles[key] = bundle
 
         F = _assemble_F_hour(
             systems, areas, offsets, n_dof, triangles, h_e, point,
@@ -512,14 +648,15 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
         # Flux net de l'enveloppe vers l'intérieur à cette heure : somme, sur
         # tous les triangles, de h_i*A_i*(T_surface,i - T_air) — c'est
-        # exactement ce que chaque paroi injecte dans le nœud d'air.
+        # exactement ce que chaque paroi injecte dans le nœud d'air. h_i_list[i]
+        # (Lot R) remplace l'ancien h_i scalaire unique.
         flux = 0.0
         t_air_next = T_next[air_idx]
         for i, (mesh, K, C, layers) in enumerate(systems):
             off = offsets[i]
             n = mesh['n_wall_nodes']
             t_surf = T_next[off + n - 1]
-            flux += h_i * areas[i] * (t_surf - t_air_next)
+            flux += h_i_list[i] * areas[i] * (t_surf - t_air_next)
         flux_series.append(flux)
 
         T = T_next

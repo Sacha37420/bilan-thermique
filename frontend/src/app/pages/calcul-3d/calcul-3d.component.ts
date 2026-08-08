@@ -18,6 +18,10 @@ interface WeatherPoint {
   sun_elevation: number;
   e_dir: number;
   e_dif: number;
+  // Vent à 10 m (m/s, Lot R) — optionnel, alimenté automatiquement par le
+  // fetch météo (Open-Meteo/PVGIS) ; requis heure par heure uniquement si
+  // h_e dynamique est activé (voir hEDynamic ci-dessous).
+  wind_m_s?: number;
 }
 
 interface PlanningEntry {
@@ -80,8 +84,16 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   // ── Paramètres du calcul ─────────────────────────────────────────────
   dxMax = 0.02;
   hE = 22;
+  // Lot R : h_e dérivé du vent (corrélation de Jürges) heure par heure plutôt
+  // que la constante ci-dessus (alors ignorée) — exige wind_m_s sur CHAQUE
+  // point météo (fetch auto Lot L/S l'alimente déjà ; CSV manuel : 6e colonne
+  // optionnelle, voir parseWeather).
+  hEDynamic = false;
   interiorMode: 'imposed' | 'free' | 'thermostat' = 'thermostat';
   hI = 8;
+  // Lot R : h_i dérivé de l'orientation de chaque triangle (ISO 6946 —
+  // mur/plafond/plancher) plutôt que la constante ci-dessus (alors ignorée).
+  hIAuto = false;
   tInt = 19;
   cAirInt = 200000;
   tMin = 19;
@@ -275,10 +287,20 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
       const nums = cells.slice(0, 5).map(c => Number(c.replace(',', '.')));
       if (nums.some(n => Number.isNaN(n))) continue;
       const [t_ext, sun_azimuth, sun_elevation, e_dir, e_dif] = nums;
-      points.push({ t_ext, sun_azimuth, sun_elevation, e_dir, e_dif });
+      const point: WeatherPoint = { t_ext, sun_azimuth, sun_elevation, e_dir, e_dif };
+      // 6e colonne optionnelle (Lot R) : vent en m/s, requis heure par heure
+      // uniquement si hEDynamic est activé — absente ou invalide, la ligne
+      // reste valide, wind_m_s simplement non renseigné.
+      if (cells.length >= 6 && cells[5] !== '') {
+        // Number('') === 0 en JS (pas NaN) — la garde ci-dessus évite de
+        // confondre "cellule vide" avec "vent nul".
+        const wind = Number(cells[5].replace(',', '.'));
+        if (!Number.isNaN(wind)) point.wind_m_s = wind;
+      }
+      points.push(point);
     }
     if (points.length === 0) {
-      this.weatherError.set("Aucune ligne valide — format attendu : T_ext, azimuth_soleil, élévation_soleil, E_dir, E_dif");
+      this.weatherError.set("Aucune ligne valide — format attendu : T_ext, azimuth_soleil, élévation_soleil, E_dir, E_dif[, vent_m_s]");
     }
     this.weather.set(points);
   }
@@ -349,7 +371,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
                 weather: WeatherPoint[]; source: 'pvgis-tmy' | 'open-meteo-archive'; warning: string | null;
               };
               this.weatherRaw = result.weather
-                .map(p => [p.t_ext, p.sun_azimuth, p.sun_elevation, p.e_dir, p.e_dif].join(','))
+                .map(p => [p.t_ext, p.sun_azimuth, p.sun_elevation, p.e_dir, p.e_dif, p.wind_m_s ?? ''].join(','))
                 .join('\n');
               this.parseWeather();
               const sourceLabel = result.source === 'pvgis-tmy'
@@ -370,9 +392,16 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   }
 
   // ── Lancement + suivi ──────────────────────────────────────────────
+  // Lot R : h_e_dynamique exige wind_m_s sur CHAQUE point météo (voir
+  // BuildingCalculRequestSerializer côté backend) — vérifié ici pour bloquer
+  // le bouton plutôt que de laisser échouer la requête.
+  get weatherMissingWind(): number {
+    return this.hEDynamic ? this.weather().filter(p => p.wind_m_s === undefined).length : 0;
+  }
+
   get canSubmit(): boolean {
     const b = this.currentBuilding();
-    return b !== null && this.weather().length > 0 &&
+    return b !== null && this.weather().length > 0 && this.weatherMissingWind === 0 &&
       (!this.usePlanning || this.planning().length === 24) &&
       (this.job() === null || this.job()!.status === 'DONE' || this.job()!.status === 'ERROR');
   }
@@ -382,7 +411,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     if (!building || !this.canSubmit) return;
     this.error.set('');
 
-    const interior: Record<string, unknown> = { mode: this.interiorMode, h_i: this.hI };
+    const interior: Record<string, unknown> = { mode: this.interiorMode, h_i: this.hI, h_i_auto: this.hIAuto };
     if (this.interiorMode === 'imposed') interior['t_int'] = this.tInt;
     if (this.interiorMode === 'free' || this.interiorMode === 'thermostat') {
       interior['c_air_int'] = this.cAirInt;
@@ -393,8 +422,8 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     if (this.interiorMode === 'thermostat') { interior['t_min'] = this.tMin; interior['t_max'] = this.tMax; }
 
     const payload: Record<string, unknown> = {
-      dx_max: this.dxMax, h_e: this.hE, interior, t_init: this.tInit, weather: this.weather(),
-      shadow_mode: this.shadowMode, t_ground: this.tGround,
+      dx_max: this.dxMax, h_e: this.hE, h_e_dynamic: this.hEDynamic, interior, t_init: this.tInit,
+      weather: this.weather(), shadow_mode: this.shadowMode, t_ground: this.tGround,
     };
     // Planning horaire (Lot Q) : n'est envoyé QUE s'il est actif et complet —
     // sinon comportement inchangé (constantes de `interior` ci-dessus).

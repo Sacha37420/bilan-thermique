@@ -365,11 +365,26 @@ class BuildingWeatherPointSerializer(serializers.Serializer):
     sun_elevation = serializers.FloatField(min_value=-90.0, max_value=90.0)
     e_dir = serializers.FloatField(min_value=0.0, max_value=1400.0)
     e_dif = serializers.FloatField(min_value=0.0, max_value=600.0)
+    # Vitesse de vent à 10 m (m/s, Lot R) — optionnelle, requise heure par
+    # heure uniquement si BuildingCalculRequestSerializer.h_e_dynamic est
+    # activé (voir sa validation). Alimentée automatiquement par le fetch météo
+    # (Open-Meteo Archive/PVGIS TMY, tous deux normalisés en m/s) — absente
+    # pour une météo collée à la main, sans effet dans ce cas (h_e reste la
+    # constante du payload).
+    wind_m_s = serializers.FloatField(required=False, allow_null=True, default=None,
+                                       min_value=0.0, max_value=100.0)
 
 
 class BuildingInteriorSerializer(serializers.Serializer):
     mode = serializers.ChoiceField(choices=['imposed', 'free', 'thermostat'])
-    h_i = serializers.FloatField(min_value=0.1, max_value=100.0)
+    # h_i devient optionnel si h_i_auto est activé (voir validate) — sinon requis
+    # comme avant.
+    h_i = serializers.FloatField(required=False, min_value=0.1, max_value=100.0)
+    # Lot R : dérive h_i par triangle depuis son tilt_deg (ISO 6946 —
+    # mur/plafond/plancher, voir building_solver.h_i_from_tilt) plutôt que la
+    # constante h_i ci-dessus (alors ignorée). Défaut False : comportement
+    # historique inchangé.
+    h_i_auto = serializers.BooleanField(required=False, default=False)
     t_int = serializers.FloatField(required=False, min_value=-30.0, max_value=50.0)
     c_air_int = serializers.FloatField(required=False, min_value=100.0, max_value=1_000_000_000.0)
     t_min = serializers.FloatField(required=False, min_value=-30.0, max_value=50.0)
@@ -398,6 +413,8 @@ class BuildingInteriorSerializer(serializers.Serializer):
                 raise serializers.ValidationError("t_min et t_max sont requis en mode 'thermostat'.")
             if data['t_min'] >= data['t_max']:
                 raise serializers.ValidationError("t_min doit être strictement inférieur à t_max.")
+        if not data.get('h_i_auto', False) and 'h_i' not in data:
+            raise serializers.ValidationError("h_i est requis sauf si h_i_auto est activé.")
         return data
 
 
@@ -412,7 +429,14 @@ class PlanningEntrySerializer(serializers.Serializer):
 
 class BuildingCalculRequestSerializer(serializers.Serializer):
     dx_max = serializers.FloatField(min_value=0.001, max_value=1.0)
+    # h_e reste requis même si h_e_dynamic est activé (alors simplement ignoré)
+    # — évite une exigence conditionnelle pour un gain marginal.
     h_e = serializers.FloatField(min_value=0.1, max_value=100.0)
+    # Lot R : dérive h_e heure par heure depuis weather[h].wind_m_s (corrélation
+    # de Jürges, building_solver.h_e_from_wind) plutôt que la constante h_e
+    # ci-dessus — exige alors wind_m_s sur CHAQUE point météo (voir validate).
+    # Défaut False : comportement historique inchangé.
+    h_e_dynamic = serializers.BooleanField(required=False, default=False)
     interior = BuildingInteriorSerializer()
     t_init = serializers.FloatField(min_value=-30.0, max_value=50.0)
     weather = BuildingWeatherPointSerializer(many=True, min_length=1, max_length=8784)
@@ -434,6 +458,16 @@ class BuildingCalculRequestSerializer(serializers.Serializer):
     # Heure du premier point de `weather` (0=minuit) — sert à indexer le planning
     # (planning[(heure_debut + hour_idx) % 24]), sans effet si `planning` absent.
     heure_debut = serializers.IntegerField(required=False, min_value=0, max_value=23, default=0)
+
+    def validate(self, data):
+        if data.get('h_e_dynamic', False):
+            missing = [i for i, w in enumerate(data.get('weather', [])) if w.get('wind_m_s') is None]
+            if missing:
+                raise serializers.ValidationError(
+                    {'weather': f"h_e_dynamic actif : vent manquant pour {len(missing)} heure(s) "
+                                 f"(ex. index {missing[0]}) — chaque point météo doit fournir wind_m_s."}
+                )
+        return data
 
     def validate_planning(self, value):
         if len(value) != 24:

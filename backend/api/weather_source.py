@@ -159,7 +159,14 @@ def fetch_open_meteo_archive(lat, lon, start_date, end_date):
     params = {
         'latitude': lat, 'longitude': lon,
         'start_date': start_date, 'end_date': end_date,
-        'hourly': 'temperature_2m,direct_normal_irradiance,diffuse_radiation',
+        # wind_speed_10m (Lot R) : wind_speed_unit=ms demandé explicitement — le
+        # défaut d'Open-Meteo est km/h, alors que PVGIS TMY (WS10m, voir
+        # _assemble_tmy_series) est nativement en m/s. Les deux sources sont
+        # ainsi normalisées en m/s dès la requête, aucune conversion nécessaire
+        # côté appelant (vérifié en réel : ordres de grandeur cohérents entre
+        # les deux sources sur les mêmes coordonnées).
+        'hourly': 'temperature_2m,direct_normal_irradiance,diffuse_radiation,wind_speed_10m',
+        'wind_speed_unit': 'ms',
         'timezone': 'UTC',
     }
     try:
@@ -180,11 +187,16 @@ def fetch_open_meteo_archive(lat, lon, start_date, end_date):
     return data
 
 
-def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg):
+def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg, wind_m_s=None):
     """Position solaire + clamping vers les bornes de BuildingWeatherPointSerializer
     pour UNE heure — partagé par les deux sources (Open-Meteo Archive, PVGIS TMY,
     Lot S), qui n'ont en commun que cette physique, pas le format brut de leur
-    réponse (voir _assemble_weather_series et _assemble_tmy_series)."""
+    réponse (voir _assemble_weather_series et _assemble_tmy_series).
+
+    wind_m_s (Lot R, optionnel) : contrairement à t_ext/e_dir/e_dif, une valeur
+    manquante n'annule PAS l'heure entière (voir les appelants) — h_e_dynamic
+    reste simplement inutilisable pour ce point si absent, sans empêcher le
+    reste du calcul de fonctionner en h_e constant."""
     real_azimuth, elevation = solar_position(lat, lon, dt_utc)
     local_azimuth = to_local_azimuth(real_azimuth, north_offset_deg)
     return {
@@ -193,18 +205,20 @@ def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg
         'sun_elevation': elevation,
         'e_dir': max(0.0, min(E_DIR_MAX, e_dir_raw)),
         'e_dif': max(0.0, min(E_DIF_MAX, e_dif_raw)),
+        'wind_m_s': max(0.0, wind_m_s) if wind_m_s is not None else None,
     }
 
 
 def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
     """Partie pure (testable sans réseau) : transforme la réponse JSON brute
     d'Open-Meteo Archive en liste de dicts {t_ext, sun_azimuth, sun_elevation,
-    e_dir, e_dif} prête pour BuildingWeatherPointSerializer."""
+    e_dir, e_dif, wind_m_s} prête pour BuildingWeatherPointSerializer."""
     hourly = data.get('hourly') or {}
     times = hourly.get('time') or []
     temps = hourly.get('temperature_2m') or []
     dni = hourly.get('direct_normal_irradiance') or []
     dif = hourly.get('diffuse_radiation') or []
+    wind = hourly.get('wind_speed_10m') or []
 
     if not times:
         raise WeatherSourceError("Open-Meteo Archive n'a retourné aucune donnée horaire pour cette période.")
@@ -227,8 +241,13 @@ def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
             n_missing += 1
             continue
 
+        # wind_m_s (Lot R) n'est volontairement PAS de la même famille que
+        # t_ext/e_dir/e_dif ci-dessus : une valeur manquante ne fait PAS sauter
+        # l'heure (h_e_dynamic devient simplement inutilisable pour ce point,
+        # voir _enrich_hour), le reste du bilan n'en dépend pas.
+        wind_m_s = wind[i] if i < len(wind) else None
         dt_utc = datetime.fromisoformat(t).replace(tzinfo=timezone.utc)
-        series.append(_enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg))
+        series.append(_enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg, wind_m_s=wind_m_s))
 
     if not series:
         raise WeatherSourceError("Toutes les heures de cette période ont une donnée manquante côté Open-Meteo.")
@@ -292,11 +311,12 @@ def fetch_pvgis_tmy(lat, lon):
 
 def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
     """Partie pure (testable sans réseau) : transforme la réponse JSON brute de
-    PVGIS TMY en liste de dicts {t_ext, sun_azimuth, sun_elevation, e_dir, e_dif}
-    — Gb(n) (irradiance directe normale au rayon) et Gd(h) (irradiance diffuse
-    horizontale) sont exactement les mêmes grandeurs physiques que
+    PVGIS TMY en liste de dicts {t_ext, sun_azimuth, sun_elevation, e_dir, e_dif,
+    wind_m_s} — Gb(n) (irradiance directe normale au rayon) et Gd(h) (irradiance
+    diffuse horizontale) sont exactement les mêmes grandeurs physiques que
     direct_normal_irradiance/diffuse_radiation d'Open-Meteo, seuls les noms de
-    champ diffèrent."""
+    champ diffèrent ; WS10m (Lot R) est nativement en m/s, comme
+    wind_speed_10m?wind_speed_unit=ms côté Open-Meteo — aucune conversion."""
     hourly = ((data.get('outputs') or {}).get('tmy_hourly')) or []
 
     if not hourly:
@@ -318,7 +338,9 @@ def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
             continue
 
         dt_utc = _parse_pvgis_timestamp(ts)
-        series.append(_enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg))
+        series.append(_enrich_hour(
+            lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg, wind_m_s=row.get('WS10m'),
+        ))
 
     if not series:
         raise WeatherSourceError("Toutes les heures TMY ont une donnée manquante côté PVGIS.")

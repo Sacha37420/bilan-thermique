@@ -1118,6 +1118,304 @@ class WindowFrameTest(SimpleTestCase):
             )
 
 
+def _wall_envelope(area):
+    """Un unique triangle vertical (tilt_deg=90°, normale horizontale) — pour
+    distinguer de _single_triangle_envelope (normale +Z, tilt=0°, toiture)."""
+    side = math.sqrt(2.0 * area)
+    vertices = [[0.0, 0.0, 0.0], [side, 0.0, 0.0], [0.0, 0.0, side]]
+    triangles = geometry.compute_envelope_geometry(vertices, [{'v': [0, 1, 2], 'paroi_model_id': 1}])
+    return {'vertices': vertices, 'triangles': triangles}
+
+
+def _no_sun_weather_3d_wind(t_ext_series, wind_series):
+    return [
+        {'t_ext': t, 'sun_azimuth': 0.0, 'sun_elevation': -10.0, 'e_dir': 0.0, 'e_dif': 0.0, 'wind_m_s': w}
+        for t, w in zip(t_ext_series, wind_series)
+    ]
+
+
+class DynamicConvectionTest(SimpleTestCase):
+    """Lot R — h_e dynamique (vent, corrélation de Jürges) et h_i par orientation
+    (ISO 6946). Comme pour le Lot Q (g_vent variable par heure), h_e variable
+    par heure change K_global (pas seulement F) : la factorisation LU doit être
+    refaite par COMBINAISON DISTINCTE de (g_vent, h_e) rencontrée (voir
+    building_solver._factorize_for) — ces tests portent sur le résultat
+    physique produit, jamais sur l'implémentation de la factorisation
+    elle-même."""
+
+    databases = []
+
+    def _envelope_and_weather(self, hours, wind=5.0, area=2.5):
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _single_triangle_envelope(area=area)
+        t_ext_series = [2.0 + 10.0 * math.sin(h / 6.0) for h in range(hours)]
+        wind_series = [wind] * hours
+        return envelope, {1: layers}, _no_sun_weather_3d_wind(t_ext_series, wind_series)
+
+    # ── Formules pures (oracle indépendant) ──────────────────────────────
+    def test_h_e_from_wind_matches_jurges_formula(self):
+        self.assertAlmostEqual(building_solver.h_e_from_wind(0.0), 5.8)
+        self.assertAlmostEqual(building_solver.h_e_from_wind(5.0), 5.8 + 3.94 * 5.0)
+        self.assertAlmostEqual(building_solver.h_e_from_wind(10.0), 5.8 + 3.94 * 10.0)
+        # Vent négatif (ne devrait jamais arriver en pratique) clampé à 0 plutôt
+        # que de réduire h_e sous sa valeur à vent nul.
+        self.assertAlmostEqual(building_solver.h_e_from_wind(-3.0), 5.8)
+
+    def test_h_i_from_tilt_buckets(self):
+        # Plafond/toiture (flux montant) : tilt proche de 0°, jusqu'au seuil inclus.
+        self.assertEqual(building_solver.h_i_from_tilt(0.0), building_solver.H_I_CEILING)
+        self.assertEqual(building_solver.h_i_from_tilt(60.0), building_solver.H_I_CEILING)
+        # Mur (flux horizontal) : entre les deux seuils.
+        self.assertEqual(building_solver.h_i_from_tilt(60.001), building_solver.H_I_WALL)
+        self.assertEqual(building_solver.h_i_from_tilt(90.0), building_solver.H_I_WALL)
+        self.assertEqual(building_solver.h_i_from_tilt(119.999), building_solver.H_I_WALL)
+        # Plancher/sol (flux descendant) : tilt proche de 180°, à partir du seuil inclus.
+        self.assertEqual(building_solver.h_i_from_tilt(120.0), building_solver.H_I_FLOOR)
+        self.assertEqual(building_solver.h_i_from_tilt(180.0), building_solver.H_I_FLOOR)
+
+    # ── h_e dynamique — intégration via run_building_simulation ──────────
+    def test_h_e_dynamic_with_constant_wind_matches_equivalent_constant_h_e(self):
+        # Vent constant à 5 m/s sur tout le run : h_e_dynamic doit produire un
+        # résultat EXACTEMENT identique à h_e_dynamic=False avec la constante
+        # h_e_from_wind(5.0) posée à la main — même physique, deux chemins de
+        # code différents.
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=40, wind=5.0)
+        h_e_equiv = building_solver.h_e_from_wind(5.0)
+
+        payload_dynamic = {
+            'dx_max': 0.02, 'h_e': 999.0, 'h_e_dynamic': True,  # h_e ignorée en mode dynamique
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        payload_constant = {
+            'dx_max': 0.02, 'h_e': h_e_equiv,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        result_dynamic = building_solver.run_building_simulation(envelope, paroi_layers, None, payload_dynamic)
+        result_constant = building_solver.run_building_simulation(envelope, paroi_layers, None, payload_constant)
+
+        self.assertEqual(result_dynamic['t_air'], result_constant['t_air'])
+        self.assertEqual(result_dynamic['envelope_flux_w'], result_constant['envelope_flux_w'])
+
+    def test_h_e_dynamic_rounds_wind_to_nearest_integer(self):
+        # 5,4 m/s et 5,0 m/s doivent produire le MÊME h_e (round(5.4)=5) — la
+        # discrétisation au m/s près est ce qui borne le nombre de
+        # factorisations distinctes sur un run réel (to_do.md, Lot R).
+        envelope, paroi_layers, weather_54 = self._envelope_and_weather(hours=30, wind=5.4)
+        _, _, weather_50 = self._envelope_and_weather(hours=30, wind=5.0)
+
+        def run(weather):
+            payload = {
+                'dx_max': 0.02, 'h_e': 999.0, 'h_e_dynamic': True,
+                'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+                't_init': 15.0, 'weather': weather,
+            }
+            return building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+
+        self.assertEqual(run(weather_54)['t_air'], run(weather_50)['t_air'])
+
+    def test_h_e_dynamic_missing_wind_raises(self):
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=5, wind=5.0)
+        del weather[2]['wind_m_s']  # une seule heure sans vent suffit
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0, 'h_e_dynamic': True,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        with self.assertRaises(building_solver.BuildingSimulationError):
+            building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+
+    # ── h_i par orientation — intégration via run_building_simulation ────
+    def test_h_i_auto_matches_equivalent_constant_for_wall_triangle(self):
+        # Un unique triangle vertical (tilt=90°) : h_i_auto doit choisir
+        # H_I_WALL, donc produire un résultat identique à h_i_auto=False avec
+        # h_i=H_I_WALL posé à la main.
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _wall_envelope(area=2.5)
+        weather = _no_sun_weather_3d([2.0 + 10.0 * math.sin(h / 6.0) for h in range(40)])
+
+        payload_auto = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i_auto': True, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        payload_manual = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': building_solver.H_I_WALL, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        result_auto = building_solver.run_building_simulation(envelope, {1: layers}, None, payload_auto)
+        result_manual = building_solver.run_building_simulation(envelope, {1: layers}, None, payload_manual)
+
+        self.assertEqual(result_auto['t_air'], result_manual['t_air'])
+
+    def test_h_i_auto_differs_from_default_for_roof_triangle(self):
+        # _single_triangle_envelope a une normale +Z (tilt=0°, toiture) :
+        # h_i_auto doit choisir H_I_CEILING (10.0) — différent de H_I_WALL
+        # (7.7), donc un résultat différent d'un h_i constant à 7.7. Confirme
+        # que h_i_auto a bien un effet réel, pas un no-op silencieux.
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _single_triangle_envelope(area=2.5)
+        weather = _no_sun_weather_3d([2.0 + 10.0 * math.sin(h / 6.0) for h in range(40)])
+
+        def run(interior_extra):
+            payload = {
+                'dx_max': 0.02, 'h_e': 25.0,
+                'interior': {'mode': 'free', 'c_air_int': 300_000.0, **interior_extra},
+                't_init': 15.0, 'weather': weather,
+            }
+            return building_solver.run_building_simulation(envelope, {1: layers}, None, payload)
+
+        result_auto = run({'h_i_auto': True})
+        result_wall_constant = run({'h_i': building_solver.H_I_WALL})
+        self.assertNotEqual(result_auto['t_air'], result_wall_constant['t_air'])
+
+    # ── Non-régression : comportement par défaut inchangé ────────────────
+    def test_defaults_unchanged_without_h_e_dynamic_or_h_i_auto(self):
+        # Ni h_e_dynamic ni h_i_auto dans le payload : comportement strictement
+        # identique à avant ce lot (h_e/h_i constants classiques).
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=20)
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        result = building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+        self.assertEqual(result['hours'], 20)
+        self.assertTrue(all(math.isfinite(t) for t in result['t_air']))
+
+    # ── Conservation d'énergie avec g_vent ET h_e variables simultanément ─
+    def test_free_mode_conserves_energy_with_varying_wind_and_planning(self):
+        # Identité de conservation (même famille que Lot F/Q), généralisée à
+        # g_vent ET h_e VARIABLES heure par heure en même temps — le test le
+        # plus sévère pour le cache de bundles factorisés par (g_vent, h_e) :
+        # une factorisation réutilisée à tort pour la mauvaise combinaison
+        # casserait cette identité de façon quasi certaine sur autant de
+        # combinaisons distinctes.
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _single_triangle_envelope(area=2.5)
+        hours = 60
+        t_ext_series = [2.0 + 10.0 * math.sin(h / 6.0) for h in range(hours)]
+        wind_series = [1.0 + (h % 7) for h in range(hours)]  # 7 valeurs de vent distinctes
+        weather = _no_sun_weather_3d_wind(t_ext_series, wind_series)
+
+        c_air_int = 300_000.0
+        planning = [
+            {'debit_vent_m3h': 20.0 + 10.0 * (h % 3), 'eta_recup_vent': 0.1 * (h % 4),
+             'apports_internes_w': 50.0 * (h % 5)}
+            for h in range(24)
+        ]
+        payload = {
+            'dx_max': 0.02, 'h_e': 999.0, 'h_e_dynamic': True,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': c_air_int},
+            't_init': 15.0, 'weather': weather, 'planning': planning,
+        }
+        result = building_solver.run_building_simulation(envelope, {1: layers}, None, payload)
+
+        t_air = result['t_air']
+        flux = result['envelope_flux_w']
+        energy_stored = c_air_int * (t_air[-1] - t_air[0])
+
+        energy_from_walls_vent_gains = 0.0
+        for h, (f, point, t_air_next) in enumerate(zip(flux, weather, t_air[1:])):
+            entry = planning[h % 24]
+            g_vent = 0.34 * entry['debit_vent_m3h'] * (1.0 - entry['eta_recup_vent'])
+            energy_from_walls_vent_gains += (
+                f + g_vent * (point['t_ext'] - t_air_next) + entry['apports_internes_w']
+            ) * DT_SECONDS
+
+        self.assertAlmostEqual(
+            energy_stored, energy_from_walls_vent_gains,
+            delta=abs(energy_from_walls_vent_gains) * 1e-6 + 1e-3,
+        )
+
+    def test_h_e_dynamic_switch_converges_to_new_steady_state(self):
+        # Piège identifié en écrivant les tests (avant tout bug réel) : une
+        # identité de conservation d'énergie comme celle du test précédent est
+        # TAUTOLOGIQUE vis-à-vis de K (elle re-dérive la ligne du nœud d'air du
+        # système linéaire RÉELLEMENT résolu, quel que soit K) — elle ne peut
+        # donc PAS détecter un bundle réutilisé à tort pour le mauvais h_e
+        # (vérifié par mutation : "key = (g_vent, h_e)" réduit à "(g_vent,)"
+        # laisse ce test-ci intact). Ce test-ci compare au contraire à un
+        # oracle INDÉPENDANT du système résolu (formule U(h_e) en régime
+        # permanent, même méthode que WallSteadyStateTest) : vent constant
+        # (donc h_e constant) sur une longue première phase, puis vent
+        # CONSTANT différent sur une seconde phase assez longue pour reconverger
+        # — le flux final doit correspondre au NOUVEAU h_e, pas être resté
+        # bloqué sur l'ancien (mode 'imposed' : g_vent toujours nul, donc la clé
+        # de cache ne varie qu'avec h_e — piège direct pour _factorize_for).
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        # Aire 1 m² : envelope_flux_w est en watts ABSOLUS (aire x W/m², voir
+        # docstring du module), alors que l'oracle U(h_e) ci-dessous est en
+        # W/m² — aire=1 les rend directement comparables sans facteur d'échelle.
+        envelope = _single_triangle_envelope(area=1.0)
+        h_i = 8.0
+        t_ext, t_int = 5.0, 20.0
+        wind_phase1, wind_phase2 = 2.0, 15.0
+        hours_per_phase = 400
+        wind_series = [wind_phase1] * hours_per_phase + [wind_phase2] * hours_per_phase
+        t_ext_series = [t_ext] * (2 * hours_per_phase)
+        weather = _no_sun_weather_3d_wind(t_ext_series, wind_series)
+
+        payload = {
+            'dx_max': 0.02, 'h_e': 999.0, 'h_e_dynamic': True,
+            'interior': {'mode': 'imposed', 'h_i': h_i, 't_int': t_int},
+            't_init': (t_ext + t_int) / 2.0, 'weather': weather,
+        }
+        result = building_solver.run_building_simulation(envelope, {1: layers}, None, payload)
+
+        h_e_phase2 = building_solver.h_e_from_wind(wind_phase2)
+        u_value = 1.0 / (1.0 / h_e_phase2 + layers[0]['e'] / layers[0]['lam'] + 1.0 / h_i)
+        q_expected = u_value * (t_ext - t_int)
+        q_actual = result['envelope_flux_w'][-1]
+
+        self.assertAlmostEqual(q_actual, q_expected, delta=abs(q_expected) * 1e-2)
+
+
+class BuildingCalculRequestSerializerWindTest(SimpleTestCase):
+    """Lot R — validation de BuildingCalculRequestSerializer.h_e_dynamic et
+    BuildingInteriorSerializer.h_i_auto."""
+
+    databases = []
+
+    def _base_payload(self, **overrides):
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0,
+            'weather': [{'t_ext': 10.0, 'sun_azimuth': 0.0, 'sun_elevation': -10.0, 'e_dir': 0.0, 'e_dif': 0.0}],
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_h_e_dynamic_requires_wind_on_every_point(self):
+        payload = self._base_payload(h_e_dynamic=True)  # weather sans wind_m_s
+        s = serializers.BuildingCalculRequestSerializer(data=payload)
+        self.assertFalse(s.is_valid())
+        self.assertIn('weather', s.errors)
+
+    def test_h_e_dynamic_valid_with_wind_on_every_point(self):
+        payload = self._base_payload(
+            h_e_dynamic=True,
+            weather=[{'t_ext': 10.0, 'sun_azimuth': 0.0, 'sun_elevation': -10.0,
+                      'e_dir': 0.0, 'e_dif': 0.0, 'wind_m_s': 4.0}],
+        )
+        s = serializers.BuildingCalculRequestSerializer(data=payload)
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_h_i_required_unless_auto(self):
+        payload = self._base_payload(interior={'mode': 'free', 'c_air_int': 300_000.0})
+        s = serializers.BuildingCalculRequestSerializer(data=payload)
+        self.assertFalse(s.is_valid())
+        self.assertIn('interior', s.errors)
+
+    def test_h_i_optional_when_auto(self):
+        payload = self._base_payload(interior={'mode': 'free', 'h_i_auto': True, 'c_air_int': 300_000.0})
+        s = serializers.BuildingCalculRequestSerializer(data=payload)
+        self.assertTrue(s.is_valid(), s.errors)
+
+
 class ExtrudeFootprintGroupedTest(SimpleTestCase):
     """Lot T (mode simplifié) — geodata.extrude_footprint_grouped. Partie pure
     (pas de réseau, contrairement à search_nearby_buildings) : la structure de
