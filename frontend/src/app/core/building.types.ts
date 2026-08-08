@@ -41,6 +41,8 @@ export interface Building {
   georef_north_offset_deg: number;
   georef_ground_z: number | null;
   surface_ref_m2: number | null;
+  suggested_debit_vent_m3h: number | null;
+  suggested_eta_recup_vent: number | null;
   sun_visibility_stale: boolean;
   created_at: string;
   updated_at: string;

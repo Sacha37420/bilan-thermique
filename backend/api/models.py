@@ -156,6 +156,18 @@ class Building(models.Model):
     # aucun calcul du solveur lui-même.
     surface_ref_m2 = models.FloatField(null=True, blank=True)
 
+    # Suggestion de ventilation (Lot T, mode simplifié) — calculée côté client à
+    # partir d'un profil du catalogue (frontend/src/app/core/ventilation-profiles.ts)
+    # et du volume réel du bâtiment (empreinte × hauteur, connus du bâtiment issu
+    # d'une recherche IGN/OSM). Jamais lue par le solveur : une SUGGESTION que
+    # Calcul 3D relit au chargement du bâtiment pour préremplir son propre
+    # formulaire de renouvellement d'air (mêmes deux grandeurs que
+    # BuildingInteriorSerializer.debit_vent_m3h/eta_recup_vent), qui reste
+    # modifiable ensuite comme pour tout bâtiment — même schéma que georef_lat/lon
+    # préremplissant le panneau météo de Calcul 3D.
+    suggested_debit_vent_m3h = models.FloatField(null=True, blank=True)
+    suggested_eta_recup_vent = models.FloatField(null=True, blank=True)
+
     sun_visibility = models.JSONField(default=dict, blank=True)
     sun_visibility_stale = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

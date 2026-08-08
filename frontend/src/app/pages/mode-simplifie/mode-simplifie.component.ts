@@ -5,6 +5,7 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { Building, WorkingTriangle } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
+import { VENTILATION_PROFILES, VentilationProfile } from '../../core/ventilation-profiles';
 
 interface ParoiModelSummary {
   id: number;
@@ -118,6 +119,50 @@ export class ModeSimplifieComponent implements OnInit {
   createError = signal('');
   buildingId = signal<number | null>(null);
 
+  // Renouvellement d'air (entrée simplifiée) — un unique profil catalogue
+  // (frontend/src/app/core/ventilation-profiles.ts, déjà utilisé par Calcul 3D)
+  // appliqué au volume RÉEL du bâtiment trouvé (empreinte × hauteur, exact —
+  // pas une estimation manuelle comme sur Calcul 3D). Optionnel : sans profil
+  // choisi, aucune suggestion n'est envoyée, comme pour tout bâtiment créé
+  // sans passer par ce mode. Reste une SUGGESTION, jamais utilisée telle
+  // quelle par le solveur — voir Building.suggested_debit_vent_m3h.
+  ventilationProfiles = VENTILATION_PROFILES;
+  selectedVentProfileId: string | null = null;
+
+  get selectedVentProfile(): VentilationProfile | null {
+    return this.ventilationProfiles.find(p => p.id === this.selectedVentProfileId) ?? null;
+  }
+
+  private footprintAreaM2(c: Candidate): number {
+    let area = 0;
+    for (const t of c.triangles) {
+      if (t.group !== 'sol') continue;
+      const [i, j, k] = t.v;
+      const a = c.vertices[i], b = c.vertices[j], p = c.vertices[k];
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      const vx = p[0] - a[0], vy = p[1] - a[1], vz = p[2] - a[2];
+      const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+      area += 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
+    }
+    return area;
+  }
+
+  get estimatedVolumeM3(): number | null {
+    const c = this.selectedCandidate;
+    return c ? Math.round(this.footprintAreaM2(c) * c.height_m) : null;
+  }
+
+  get suggestedDebitVentM3h(): number | null {
+    const profile = this.selectedVentProfile;
+    const volume = this.estimatedVolumeM3;
+    if (!profile || volume === null) return null;
+    return Math.round(profile.tauxRenouvellementVolH * volume * 10) / 10;
+  }
+
+  get suggestedEtaRecupVent(): number | null {
+    return this.selectedVentProfile?.etaRecup ?? null;
+  }
+
   vertices = signal<number[][]>([]);
   triangles = signal<WorkingTriangle[]>([]);
   groups = signal<string[]>([]);
@@ -149,6 +194,8 @@ export class ModeSimplifieComponent implements OnInit {
       vertices: c.vertices,
       triangles: c.triangles.map(t => ({ v: t.v, group: t.group, paroi_model_id: null, boundary: t.boundary })),
       georef_lat: c.lat, georef_lon: c.lon, georef_north_offset_deg: 0,
+      suggested_debit_vent_m3h: this.suggestedDebitVentM3h,
+      suggested_eta_recup_vent: this.suggestedEtaRecupVent,
     };
 
     this.api.createBuilding(payload).subscribe({

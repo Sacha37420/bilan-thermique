@@ -239,6 +239,16 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
           this.weatherFetchLon = building.georef_lon;
           this.weatherFetchNorthOffset = building.georef_north_offset_deg;
         }
+        // Même principe pour le renouvellement d'air (Lot T, mode simplifié) :
+        // une suggestion calculée là-bas depuis un profil catalogue + le volume
+        // réel du bâtiment, reprise ici comme point de départ — les deux champs
+        // restent modifiables normalement, comme pour tout bâtiment.
+        if (building.suggested_debit_vent_m3h !== null) {
+          this.debitVentM3h = building.suggested_debit_vent_m3h;
+        }
+        if (building.suggested_eta_recup_vent !== null) {
+          this.etaRecupVent = building.suggested_eta_recup_vent;
+        }
       },
       error: () => {
         this.loadingBuilding.set(false);

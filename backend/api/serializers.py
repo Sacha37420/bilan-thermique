@@ -180,6 +180,13 @@ class BuildingSerializer(serializers.Serializer):
     georef_north_offset_deg = serializers.FloatField(required=False, default=0.0)
     georef_ground_z = serializers.FloatField(required=False, allow_null=True, default=None)
     surface_ref_m2 = serializers.FloatField(required=False, allow_null=True, default=None, min_value=0.01)
+    # Suggestion de ventilation (Lot T) — bornes identiques à
+    # BuildingInteriorSerializer.debit_vent_m3h/eta_recup_vent, que ces champs
+    # préremplissent côté Calcul 3D (voir Building.suggested_debit_vent_m3h).
+    suggested_debit_vent_m3h = serializers.FloatField(required=False, allow_null=True, default=None,
+                                                       min_value=0.0, max_value=100_000.0)
+    suggested_eta_recup_vent = serializers.FloatField(required=False, allow_null=True, default=None,
+                                                        min_value=0.0, max_value=0.95)
     sun_visibility_stale = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)

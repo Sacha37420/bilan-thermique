@@ -92,6 +92,34 @@
             </small>
           </label>
         </div>
+
+        <h3>Renouvellement d'air (optionnel)</h3>
+        <p class="hint">
+          Méthode complète équivalente : régler séparément le débit de ventilation et le rendement
+          de récupération de chaleur (page Calcul 3D). Ici, un seul profil par génération de
+          bâtiment suffit — le volume est calculé automatiquement depuis l'empreinte réelle et la
+          hauteur trouvées ({{ estimatedVolumeM3 }} m³), pas besoin de le saisir à la main.
+        </p>
+        <div class="field-grid">
+          <label>
+            <span>Profil de ventilation</span>
+            <select [(ngModel)]="selectedVentProfileId" name="selectedVentProfileId">
+              <option [ngValue]="null">— aucun —</option>
+              @for (p of ventilationProfiles; track p.id) {
+                <option [ngValue]="p.id">{{ p.label }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        @if (selectedVentProfile) {
+          <p class="hint">{{ selectedVentProfile.description }}</p>
+          <p class="hint">
+            Débit suggéré : {{ suggestedDebitVentM3h }} m³/h, rendement de récupération :
+            {{ suggestedEtaRecupVent }} — préremplira le panneau « Renouvellement d'air » de
+            Calcul 3D, où les deux valeurs restent modifiables librement.
+          </p>
+        }
+
         <button type="button" class="btn-primary" [disabled]="creating() || !buildingName.trim()" (click)="createAndRefine()">
           {{ creating() ? 'Création…' : 'Créer et subdiviser' }}
         </button>
