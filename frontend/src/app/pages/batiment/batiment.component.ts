@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
+import { generateBoxEnvelope } from '../../core/box-generator';
 import { Building, Job, TriangleBoundary, WorkingTriangle } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 
@@ -155,6 +156,37 @@ export class BatimentComponent implements OnInit, OnDestroy {
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : "Échec de la lecture du fichier.");
     }
+  }
+
+  // ── Générateur de boîte (Lot O) — alternative à l'import pour tester
+  // l'outil sans modélisateur 3D externe, groupes déjà nommés pour
+  // l'assignation par groupe ci-dessous. Voir core/box-generator.ts.
+  boxWidth = 8;
+  boxLength = 6;
+  boxHeight = 3;
+  boxRoof: 'flat' | 'gable' = 'flat';
+  boxRoofPitchHeight = 1.5;
+
+  generateBox(): void {
+    this.error.set('');
+    this.message.set('');
+    const mesh = generateBoxEnvelope({
+      width: this.boxWidth, length: this.boxLength, height: this.boxHeight,
+      roof: this.boxRoof, roofPitchHeight: this.boxRoofPitchHeight,
+    });
+    this.currentBuildingId.set(null);
+    this.buildingName = `Boîte ${this.boxWidth}×${this.boxLength}×${this.boxHeight}`;
+    this.buildingDescription = '';
+    this.vertices.set(mesh.vertices);
+    this.triangles.set(mesh.triangles);
+    this.groups.set(mesh.groups);
+    this.groupAssignments = {};
+    this.groupBoundaryAssignments = {};
+    this.selectedIndices.set(new Set());
+    this.modelColorMap.clear();
+    this.message.set(
+      `Boîte générée : ${mesh.vertices.length} sommets, ${mesh.triangles.length} triangles, ${mesh.groups.length} groupe(s).`,
+    );
   }
 
   // ── Couleurs ─────────────────────────────────────────────────────────

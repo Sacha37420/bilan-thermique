@@ -110,6 +110,45 @@
       <input type="file" accept=".obj,.stl" (change)="onFileSelected($event)" />
     </label>
 
+    <div class="shadow-block">
+      <h3>Générer une boîte</h3>
+      <p class="hint">
+        Point d'entrée pédagogique/de test — pas besoin de modélisateur 3D externe : génère
+        directement un maillage simple avec des groupes déjà nommés (mur_nord, mur_sud…), prêt pour
+        l'assignation par groupe ci-dessous. Pour une géométrie réelle, l'import ci-dessus reste la
+        voie avancée, ou le <a routerLink="/mode-simplifie">mode simplifié</a> pour un bâtiment réel
+        existant.
+      </p>
+      <div class="field-grid">
+        <label>
+          <span>Largeur est-ouest (m)</span>
+          <input type="number" step="0.5" min="1" [(ngModel)]="boxWidth" name="boxWidth" />
+        </label>
+        <label>
+          <span>Longueur nord-sud (m)</span>
+          <input type="number" step="0.5" min="1" [(ngModel)]="boxLength" name="boxLength" />
+        </label>
+        <label>
+          <span>Hauteur des murs (m)</span>
+          <input type="number" step="0.1" min="1" [(ngModel)]="boxHeight" name="boxHeight" />
+        </label>
+        <label>
+          <span>Toiture</span>
+          <select [(ngModel)]="boxRoof" name="boxRoof">
+            <option value="flat">Plate</option>
+            <option value="gable">2 pans (faîtage nord-sud)</option>
+          </select>
+        </label>
+        @if (boxRoof === 'gable') {
+          <label>
+            <span>Hauteur du faîtage au-dessus de l'égout (m)</span>
+            <input type="number" step="0.1" min="0.1" [(ngModel)]="boxRoofPitchHeight" name="boxRoofPitchHeight" />
+          </label>
+        }
+      </div>
+      <button type="button" class="btn-secondary" (click)="generateBox()">Générer la boîte</button>
+    </div>
+
     @if (currentBuildingId() !== null) {
       <div class="shadow-block">
         <h3>Raffiner le maillage</h3>
