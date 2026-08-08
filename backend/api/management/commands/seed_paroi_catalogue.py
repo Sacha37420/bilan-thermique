@@ -76,6 +76,7 @@ CATALOGUE = [
         'layers': VITRAGE_SIMPLE,
         'frame_u': 2.0,
         'frame_fraction': 0.25,
+        'is_glazing': True,
     },
     {
         'name': 'Fenêtre double vitrage (usuelle, 4/16/4)',
@@ -88,6 +89,7 @@ CATALOGUE = [
         'layers': VITRAGE_DOUBLE,
         'frame_u': 1.8,
         'frame_fraction': 0.25,
+        'is_glazing': True,
     },
     {
         'name': 'Mur ITE — RT2005 (isolant 100 mm)',
@@ -184,6 +186,7 @@ class Command(BaseCommand):
                 defaults={
                     'description': entry['description'], 'layers': entry['layers'],
                     'frame_u': entry.get('frame_u'), 'frame_fraction': entry.get('frame_fraction'),
+                    'is_glazing': entry.get('is_glazing', False),
                 },
             )
             verb = 'créé' if created else 'mis à jour'

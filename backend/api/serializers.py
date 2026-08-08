@@ -35,6 +35,8 @@ class ParoiModelSerializer(serializers.Serializer):
     # façon plus un vitrage.
     frame_u = serializers.FloatField(required=False, allow_null=True, default=None, min_value=0.1, max_value=20.0)
     frame_fraction = serializers.FloatField(required=False, allow_null=True, default=None, min_value=0.0, max_value=0.95)
+    # Modèle de vitrage plutôt que de paroi opaque (Lot T) — voir ParoiModel.is_glazing.
+    is_glazing = serializers.BooleanField(required=False, default=False)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
@@ -259,6 +261,18 @@ class GenerateEnvironmentRequestSerializer(serializers.Serializer):
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
     lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
     radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
+
+
+class SearchNearbyBuildingsRequestSerializer(serializers.Serializer):
+    """POST /api/batiments/rechercher/ (Lot T, mode simplifié) — voir
+    api.geodata.search_nearby_buildings. Rayon volontairement plus petit que
+    GenerateEnvironmentRequestSerializer (400 m) : ici on cherche UN bâtiment
+    précis (le sien), pas tous les obstacles alentour."""
+
+    lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
+    lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
+    radius_m = serializers.FloatField(required=False, min_value=5.0, max_value=150.0, default=50.0)
+
 
 
 class GenerateBuildingEnvironmentRequestSerializer(serializers.Serializer):

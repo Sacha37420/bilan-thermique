@@ -1,0 +1,197 @@
+<main class="page-mode-simplifie">
+
+  <div class="page-head">
+    <p class="eyebrow"><span class="dot"></span> Point d'entrée guidé</p>
+    <h1>Mode simplifié</h1>
+    <p class="subtitle">
+      Pour évaluer rapidement un bâtiment réel existant — recherche automatique, taux de vitrage
+      par paroi plutôt qu'un import de maillage détaillé. Le bâtiment produit est un bâtiment
+      ordinaire, éditable ensuite avec tous les outils complets (page <a routerLink="/batiment">Bâtiment</a>).
+    </p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">Ce que ce mode simplifie — et ce qu'il ne fait pas</span>
+    <p>
+      Chaque étape ci-dessous indique ce que ferait la méthode complète à sa place. En résumé :
+      l'empreinte vient d'IGN/OpenStreetMap (souvent approximative), la hauteur est parfois estimée,
+      la toiture est toujours plate, il n'y a pas de vraie disposition de fenêtres — seulement une
+      proportion de petits triangles répartis régulièrement — et le cadre de fenêtre n'est pas
+      modélisé ici. Pour un résultat plus fin, continuez ensuite sur la page Bâtiment.
+    </p>
+  </div>
+
+  <!-- ── Étape 1 : recherche ─────────────────────────────────────────── -->
+  <section class="form-card" [class.done]="step() !== 'recherche'">
+    <h2>1. Rechercher le bâtiment</h2>
+    <p class="hint">
+      Méthode complète équivalente : importer un fichier OBJ/STL déjà modélisé (page Bâtiment). Ici,
+      on récupère directement l'empreinte réelle du bâtiment depuis IGN BD TOPO (France) ou
+      OpenStreetMap (ailleurs) — mêmes sources que la génération d'environnement.
+    </p>
+    @if (step() === 'recherche') {
+      <div class="field-grid">
+        <label><span>Latitude</span><input type="number" step="0.0001" min="-90" max="90" [(ngModel)]="searchLat" name="searchLat" /></label>
+        <label><span>Longitude</span><input type="number" step="0.0001" min="-180" max="180" [(ngModel)]="searchLon" name="searchLon" /></label>
+        <label><span>Rayon de recherche (m)</span><input type="number" step="5" min="5" max="150" [(ngModel)]="searchRadius" name="searchRadius" /></label>
+      </div>
+      <button type="button" class="btn-primary" [disabled]="searching() || searchLat === null || searchLon === null" (click)="search()">
+        {{ searching() ? 'Recherche…' : 'Rechercher' }}
+      </button>
+      @if (searchError()) {
+        <p class="field-error">{{ searchError() }}</p>
+      }
+      @if (nSkippedTooComplex() > 0) {
+        <p class="hint">
+          {{ nSkippedTooComplex() }} bâtiment(s) proche(s) ignoré(s) — empreinte trop complexe
+          (trop de parois) pour ce mode simplifié.
+        </p>
+      }
+      @if (candidates().length > 0) {
+        <div class="candidate-list">
+          @for (c of candidates(); track $index) {
+            <div class="candidate-row" [class.active]="selectedCandidateIndex() === $index">
+              <div class="candidate-info">
+                <span>{{ c.distance_m }} m</span>
+                <span>hauteur {{ c.height_m | number:'1.0-1' }} m{{ c.approx_height ? ' (estimée)' : '' }}</span>
+                <span>{{ c.n_walls }} paroi(s)</span>
+                <span class="hint">source : {{ c.source === 'ign' ? 'IGN BD TOPO' : 'OpenStreetMap' }}</span>
+              </div>
+              <button type="button" class="btn-secondary" (click)="selectCandidate($index)">Choisir</button>
+            </div>
+          }
+        </div>
+      }
+    } @else if (selectedCandidate) {
+      <p class="hint">
+        Bâtiment choisi à {{ selectedCandidate.distance_m }} m, {{ selectedCandidate.n_walls }} paroi(s).
+      </p>
+    }
+  </section>
+
+  <!-- ── Étape 2 : création + subdivision ────────────────────────────── -->
+  @if (selectedCandidate && step() !== 'recherche') {
+    <section class="form-card" [class.done]="step() !== 'creation'">
+      <h2>2. Créer et subdiviser le maillage</h2>
+      <p class="hint">
+        Méthode complète équivalente : assigner un modèle de paroi triangle par triangle, puis
+        raffiner le maillage à la main (page Bâtiment). Ici, le maillage est subdivisé finement tout
+        de suite — c'est ce qui permettra d'approximer le taux de vitrage choisi à l'étape suivante.
+      </p>
+      @if (step() === 'creation') {
+        <div class="field-grid">
+          <label><span>Nom du bâtiment</span><input type="text" [(ngModel)]="buildingName" name="buildingName" /></label>
+          <label>
+            <span>Finesse de subdivision (m)</span>
+            <input type="number" step="0.1" min="0.5" max="5" [(ngModel)]="maxEdgeLength" name="maxEdgeLength" />
+            <small>
+              Plus petit = meilleure précision du taux de vitrage, mais beaucoup plus de triangles —
+              la subdivision touche tout le bâtiment (murs, toiture, sol), pas seulement les murs.
+              2 m convient pour la plupart des bâtiments ; augmentez si la subdivision échoue
+              (bâtiment de grande taille).
+            </small>
+          </label>
+        </div>
+        <button type="button" class="btn-primary" [disabled]="creating() || !buildingName.trim()" (click)="createAndRefine()">
+          {{ creating() ? 'Création…' : 'Créer et subdiviser' }}
+        </button>
+        @if (createError()) {
+          <p class="field-error">{{ createError() }}</p>
+        }
+      } @else {
+        <p class="hint">« {{ buildingName }} » créé — {{ triangles().length }} triangles après subdivision.</p>
+      }
+    </section>
+  }
+
+  <!-- ── Étape 3 : configuration par paroi ───────────────────────────── -->
+  @if (step() === 'configuration' || step() === 'termine') {
+    <section class="form-card" [class.done]="step() === 'termine'">
+      <h2>3. Taux de vitrage par paroi</h2>
+      <p class="hint">
+        Méthode complète équivalente : dessiner ou importer la vraie forme et position de chaque
+        fenêtre. Ici, pour chaque paroi, on choisit un modèle opaque, un modèle de vitrage et une
+        proportion — les petits triangles sont répartis régulièrement pour approcher cette
+        proportion, sans représenter de vraies fenêtres ni leur cadre (voir le Lot I pour le cadre,
+        applicable ensuite via la page Bibliothèque de parois si le modèle de vitrage en a un).
+      </p>
+      @if (step() === 'configuration') {
+        <div class="group-config-list">
+          @for (g of groups(); track g) {
+            <div class="group-config-row">
+              <h3>{{ g }} <span class="hint">({{ triangleCountForGroup(g) }} triangle(s))</span></h3>
+              <div class="field-grid">
+                <label>
+                  <span>Modèle opaque</span>
+                  <select [(ngModel)]="groupConfig[g].opaqueModelId" name="opaque_{{g}}">
+                    <option [ngValue]="null">— choisir —</option>
+                    @for (m of opaqueModels; track m.id) {
+                      <option [ngValue]="m.id">{{ m.name }}</option>
+                    }
+                  </select>
+                </label>
+                @if (g !== 'sol') {
+                  <label>
+                    <span>Modèle de vitrage</span>
+                    <select [(ngModel)]="groupConfig[g].glazingModelId" name="glazing_{{g}}">
+                      <option [ngValue]="null">— aucun —</option>
+                      @for (m of glazingModels; track m.id) {
+                        <option [ngValue]="m.id">{{ m.name }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label>
+                    <span>Taux de vitrage (%)</span>
+                    <input type="number" step="5" min="0" max="95" [(ngModel)]="groupConfig[g].tauxVitragePct" name="taux_{{g}}" />
+                  </label>
+                }
+              </div>
+            </div>
+          }
+        </div>
+        <button type="button" class="btn-secondary" [disabled]="!allGroupsConfigured" (click)="generateAssignment()">
+          Générer l'assignation
+        </button>
+        @if (!allGroupsConfigured) {
+          <p class="hint">Choisissez un modèle opaque pour chaque paroi avant de générer l'assignation.</p>
+        }
+
+        @if (vertices().length > 0) {
+          <h3>Aperçu — <span class="hint" style="color: var(--accent)">vitrage</span> / <span class="hint">opaque</span> / <span class="hint" style="color: var(--warning)">non assigné</span></h3>
+          <div class="viewer-wrap">
+            <app-mesh-viewer [vertices]="vertices()" [triangles]="triangles()" [colorForTriangle]="colorForTriangle" [pickable]="false" />
+          </div>
+
+          <button type="button" class="btn-primary" [disabled]="saving() || assignedCount === 0" (click)="save()">
+            {{ saving() ? 'Enregistrement…' : 'Enregistrer et terminer' }}
+          </button>
+          @if (saveError()) {
+            <p class="field-error">{{ saveError() }}</p>
+          }
+        }
+      }
+    </section>
+  }
+
+  <!-- ── Étape 4 : terminé ────────────────────────────────────────────── -->
+  @if (step() === 'termine') {
+    <section class="form-card">
+      <h2>4. Météo et calcul</h2>
+      <p class="hint">
+        Méthode complète équivalente : construire ou coller une série météo horaire à la main. Ici,
+        rien à faire de plus — le bâtiment est géoréférencé (coordonnées de la recherche), la page
+        Calcul 3D pré-remplira automatiquement le panneau météo avec ces coordonnées. Choisissez-y
+        juste l'année (ou l'année type PVGIS) puis lancez le calcul.
+      </p>
+      <p class="hint">
+        « {{ buildingName }} » est un bâtiment ordinaire : ombrage, environnement voisin, cadre de
+        fenêtre, planning horaire… tous les outils complets restent utilisables pour l'affiner.
+      </p>
+      <div class="editor-actions">
+        <a routerLink="/calcul-3d" class="btn-primary">Aller sur Calcul 3D</a>
+        <a routerLink="/batiment" class="btn-secondary">Aller sur Bâtiment</a>
+      </div>
+    </section>
+  }
+
+</main>

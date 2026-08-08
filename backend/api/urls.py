@@ -5,7 +5,7 @@ from .views import (
     BuildingListCreateView, BuildingDetailView, GenerateBuildingEnvironmentView,
     EnvironmentListCreateView, EnvironmentDetailView, GenerateEnvironmentView,
     JobDetailView, PrecomputeShadowsView, BuildingCalculView, BuildingRefineView,
-    FetchWeatherView,
+    FetchWeatherView, SearchNearbyBuildingsView,
 )
 
 urlpatterns = [
@@ -16,6 +16,7 @@ urlpatterns = [
     path('paroi-modeles/',    ParoiModelListCreateView.as_view()),
     path('paroi-modeles/<int:pk>/', ParoiModelDetailView.as_view()),
     path('batiments/',        BuildingListCreateView.as_view()),
+    path('batiments/rechercher/', SearchNearbyBuildingsView.as_view()),
     path('batiments/<int:pk>/', BuildingDetailView.as_view()),
     path('batiments/<int:pk>/precalcul-ombrage/', PrecomputeShadowsView.as_view()),
     path('batiments/<int:pk>/calcul-3d/', BuildingCalculView.as_view()),

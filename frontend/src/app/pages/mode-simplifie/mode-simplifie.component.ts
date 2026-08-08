@@ -1,0 +1,260 @@
+import { Component, OnInit, ViewChild, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { DecimalPipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
+import { ApiService } from '../../core/api.service';
+import { Building, WorkingTriangle } from '../../core/building.types';
+import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
+
+interface ParoiModelSummary {
+  id: number;
+  name: string;
+  is_glazing: boolean;
+}
+
+interface Candidate {
+  lat: number;
+  lon: number;
+  distance_m: number;
+  height_m: number;
+  approx_height: boolean;
+  source: 'ign' | 'osm';
+  n_walls: number;
+  vertices: number[][];
+  triangles: { v: [number, number, number]; group: string; boundary: 'ground' | 'exterior_air' }[];
+}
+
+interface GroupConfig {
+  opaqueModelId: number | null;
+  glazingModelId: number | null;
+  tauxVitragePct: number;
+}
+
+const GLAZING_COLOR = '--accent';
+const OPAQUE_COLOR = '--text-mute';
+const UNASSIGNED_COLOR = '--warning';
+
+/** Mode simplifié (Lot T) — point d'entrée pédagogique vers la méthode complète :
+ * recherche d'un bâtiment réel (IGN/OSM, même mécanisme que la génération
+ * d'environnement), configuration d'un taux de vitrage par paroi plutôt qu'un
+ * import de maillage + assignation manuelle triangle par triangle. Le
+ * `Building` produit est un Building ordinaire, éditable ensuite via les pages
+ * Bâtiment/Calcul 3D habituelles — ce mode ne remplace rien, il raccourcit le
+ * point de départ. Voir to_do_bilan_thermique.md, Lot T, pour le détail des
+ * simplifications assumées (pas de cadre de fenêtre, pas de vraie disposition
+ * de fenêtres — juste une proportion de petits triangles).
+ */
+@Component({
+  selector: 'app-mode-simplifie',
+  standalone: true,
+  imports: [FormsModule, DecimalPipe, RouterLink, MeshViewerComponent],
+  templateUrl: './mode-simplifie.component.html',
+  styleUrl: './mode-simplifie.component.scss',
+})
+export class ModeSimplifieComponent implements OnInit {
+  private api = inject(ApiService);
+
+  @ViewChild(MeshViewerComponent) viewer?: MeshViewerComponent;
+
+  step = signal<'recherche' | 'creation' | 'configuration' | 'termine'>('recherche');
+
+  // ── Étape 1 : recherche ────────────────────────────────────────────────
+  searchLat: number | null = null;
+  searchLon: number | null = null;
+  searchRadius = 50;
+  searching = signal(false);
+  searchError = signal('');
+  candidates = signal<Candidate[]>([]);
+  nSkippedTooComplex = signal(0);
+  selectedCandidateIndex = signal<number | null>(null);
+
+  get selectedCandidate(): Candidate | null {
+    const i = this.selectedCandidateIndex();
+    return i === null ? null : this.candidates()[i] ?? null;
+  }
+
+  search(): void {
+    if (this.searchLat === null || this.searchLon === null) return;
+    this.searching.set(true);
+    this.searchError.set('');
+    this.candidates.set([]);
+    this.selectedCandidateIndex.set(null);
+    this.api.searchNearbyBuildings({ lat: this.searchLat, lon: this.searchLon, radius_m: this.searchRadius }).subscribe({
+      next: (res) => {
+        const r = res as { candidates: Candidate[]; n_skipped_too_complex: number };
+        this.candidates.set(r.candidates);
+        this.nSkippedTooComplex.set(r.n_skipped_too_complex);
+        this.searching.set(false);
+        if (r.candidates.length === 0) {
+          this.searchError.set(
+            r.n_skipped_too_complex > 0
+              ? "Bâtiment(s) trouvé(s) mais trop complexe(s) pour ce mode — essayez l'import manuel (page Bâtiment)."
+              : "Aucun bâtiment trouvé à cet endroit — élargissez le rayon ou vérifiez les coordonnées.",
+          );
+        }
+      },
+      error: (err) => {
+        this.searching.set(false);
+        this.searchError.set(err?.error?.detail ?? 'Échec de la recherche.');
+      },
+    });
+  }
+
+  selectCandidate(i: number): void {
+    this.selectedCandidateIndex.set(i);
+  }
+
+  // ── Étape 2 : création + subdivision fine ───────────────────────────────
+  buildingName = '';
+  // Défaut vérifié en réel (2026-08-08) : le raffinement (geometry.refine_envelope)
+  // propage la subdivision à tout le maillage connecté (murs/toiture/sol partagent
+  // des arêtes dans un volume extrudé étanche) — pas de raffinement "murs
+  // seulement". 0,6 m produisait 16384 triangles pour un petit pavillon (bien
+  // au-delà de MAX_TOTAL_DOF du solveur une fois chaque triangle maillé en
+  // profondeur) ; 2,0 m donne ~128 triangles/mur, largement assez fin pour un
+  // taux de vitrage à quelques % près, avec une marge confortable.
+  maxEdgeLength = 2.0;
+  creating = signal(false);
+  createError = signal('');
+  buildingId = signal<number | null>(null);
+
+  vertices = signal<number[][]>([]);
+  triangles = signal<WorkingTriangle[]>([]);
+  groups = signal<string[]>([]);
+  groupConfig: Record<string, GroupConfig> = {};
+
+  paroiModels = signal<ParoiModelSummary[]>([]);
+  get opaqueModels(): ParoiModelSummary[] {
+    return this.paroiModels().filter(m => !m.is_glazing);
+  }
+  get glazingModels(): ParoiModelSummary[] {
+    return this.paroiModels().filter(m => m.is_glazing);
+  }
+
+  ngOnInit(): void {
+    this.api.getParoiModeles().subscribe({
+      next: (models) => this.paroiModels.set(models as ParoiModelSummary[]),
+      error: () => {},
+    });
+  }
+
+  createAndRefine(): void {
+    const c = this.selectedCandidate;
+    if (!c || !this.buildingName.trim()) return;
+    this.creating.set(true);
+    this.createError.set('');
+
+    const payload = {
+      name: this.buildingName.trim(),
+      vertices: c.vertices,
+      triangles: c.triangles.map(t => ({ v: t.v, group: t.group, paroi_model_id: null, boundary: t.boundary })),
+      georef_lat: c.lat, georef_lon: c.lon, georef_north_offset_deg: 0,
+    };
+
+    this.api.createBuilding(payload).subscribe({
+      next: (res) => {
+        const building = res as Building;
+        this.buildingId.set(building.id);
+        this.api.refineBuildingMesh(building.id, this.maxEdgeLength).subscribe({
+          next: () => this.loadRefinedBuilding(building.id),
+          error: (err) => {
+            this.creating.set(false);
+            this.createError.set(err?.error?.detail ?? "Échec de la subdivision — augmentez la taille de maille.");
+          },
+        });
+      },
+      error: (err) => {
+        this.creating.set(false);
+        this.createError.set(err?.error?.name?.[0] ?? "Échec de la création du bâtiment.");
+      },
+    });
+  }
+
+  private loadRefinedBuilding(id: number): void {
+    this.api.getBuilding(id).subscribe({
+      next: (res) => {
+        const building = res as Building;
+        this.vertices.set(building.envelope.vertices);
+        this.triangles.set(building.envelope.triangles);
+        const groupNames = [...new Set(building.envelope.triangles.map(t => t.group).filter((g): g is string => !!g))];
+        this.groups.set(groupNames);
+        this.groupConfig = {};
+        for (const g of groupNames) {
+          this.groupConfig[g] = {
+            opaqueModelId: null, glazingModelId: null,
+            tauxVitragePct: g === 'sol' || g === 'toiture' ? 0 : 20,
+          };
+        }
+        this.creating.set(false);
+        this.step.set('configuration');
+      },
+      error: () => {
+        this.creating.set(false);
+        this.createError.set('Échec du rechargement du bâtiment subdivisé.');
+      },
+    });
+  }
+
+  // ── Étape 3 : configuration par paroi + assignation proportionnelle ─────
+  triangleCountForGroup(group: string): number {
+    return this.triangles().filter(t => t.group === group).length;
+  }
+
+  generateAssignment(): void {
+    const updated = this.triangles().map(t => ({ ...t }));
+    for (const group of this.groups()) {
+      const cfg = this.groupConfig[group];
+      if (!cfg || cfg.opaqueModelId === null) continue;
+      const indices: number[] = [];
+      updated.forEach((t, i) => { if (t.group === group) indices.push(i); });
+
+      for (const i of indices) updated[i] = { ...updated[i], paroi_model_id: cfg.opaqueModelId };
+
+      if (cfg.glazingModelId !== null && cfg.tauxVitragePct > 0) {
+        const ratio = Math.min(cfg.tauxVitragePct, 95) / 100;
+        const step = Math.max(1, Math.round(1 / ratio));
+        indices.forEach((triIdx, pos) => {
+          if (pos % step === 0) updated[triIdx] = { ...updated[triIdx], paroi_model_id: cfg.glazingModelId };
+        });
+      }
+    }
+    this.triangles.set(updated);
+    this.viewer?.repaint();
+  }
+
+  colorForTriangle = (index: number): string => {
+    const t = this.triangles()[index];
+    if (!t || t.paroi_model_id === null) return UNASSIGNED_COLOR;
+    const model = this.paroiModels().find(m => m.id === t.paroi_model_id);
+    return model?.is_glazing ? GLAZING_COLOR : OPAQUE_COLOR;
+  };
+
+  get allGroupsConfigured(): boolean {
+    return this.groups().every(g => this.groupConfig[g]?.opaqueModelId !== null);
+  }
+
+  get assignedCount(): number {
+    return this.triangles().filter(t => t.paroi_model_id !== null).length;
+  }
+
+  saving = signal(false);
+  saveError = signal('');
+
+  save(): void {
+    const id = this.buildingId();
+    if (id === null || this.assignedCount === 0) return;
+    this.saving.set(true);
+    this.saveError.set('');
+    const triangles = this.triangles().map(t => ({ v: t.v, group: t.group, paroi_model_id: t.paroi_model_id, boundary: t.boundary }));
+    this.api.updateBuilding(id, { triangles }).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.step.set('termine');
+      },
+      error: (err) => {
+        this.saving.set(false);
+        this.saveError.set(err?.error?.detail ?? "Échec de l'enregistrement.");
+      },
+    });
+  }
+}

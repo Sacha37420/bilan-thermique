@@ -16,7 +16,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
-from . import building_solver, geometry, serializers, shadow, solver, weather_source
+from . import building_solver, geodata, geometry, serializers, shadow, solver, weather_source
 
 DT_SECONDS = 3600.0
 
@@ -1116,3 +1116,97 @@ class WindowFrameTest(SimpleTestCase):
             building_solver.run_building_simulation(
                 envelope, paroi_layers, None, payload, paroi_frame_by_id={1: (2.0, 1.0)},
             )
+
+
+class ExtrudeFootprintGroupedTest(SimpleTestCase):
+    """Lot T (mode simplifié) — geodata.extrude_footprint_grouped. Partie pure
+    (pas de réseau, contrairement à search_nearby_buildings) : la structure de
+    faces de trimesh.creation.extrude_polygon a été vérifiée empiriquement (voir
+    sa docstring), ces tests la figent pour détecter un changement de
+    comportement de trimesh plutôt que de le découvrir en production."""
+
+    databases = []
+
+    def test_rectangle_four_walls(self):
+        footprint = [(0.0, 0.0), (4.0, 0.0), (4.0, 3.0), (0.0, 3.0)]
+        vertices, triangles = geodata.extrude_footprint_grouped(footprint, height_m=2.5)
+        groups = [t['group'] for t in triangles]
+        self.assertEqual(groups.count('sol'), 2)
+        self.assertEqual(groups.count('toiture'), 2)
+        for i in range(1, 5):
+            self.assertEqual(groups.count(f'mur_{i}'), 2)
+        self.assertEqual(len(triangles), 12)
+
+        boundaries = {t['group']: t['boundary'] for t in triangles}
+        self.assertEqual(boundaries['sol'], 'ground')
+        self.assertEqual(boundaries['toiture'], 'exterior_air')
+        self.assertEqual(boundaries['mur_1'], 'exterior_air')
+
+    def test_l_shape_six_walls(self):
+        # Polygone non convexe (en L) -- plus représentatif d'une empreinte
+        # IGN/OSM réelle qu'un simple rectangle.
+        footprint = [(0, 0), (6, 0), (6, 4), (3, 4), (3, 7), (0, 7)]
+        vertices, triangles = geodata.extrude_footprint_grouped(footprint, height_m=2.5)
+        groups = [t['group'] for t in triangles]
+        self.assertEqual(groups.count('sol'), 4)
+        self.assertEqual(groups.count('toiture'), 4)
+        for i in range(1, 7):
+            self.assertEqual(groups.count(f'mur_{i}'), 2)
+        self.assertEqual(len(triangles), 20)
+
+    def test_sol_and_toiture_at_expected_elevation(self):
+        # Oracle indépendant du comptage de groupes : le sol doit être
+        # exactement au niveau z=0, la toiture exactement à z=height_m (les
+        # deux capuchons de l'extrusion), peu importe comment trimesh a
+        # numéroté ses faces en interne.
+        footprint = [(0.0, 0.0), (5.0, 0.0), (5.0, 4.0), (0.0, 4.0)]
+        height = 3.0
+        vertices, triangles = geodata.extrude_footprint_grouped(footprint, height_m=height)
+        for t in triangles:
+            zs = [round(vertices[i][2], 9) for i in t['v']]
+            if t['group'] == 'sol':
+                self.assertTrue(all(z == 0.0 for z in zs))
+            elif t['group'] == 'toiture':
+                self.assertTrue(all(z == round(height, 9) for z in zs))
+            else:
+                # Un mur touche à la fois z=0 et z=height, jamais uniquement l'un des deux.
+                self.assertIn(0.0, zs)
+                self.assertIn(round(height, 9), zs)
+
+    def test_resulting_triangles_pass_geometry_validation(self):
+        # Intégration : le format produit doit être directement consommable
+        # par compute_envelope_geometry (donc par BuildingSerializer), sans
+        # transformation supplémentaire.
+        footprint = [(0.0, 0.0), (4.0, 0.0), (4.0, 3.0), (0.0, 3.0)]
+        vertices, triangles = geodata.extrude_footprint_grouped(footprint, height_m=2.5)
+        computed = geometry.compute_envelope_geometry(vertices, [dict(t) for t in triangles])
+        self.assertEqual(len(computed), len(triangles))
+        for c in computed:
+            self.assertGreater(c['area'], 0.0)
+
+
+class SearchNearbyBuildingsSerializerTest(SimpleTestCase):
+    """Lot T — validation de SearchNearbyBuildingsRequestSerializer (pas de
+    réseau, contrairement à geodata.search_nearby_buildings lui-même)."""
+
+    databases = []
+
+    def test_valid_with_explicit_radius(self):
+        s = serializers.SearchNearbyBuildingsRequestSerializer(data={'lat': 48.85, 'lon': 2.35, 'radius_m': 40.0})
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertEqual(s.validated_data['radius_m'], 40.0)
+
+    def test_radius_defaults_to_50(self):
+        s = serializers.SearchNearbyBuildingsRequestSerializer(data={'lat': 48.85, 'lon': 2.35})
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertEqual(s.validated_data['radius_m'], 50.0)
+
+    def test_radius_above_150_rejected(self):
+        s = serializers.SearchNearbyBuildingsRequestSerializer(data={'lat': 48.85, 'lon': 2.35, 'radius_m': 200.0})
+        self.assertFalse(s.is_valid())
+        self.assertIn('radius_m', s.errors)
+
+    def test_out_of_range_coordinates_rejected(self):
+        s = serializers.SearchNearbyBuildingsRequestSerializer(data={'lat': 200.0, 'lon': 2.35})
+        self.assertFalse(s.is_valid())
+        self.assertIn('lat', s.errors)

@@ -62,6 +62,15 @@ class ParoiModel(models.Model):
     frame_u = models.FloatField(null=True, blank=True)
     frame_fraction = models.FloatField(null=True, blank=True)
 
+    # Modèle de vitrage plutôt que de paroi opaque (Lot T, mode simplifié) —
+    # champ explicite plutôt qu'une heuristique déduite des couches (ex. au
+    # moins une couche à tau > 0) pour ne pas dépendre d'un indice indirect qui
+    # casserait si un mur avait par erreur une couche légèrement translucide.
+    # Pilote uniquement les listes déroulantes "vitrage" vs "opaque" du mode
+    # simplifié — n'affecte jamais le solveur (qui se base uniquement sur les
+    # couches réelles, tau compris).
+    is_glazing = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

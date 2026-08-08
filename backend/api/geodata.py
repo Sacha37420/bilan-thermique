@@ -250,6 +250,141 @@ def extrude_footprint(footprint_xy, height_m):
     return mesh.vertices.tolist(), mesh.faces.tolist()
 
 
+def extrude_footprint_grouped(footprint_xy, height_m):
+    """Comme extrude_footprint, mais retourne des triangles groupés
+    ('sol'/'toiture'/'mur_1'..'mur_N') plutôt qu'une liste plate — pour un
+    bâtiment dont chaque paroi doit être assignable indépendamment (Lot T,
+    mode simplifié), contrairement aux obstacles d'environnement (juste de la
+    géométrie d'occlusion, jamais assignée à un ParoiModel).
+
+    Ordre des faces retournées par trimesh.creation.extrude_polygon, vérifié
+    empiriquement (non documenté explicitement par trimesh) sur un rectangle
+    (N=4) et un polygone en L non convexe (N=6) : pour une empreinte à N
+    sommets, les N-2 premières faces triangulent le sol (normale -Z), les N-2
+    suivantes le toit (normale +Z), puis EXACTEMENT 2 triangles par arête du
+    polygone, dans l'ordre des arêtes (arête i = sommet i -> sommet (i+1)%N).
+    Vérification de structure ci-dessous (nombre de faces attendu) plutôt que
+    de faire confiance aveuglément à ce comportement non garanti par l'API de
+    trimesh — un changement de version qui le romprait doit échouer bruyamment,
+    pas assigner silencieusement les mauvais groupes.
+
+    Retourne (vertices, triangles) — triangles : [{'v':[i,j,k], 'group': str,
+    'boundary': 'ground'|'exterior_air'}, ...], le format attendu par
+    TriangleInputSerializer (Building.envelope). Le sol est marqué
+    boundary='ground' (Lot K) — un plancher bas issu d'une empreinte réelle
+    touche le terrain par construction."""
+    polygon = shapely.geometry.Polygon(footprint_xy)
+    if not polygon.is_valid:
+        polygon = polygon.buffer(0)
+    if polygon.is_empty or polygon.area < 1e-3:
+        raise GeodataError("Empreinte de bâtiment dégénérée.")
+
+    n = len(polygon.exterior.coords) - 1  # dernier point = premier point (anneau fermé)
+    mesh = trimesh.creation.extrude_polygon(polygon, height=max(height_m, 1.0))
+    faces = mesh.faces.tolist()
+
+    cap_size = n - 2
+    if cap_size < 1 or len(faces) != 2 * cap_size + 2 * n:
+        raise GeodataError(
+            f"Structure de faces inattendue pour cette empreinte ({len(faces)} faces pour "
+            f"{n} sommets, {2 * max(cap_size, 0) + 2 * n} attendues) — extrusion groupée abandonnée."
+        )
+
+    triangles = []
+    for i, f in enumerate(faces):
+        if i < cap_size:
+            group, boundary = 'sol', 'ground'
+        elif i < 2 * cap_size:
+            group, boundary = 'toiture', 'exterior_air'
+        else:
+            edge_idx = (i - 2 * cap_size) // 2
+            group, boundary = f'mur_{edge_idx + 1}', 'exterior_air'
+        triangles.append({'v': list(f), 'group': group, 'boundary': boundary})
+
+    return mesh.vertices.tolist(), triangles
+
+
+MAX_WALLS_SIMPLIFIED_MODE = 30
+# Vérifié en réel (2026-08-07) : un bâtiment IGN en zone urbaine dense peut
+# avoir une empreinte à plusieurs centaines de sommets (un pâté de maisons
+# entier digitalisé comme un seul bâtiment complexe — 515 murs observés en
+# plein Paris) — inutilisable pour une configuration paroi par paroi. Une zone
+# pavillonnaire donne typiquement 4-26 murs. Le mode simplifié étant justement
+# pensé pour un cas simple, on écarte les candidats trop complexes plutôt que
+# de produire une UI à des centaines de menus déroulants.
+
+
+def search_nearby_buildings(lat, lon, radius_m, max_results=5):
+    """Lot T (mode simplifié) — cherche les bâtiments réels les plus proches de
+    (lat, lon) dans un rayon donné (IGN BD TOPO en France, repli OpenStreetMap
+    sinon — même bascule que generate_environment_mesh) et retourne jusqu'à
+    max_results candidats triés par distance, chacun DÉJÀ extrudé en enveloppe
+    groupée (extrude_footprint_grouped) — extruder au moment de la recherche
+    évite un second aller-retour réseau une fois le bâtiment choisi par
+    l'utilisateur. Contrairement à generate_environment_mesh (tous les
+    bâtiments d'un rayon, utilisés comme obstacles bruts non assignables),
+    chaque candidat ici est individuellement assignable ensuite.
+
+    Retourne (candidates, n_skipped_too_complex) : candidates avec au plus
+    MAX_WALLS_SIMPLIFIED_MODE parois (les autres sont ignorés, comptés dans
+    n_skipped_too_complex — à afficher pour que l'utilisateur comprenne
+    pourquoi un bâtiment proche n'apparaît pas). candidates=[] si la zone a
+    été interrogée avec succès mais ne contient aucun bâtiment exploitable
+    (repli déjà tenté) ; lève GeodataError seulement si LES DEUX sources ont
+    échoué (panne réseau/service, pas juste « zone vide »)."""
+    bbox = bbox_from_radius(lat, lon, radius_m)
+
+    buildings = []
+    ign_error = None
+    if is_in_france(lat, lon):
+        try:
+            buildings = fetch_ign_buildings(bbox)
+        except GeodataError as exc:
+            ign_error = exc
+
+    if not buildings:
+        try:
+            buildings = fetch_osm_buildings(bbox)
+        except GeodataError as exc:
+            if ign_error is not None:
+                raise GeodataError(f"{ign_error} Repli OpenStreetMap également en échec : {exc}") from exc
+            raise
+
+    if not buildings:
+        return [], 0
+
+    for b in buildings:
+        clat, clon = _footprint_center(b['footprint_latlon'])
+        x, y = local_xy(clat, clon, lat, lon)
+        b['_dist'] = math.hypot(x, y)
+    buildings.sort(key=lambda b: b['_dist'])
+
+    candidates = []
+    n_skipped_too_complex = 0
+    for b in buildings:
+        if len(candidates) >= max_results:
+            break
+        footprint_xy = [local_xy(plat, plon, lat, lon) for plat, plon in b['footprint_latlon']]
+        try:
+            vertices, triangles = extrude_footprint_grouped(footprint_xy, b['height_m'])
+        except GeodataError:
+            continue
+        # Compté sur les triangles réellement produits (pas sur le nombre brut
+        # de sommets de l'empreinte) : robuste aux conventions de fermeture
+        # d'anneau qui diffèrent entre IGN (GeoJSON) et OSM (way Overpass).
+        n_walls = len({t['group'] for t in triangles if t['group'].startswith('mur_')})
+        if n_walls > MAX_WALLS_SIMPLIFIED_MODE:
+            n_skipped_too_complex += 1
+            continue
+        clat, clon = _footprint_center(b['footprint_latlon'])
+        candidates.append({
+            'lat': clat, 'lon': clon, 'distance_m': round(b['_dist'], 1),
+            'height_m': b['height_m'], 'approx_height': b['approx_height'], 'source': b['source'],
+            'n_walls': n_walls, 'vertices': vertices, 'triangles': triangles,
+        })
+    return candidates, n_skipped_too_complex
+
+
 def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
                                north_offset_deg=0.0, ground_z_ref=None):
     """Orchestrateur principal. progress_cb(stage: str, pct: int) est optionnel (appelé

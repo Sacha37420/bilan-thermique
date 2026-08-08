@@ -71,6 +71,10 @@ export class ApiService {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/affiner-maillage/`, { max_edge_length: maxEdgeLength });
   }
 
+  searchNearbyBuildings(payload: { lat: number; lon: number; radius_m?: number }): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/rechercher/`, payload);
+  }
+
   precomputeShadows(buildingId: number): Observable<unknown> {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/precalcul-ombrage/`, {});
   }

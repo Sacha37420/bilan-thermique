@@ -9,11 +9,13 @@ from .serializers import (
     BuildingSerializer, EnvironmentSerializer, JobSerializer, BuildingCalculRequestSerializer,
     RefineMeshRequestSerializer, GenerateEnvironmentRequestSerializer,
     GenerateBuildingEnvironmentRequestSerializer, WeatherFetchRequestSerializer,
+    SearchNearbyBuildingsRequestSerializer,
 )
 from . import solver
 from . import tasks
 from . import building_solver
 from . import geometry
+from . import geodata
 
 
 class MeView(APIView):
@@ -86,6 +88,30 @@ class BuildingDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     queryset         = Building.objects.all()
     serializer_class = BuildingSerializer
+
+
+class SearchNearbyBuildingsView(APIView):
+    """
+    POST /api/batiments/rechercher/  {lat, lon, radius_m?}
+    Lot T (mode simplifié) — cherche les bâtiments réels les plus proches
+    (IGN BD TOPO / OpenStreetMap, api.geodata.search_nearby_buildings), chacun
+    déjà extrudé en enveloppe groupée (mur_1..mur_N/toiture/sol) prête à être
+    envoyée telle quelle à POST /api/batiments/ une fois choisie — synchrone
+    (rayon volontairement petit, quelques bâtiments au plus, contrairement à
+    la génération d'environnement qui passe par Celery).
+    """
+
+    def post(self, request):
+        serializer = SearchNearbyBuildingsRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            candidates, n_skipped_too_complex = geodata.search_nearby_buildings(
+                serializer.validated_data['lat'], serializer.validated_data['lon'],
+                serializer.validated_data['radius_m'],
+            )
+        except geodata.GeodataError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'candidates': candidates, 'n_skipped_too_complex': n_skipped_too_complex})
 
 
 class GenerateBuildingEnvironmentView(APIView):

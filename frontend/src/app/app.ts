@@ -35,6 +35,7 @@ export class AppComponent {
     { path: '/calcul-1d',     label: 'Calcul 1D',        abbr: '1D' },
     { path: '/theorie',       label: 'Théorie',          abbr: 'Th' },
     { path: '/parois',        label: 'Modèles de paroi', abbr: 'Mp' },
+    { path: '/mode-simplifie', label: 'Mode simplifié',  abbr: 'Ms' },
     { path: '/batiment',      label: 'Bâtiment',         abbr: 'Bt' },
     { path: '/environnement', label: 'Environnement',    abbr: 'En' },
     { path: '/calcul-3d',     label: 'Calcul 3D',        abbr: '3D' },
