@@ -26,6 +26,15 @@ class ParoiModelSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=150)
     description = serializers.CharField(allow_blank=True, required=False, default='')
     layers = LayerSerializer(many=True, min_length=1, max_length=20)
+    # Cadre de fenêtre (Lot I, optionnel) — voir ParoiModel.frame_u/frame_fraction.
+    # frame_fraction plafonné à 0,95 (pas 1,0) : à 1,0 l'aire "vitrage" du
+    # triangle tomberait exactement à zéro (building_solver.run_building_simulation
+    # réduit l'aire du maillage à (1-frame_fraction)*aire), ce qui annulerait
+    # entièrement son bloc dans la matrice globale (lignes nulles) — système
+    # singulier, spla.splu échouerait. Un modèle 100% cadre ne modélise de toute
+    # façon plus un vitrage.
+    frame_u = serializers.FloatField(required=False, allow_null=True, default=None, min_value=0.1, max_value=20.0)
+    frame_fraction = serializers.FloatField(required=False, allow_null=True, default=None, min_value=0.0, max_value=0.95)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
@@ -36,6 +45,15 @@ class ParoiModelSerializer(serializers.Serializer):
         if qs.exists():
             raise serializers.ValidationError("Un modèle de paroi porte déjà ce nom.")
         return value
+
+    def validate(self, data):
+        frame_u = data.get('frame_u')
+        frame_fraction = data.get('frame_fraction')
+        if (frame_u is None) != (frame_fraction is None):
+            raise serializers.ValidationError(
+                "frame_u et frame_fraction doivent être renseignés ensemble (ou ni l'un ni l'autre)."
+            )
+        return data
 
     def create(self, validated_data):
         return ParoiModel.objects.create(**validated_data)

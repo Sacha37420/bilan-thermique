@@ -80,7 +80,13 @@ def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i):
     return systems
 
 
-def _assemble_global_kc(systems, areas, h_i):
+def _assemble_global_kc(systems, areas, h_i, frame_g=None):
+    """frame_g : liste optionnelle (une par triangle, Lot I) — conductance directe
+    du cadre de fenêtre vers le nœud d'air, ajoutée à K_global[air_idx,air_idx]
+    exactement comme g_vent (Lot G), mais PAR TRIANGLE plutôt qu'un terme global
+    unique (des fenêtres différentes peuvent avoir des cadres différents). Le
+    cadre n'a pas de nœud de surface propre (pas de comportement optique, capacité
+    négligeable — voir ParoiModel.frame_u/frame_fraction)."""
     offsets = []
     total = 0
     for mesh, K, C, layers in systems:
@@ -105,13 +111,17 @@ def _assemble_global_kc(systems, areas, h_i):
         K_global[air_idx, last] -= h_i * area
         K_global[air_idx, air_idx] += h_i * area
 
+        if frame_g is not None and frame_g[i]:
+            K_global[air_idx, air_idx] += frame_g[i]
+
     return K_global.tocsc(), C_global.tocsc(), offsets, air_idx, n_dof
 
 
 def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
                       sky_view_factor=None, sun_visibility_grid=None,
                       occluder_intersector=None, centroids=None,
-                      air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None):
+                      air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None,
+                      frame_g=None):
     """sky_view_factor : liste par triangle (précalculée OU recalculée en
     temps réel par l'appelant) ou None -> repli analytique par triangle.
     Occlusion du rayon direct — deux sources mutuellement exclusives :
@@ -195,6 +205,14 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
 
         F[off:off + n] += f_local * area
 
+        # Cadre de fenêtre (Lot I) : résistance directe vers le nœud d'air,
+        # exactement comme g_vent/apports_internes_w plus bas, mais PAR triangle
+        # (voir _assemble_global_kc) — utilise le même t_boundary que la paroi
+        # elle-même (t_ground si ce triangle est 'ground', t_ext sinon ; combo
+        # non réaliste pour une fenêtre mais géré sans crash).
+        if frame_g is not None and frame_g[i] and air_idx is not None:
+            F[air_idx] += frame_g[i] * t_boundary
+
     # Renouvellement d'air + apports internes : deux sources directes sur le
     # nœud d'air global, hors de la boucle par triangle — ni la ventilation ni
     # les apports internes (occupants, éclairage, électroménager, Lot H)
@@ -264,11 +282,23 @@ def _factorize_for_g_vent(K_global_no_vent, C_global, air_idx, mode, g_vent):
 
 
 def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibility, payload,
-                             environment_envelope=None, progress_cb=None):
+                             environment_envelope=None, progress_cb=None, paroi_frame_by_id=None):
     """payload : {dx_max, h_e, interior: {mode, h_i, c_air_int, t_int?, t_min?, t_max?,
     debit_vent_m3h?, eta_recup_vent?, apports_internes_w?}, t_init, weather: [{t_ext,
     sun_azimuth, sun_elevation, e_dir, e_dif}, ...], shadow_mode: 'precomputed' | 'realtime'
     (défaut 'precomputed')}
+
+    paroi_frame_by_id (Lot I, optionnel) : {paroi_model_id: (frame_u, frame_fraction)} pour
+    les seuls modèles de paroi qui ont un cadre (voir ParoiModel.frame_u/frame_fraction —
+    frame_u déjà inclusif des résistances superficielles, comme Uf/Uw dans le vocabulaire
+    fenêtre standard). Pour un triangle dont le paroi_model_id y figure : le maillage
+    multicouche existant (solaire, capacité) garde sa physique complète mais sur l'aire
+    RÉDUITE (1 - frame_fraction) * aire_triangle — le cadre lui-même est traité comme une
+    résistance directe extérieur -> nœud d'air, exactement comme g_vent (Lot G), de
+    conductance frame_fraction * frame_u * aire_triangle (voir _assemble_global_kc/
+    _assemble_F_hour). Pas de nœud de surface propre pour le cadre : pas de comportement
+    optique (tau=0 implicite), capacité thermique négligeable — hypothèses assumées, cf.
+    to_do.md Lot I.
 
     debit_vent_m3h/eta_recup_vent (modes 'free'/'thermostat' uniquement, ignorés en 'imposed') :
     renouvellement d'air (infiltrations/VMC), voir le calcul de g_vent plus bas.
@@ -333,6 +363,30 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     areas = [tri['area'] for tri in triangles]
 
+    # Cadre de fenêtre (Lot I) : réduit l'aire "vitrage" (maillage multicouche
+    # existant, solaire+capacité inchangés) à (1-frame_fraction)*aire pour les
+    # triangles concernés, et calcule la conductance directe du cadre
+    # (frame_fraction*frame_u*aire, sur l'aire ORIGINALE — c'est bien l'aire du
+    # cadre lui-même) — voir _assemble_global_kc/_assemble_F_hour pour son usage.
+    frame_g = [0.0] * len(triangles)
+    if paroi_frame_by_id:
+        for i, tri in enumerate(triangles):
+            frame_info = paroi_frame_by_id.get(tri.get('paroi_model_id'))
+            if frame_info is None:
+                continue
+            frame_u, frame_fraction = frame_info
+            if not (0.0 <= frame_fraction < 1.0):
+                # frame_fraction == 1.0 annulerait entièrement l'aire "vitrage" du
+                # triangle -> lignes nulles dans la matrice globale -> système
+                # singulier (voir ParoiModelSerializer.frame_fraction, plafonné à
+                # 0,95 côté API — ce garde-fou couvre tout appelant direct de
+                # run_building_simulation, hors du serializer).
+                raise BuildingSimulationError(
+                    f"frame_fraction doit être dans [0, 1[ (obtenu {frame_fraction!r})."
+                )
+            frame_g[i] = frame_fraction * frame_u * areas[i]
+            areas[i] = areas[i] * (1.0 - frame_fraction)
+
     occluder_intersector = None
     centroids = None
     sky_view_factor = None
@@ -351,7 +405,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         if 'sky_view_factor' in sun_visibility:
             sky_view_factor = sun_visibility['sky_view_factor']
     systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max, h_e, h_i)
-    K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(systems, areas, h_i)
+    K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(systems, areas, h_i, frame_g=frame_g)
 
     planning = payload.get('planning')
     heure_debut = payload.get('heure_debut', 0)
@@ -418,6 +472,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             sky_view_factor=sky_view_factor, sun_visibility_grid=sun_visibility_grid,
             occluder_intersector=occluder_intersector, centroids=centroids,
             air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w, t_ground=t_ground,
+            frame_g=frame_g,
         )
         b_free = (C_global / DT_SECONDS) @ T + F
 

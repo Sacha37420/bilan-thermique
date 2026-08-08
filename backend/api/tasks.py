@@ -57,7 +57,16 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
         building = Building.objects.get(pk=building_id)
         triangles = building.envelope.get('triangles', [])
         paroi_ids = {t['paroi_model_id'] for t in triangles}
-        paroi_layers = {p.pk: p.layers for p in ParoiModel.objects.filter(pk__in=paroi_ids)}
+        paroi_models = list(ParoiModel.objects.filter(pk__in=paroi_ids))
+        paroi_layers = {p.pk: p.layers for p in paroi_models}
+        # Cadre de fenêtre (Lot I) : dict séparé plutôt que d'étendre paroi_layers
+        # (qui reste {pid: layers} — convention utilisée telle quelle par les
+        # tests existants), seulement les modèles où les deux champs sont
+        # renseignés (voir ParoiModel.frame_u/frame_fraction).
+        paroi_frame_by_id = {
+            p.pk: (p.frame_u, p.frame_fraction)
+            for p in paroi_models if p.frame_u is not None and p.frame_fraction is not None
+        }
         sun_visibility = building.sun_visibility if building.sun_visibility.get('per_triangle') else None
         environment_envelope = building.environment.envelope if building.environment_id else None
 
@@ -77,6 +86,7 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
         result = building_solver.run_building_simulation(
             building.envelope, paroi_layers, sun_visibility, calcul_payload,
             environment_envelope=environment_envelope, progress_cb=progress_cb,
+            paroi_frame_by_id=paroi_frame_by_id,
         )
 
         job.result = {

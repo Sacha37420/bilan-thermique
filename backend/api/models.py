@@ -49,6 +49,19 @@ class ParoiModel(models.Model):
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True)
     layers = models.JSONField()
+
+    # Cadre de fenêtre (Lot I, optionnel — pertinent seulement pour un modèle de
+    # type fenêtre). Les deux doivent être renseignés ensemble pour être exploités
+    # par le solveur (building_solver.run_building_simulation) : frame_u (W/m²·K,
+    # déjà inclusif des résistances superficielles, comme Ug/Uw dans le vocabulaire
+    # standard des fenêtres) et frame_fraction (0..1, part de l'aire du triangle
+    # occupée par le cadre plutôt que le vitrage). Le cadre est traité comme une
+    # résistance directe extérieur->air (même schéma que g_vent, Lot G), le
+    # vitrage garde son maillage multicouche complet (gains solaires, capacité)
+    # sur l'aire réduite (1 - frame_fraction) — voir to_do.md, Lot I.
+    frame_u = models.FloatField(null=True, blank=True)
+    frame_fraction = models.FloatField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

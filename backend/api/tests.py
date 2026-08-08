@@ -947,3 +947,172 @@ class PlanningSerializerTest(SimpleTestCase):
         self.assertTrue(s.is_valid(), s.errors)
         self.assertNotIn('planning', s.validated_data)
         self.assertEqual(s.validated_data['heure_debut'], 0)
+
+
+class WindowFrameTest(SimpleTestCase):
+    """Lot I — cadre de fenêtre. Le maillage vitrage existant (solaire, capacité)
+    garde sa physique complète mais sur une aire réduite à (1-frame_fraction)*aire ;
+    le cadre lui-même est traité comme une résistance directe extérieur->nœud
+    d'air, comme g_vent (Lot G) mais par triangle. Voir
+    building_solver.run_building_simulation, docstring du paramètre paroi_frame_by_id."""
+
+    databases = []
+
+    def _envelope_and_weather(self, hours, area=2.5):
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _single_triangle_envelope(area=area)
+        t_ext_series = [2.0 + 10.0 * math.sin(h / 6.0) for h in range(hours)]
+        return envelope, {1: layers}, _no_sun_weather_3d(t_ext_series)
+
+    def test_frame_fraction_zero_matches_no_frame_info_at_all(self):
+        # frame_fraction=0 (cadre nul) doit être un no-op EXACT : aucune aire
+        # réduite (1-0=1), aucune conductance (0*frame_u*aire=0).
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=30)
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        result_no_frame = building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+        result_zero_frame = building_solver.run_building_simulation(
+            envelope, paroi_layers, None, payload, paroi_frame_by_id={1: (2.0, 0.0)},
+        )
+        self.assertEqual(result_no_frame['t_air'], result_zero_frame['t_air'])
+        self.assertEqual(result_no_frame['envelope_flux_w'], result_zero_frame['envelope_flux_w'])
+
+    def test_free_mode_conserves_energy_with_frame(self):
+        # Identité de conservation (même famille que Lot F/G/Q) : le flux mural
+        # (envelope_flux_w) ne porte plus QUE la contribution vitrage (aire
+        # réduite) — le cadre est un terme séparé, comme g_vent.
+        for frame_fraction in (0.3, 0.9):
+            with self.subTest(frame_fraction=frame_fraction):
+                envelope, paroi_layers, weather = self._envelope_and_weather(hours=25)
+                c_air_int = 300_000.0
+                frame_u = 2.0
+                payload = {
+                    'dx_max': 0.02, 'h_e': 25.0,
+                    'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': c_air_int},
+                    't_init': 15.0, 'weather': weather,
+                }
+                result = building_solver.run_building_simulation(
+                    envelope, paroi_layers, None, payload,
+                    paroi_frame_by_id={1: (frame_u, frame_fraction)},
+                )
+
+                t_air = result['t_air']
+                flux = result['envelope_flux_w']
+                area = envelope['triangles'][0]['area']
+                frame_g = frame_fraction * frame_u * area
+
+                energy_stored = c_air_int * (t_air[-1] - t_air[0])
+                energy_from_walls_and_frame = sum(
+                    (f + frame_g * (point['t_ext'] - t_air_next)) * DT_SECONDS
+                    for f, point, t_air_next in zip(flux, weather, t_air[1:])
+                )
+                self.assertAlmostEqual(
+                    energy_stored, energy_from_walls_and_frame,
+                    delta=abs(energy_from_walls_and_frame) * 1e-6 + 1e-3,
+                )
+
+    def test_glazing_area_reduction_matches_smaller_triangle_flux(self):
+        # Piège évité : en mode 'imposed', la température de surface est
+        # INVARIANTE par aire (déjà établi par Building1D3DConsistencyTest —
+        # l'aire cancelle algébriquement dans le système local d'un triangle
+        # découplé, puisque K/C/F sont TOUS scalés par la même aire). Comparer
+        # des températures de surface entre deux aires différentes ne peut donc
+        # RIEN prouver sur la réduction d'aire elle-même — seule la PUISSANCE
+        # ABSOLUE (envelope_flux_w, en W) en dépend. Mode 'imposed' choisi
+        # exprès : frame_g y est sans effet (Dirichlet écrase la ligne du nœud
+        # d'air, comme g_vent/apports_internes_w), donc la comparaison isole
+        # PUREMENT la réduction d'aire du vitrage, sans contamination par la
+        # conductance propre du cadre.
+        layers = [_flat_wall_layer(e=0.1, lam=1.0), _flat_wall_layer(e=0.08, lam=0.035, rho=25.0, c=1030.0)]
+        h_e, h_i, t_int, dx_max = 25.0, 8.0, 19.0, 0.02
+        hours = 20
+        weather = [
+            {'t_ext': 5.0 + 3.0 * math.sin(h / 5.0), 'sun_azimuth': 180.0,
+             'sun_elevation': 30.0 if 6 <= h % 24 <= 18 else -10.0,
+             'e_dir': 500.0 if 6 <= h % 24 <= 18 else 0.0, 'e_dif': 80.0 if 6 <= h % 24 <= 18 else 0.0}
+            for h in range(hours)
+        ]
+        area_full = 4.0
+        frame_fraction = 0.4
+
+        envelope_reduced = _single_triangle_envelope(area=area_full * (1.0 - frame_fraction))
+        payload_reduced = {
+            'dx_max': dx_max, 'h_e': h_e,
+            'interior': {'mode': 'imposed', 'h_i': h_i, 't_int': t_int},
+            't_init': 12.0, 'weather': weather,
+        }
+        result_reduced = building_solver.run_building_simulation(
+            envelope_reduced, {1: layers}, None, payload_reduced,
+        )
+
+        envelope_full = _single_triangle_envelope(area=area_full)
+        payload_full = dict(payload_reduced)
+        result_full = building_solver.run_building_simulation(
+            envelope_full, {1: layers}, None, payload_full,
+            paroi_frame_by_id={1: (3.0, frame_fraction)},
+        )
+
+        for f_reduced, f_full in zip(result_reduced['envelope_flux_w'], result_full['envelope_flux_w']):
+            self.assertAlmostEqual(f_reduced, f_full, places=6)
+
+    def test_frame_only_affects_triangles_using_that_paroi_model(self):
+        # Bâtiment à deux triangles, modèles de paroi différents. Comparaison
+        # différentielle plutôt qu'une égalité stricte sur le triangle 2 : les
+        # deux triangles partagent le MÊME nœud d'air, donc changer le triangle 1
+        # perturbe forcément (légèrement) la dynamique du triangle 2 aussi — ce
+        # n'est pas un bug, c'est le couplage voulu par le nœud d'air partagé.
+        # Le vrai test : {1: cadre} et {1: cadre, 2: MÊME cadre} doivent donner
+        # des résultats DIFFÉRENTS — un bug qui appliquerait le cadre à tous les
+        # triangles indépendamment de paroi_model_id rendrait ces deux scénarios
+        # indiscernables (le triangle 2 aurait déjà "secrètement" le cadre dans
+        # le premier cas).
+        area1, area2 = 2.5, 3.0
+        side1, side2 = math.sqrt(2.0 * area1), math.sqrt(2.0 * area2)
+        vertices = [
+            [0.0, 0.0, 0.0], [side1, 0.0, 0.0], [0.0, side1, 0.0],
+            [10.0, 0.0, 0.0], [10.0 + side2, 0.0, 0.0], [10.0, side2, 0.0],
+        ]
+        triangles = geometry.compute_envelope_geometry(vertices, [
+            {'v': [0, 1, 2], 'paroi_model_id': 1},
+            {'v': [3, 4, 5], 'paroi_model_id': 2},
+        ])
+        envelope = {'vertices': vertices, 'triangles': triangles}
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        paroi_layers = {1: layers, 2: layers}
+        weather = _no_sun_weather_3d([2.0 + 10.0 * math.sin(h / 6.0) for h in range(20)])
+
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+
+        def run(paroi_frame_by_id):
+            return building_solver.run_building_simulation(
+                envelope, paroi_layers, None, payload, paroi_frame_by_id=paroi_frame_by_id,
+            )
+
+        result_only_1 = run({1: (2.0, 0.3)})
+        result_both = run({1: (2.0, 0.3), 2: (2.0, 0.3)})
+        self.assertNotEqual(result_only_1['t_air'], result_both['t_air'])
+
+        # Et sans aucun cadre, un résultat encore différent des deux précédents
+        # (confirme que le cadre a bien un effet du tout, pas seulement qu'il
+        # distingue 1 de 2).
+        result_none = run(None)
+        self.assertNotEqual(result_none['t_air'], result_only_1['t_air'])
+
+    def test_invalid_frame_fraction_raises(self):
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=5)
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        with self.assertRaises(building_solver.BuildingSimulationError):
+            building_solver.run_building_simulation(
+                envelope, paroi_layers, None, payload, paroi_frame_by_id={1: (2.0, 1.0)},
+            )

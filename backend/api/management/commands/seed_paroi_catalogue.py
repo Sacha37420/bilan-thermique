@@ -70,18 +70,24 @@ CATALOGUE = [
         'name': 'Fenêtre simple vitrage (usuelle)',
         'description': (
             "Vitrage simple 4 mm, sans lame d'air. Ug indicatif ≈ 5,7 W/m²·K. "
-            "Facteur solaire g ≈ 0,87. Modélise uniquement le vitrage, pas le cadre."
+            "Facteur solaire g ≈ 0,87. Cadre PVC usuel modélisé séparément "
+            "(frame_u ≈ 2,0 W/m²·K, frame_fraction ≈ 0,25 — ajustables par modèle)."
         ),
         'layers': VITRAGE_SIMPLE,
+        'frame_u': 2.0,
+        'frame_fraction': 0.25,
     },
     {
         'name': 'Fenêtre double vitrage (usuelle, 4/16/4)',
         'description': (
             "Double vitrage standard 4/16/4 (verre + lame d'air 16 mm + verre), "
             "sans traitement basse émissivité. Ug indicatif ≈ 2,9 W/m²·K, "
-            "facteur solaire g ≈ 0,75. Modélise uniquement le vitrage, pas le cadre."
+            "facteur solaire g ≈ 0,75. Cadre PVC usuel modélisé séparément "
+            "(frame_u ≈ 1,8 W/m²·K, frame_fraction ≈ 0,25 — ajustables par modèle)."
         ),
         'layers': VITRAGE_DOUBLE,
+        'frame_u': 1.8,
+        'frame_fraction': 0.25,
     },
     {
         'name': 'Mur ITE — RT2005 (isolant 100 mm)',
@@ -175,7 +181,10 @@ class Command(BaseCommand):
         for entry in CATALOGUE:
             obj, created = ParoiModel.objects.update_or_create(
                 name=entry['name'],
-                defaults={'description': entry['description'], 'layers': entry['layers']},
+                defaults={
+                    'description': entry['description'], 'layers': entry['layers'],
+                    'frame_u': entry.get('frame_u'), 'frame_fraction': entry.get('frame_fraction'),
+                },
             )
             verb = 'créé' if created else 'mis à jour'
             self.stdout.write(self.style.SUCCESS(f"  {verb} : {obj.name}"))

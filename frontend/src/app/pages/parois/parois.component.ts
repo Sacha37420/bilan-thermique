@@ -1,6 +1,6 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { LayerInput, LayersEditorComponent, defaultLayer } from '../../components/layers-editor/layers-editor.component';
@@ -10,6 +10,8 @@ interface ParoiModel {
   name: string;
   description: string;
   layers: LayerInput[];
+  frame_u: number | null;
+  frame_fraction: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -19,12 +21,18 @@ interface EditingModel {
   name: string;
   description: string;
   layers: LayerInput[];
+  // Cadre de fenêtre (Lot I, optionnel) — les deux vont ensemble ou pas du tout
+  // (voir ParoiModelSerializer.validate) ; hasFrame pilote juste l'affichage,
+  // c'est frame_u/frame_fraction (null si !hasFrame) qui partent au serveur.
+  hasFrame: boolean;
+  frame_u: number;
+  frame_fraction: number;
 }
 
 @Component({
   selector: 'app-parois',
   standalone: true,
-  imports: [FormsModule, DatePipe, RouterLink, LayersEditorComponent],
+  imports: [FormsModule, DatePipe, DecimalPipe, RouterLink, LayersEditorComponent],
   templateUrl: './parois.component.html',
   styleUrl: './parois.component.scss',
 })
@@ -56,7 +64,10 @@ export class ParoisComponent implements OnInit {
   }
 
   startCreate(): void {
-    this.editing.set({ id: null, name: '', description: '', layers: [defaultLayer()] });
+    this.editing.set({
+      id: null, name: '', description: '', layers: [defaultLayer()],
+      hasFrame: false, frame_u: 2.0, frame_fraction: 0.25,
+    });
   }
 
   startEdit(m: ParoiModel): void {
@@ -65,6 +76,9 @@ export class ParoisComponent implements OnInit {
       name: m.name,
       description: m.description,
       layers: m.layers.map(l => ({ ...l })),
+      hasFrame: m.frame_u !== null && m.frame_fraction !== null,
+      frame_u: m.frame_u ?? 2.0,
+      frame_fraction: m.frame_fraction ?? 0.25,
     });
   }
 
@@ -82,7 +96,11 @@ export class ParoisComponent implements OnInit {
     if (!e || !e.name.trim()) return;
     this.saving.set(true);
     this.error.set('');
-    const payload = { name: e.name.trim(), description: e.description, layers: e.layers };
+    const payload = {
+      name: e.name.trim(), description: e.description, layers: e.layers,
+      frame_u: e.hasFrame ? e.frame_u : null,
+      frame_fraction: e.hasFrame ? e.frame_fraction : null,
+    };
     const req = e.id === null
       ? this.api.createParoiModele(payload)
       : this.api.updateParoiModele(e.id, payload);
