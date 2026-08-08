@@ -363,6 +363,18 @@
             cas : la source solaire apparaît simplement à l'interface où la lumière rencontre la
             première surface opaque, quelle que soit sa position dans l'épaisseur de la paroi.
           </p>
+          <p>
+            Reste un troisième cas, distinct des deux précédents : <strong>aucune</strong> couche
+            opaque du tout — un simple ou double vitrage sans encadrement opaque en fond (le cas de
+            tout le catalogue de vitrages de l'application). La boucle couche par couche se termine
+            alors sans jamais avoir rencontré de couche opaque : le reliquat
+            <span class="sym">E_inc,N+1</span> qui sort de la DERNIÈRE couche a physiquement fini de
+            traverser toute la paroi — il entre dans la pièce et doit chauffer l'air intérieur
+            directement (cas 2, nœud d'air libre), et non une couche de la paroi qui n'existe pas.
+            C'est un terme de source direct sur ce nœud, symétrique au renouvellement d'air/apports
+            internes ci-dessus (<span class="sym">F[air] += E_inc,N+1</span>) — sans effet en cas 1
+            (T_int imposée) pour la même raison que ces deux autres termes.
+          </p>
         </div>
         <div class="callout">
           <span class="callout-label">Répartition de la source dans une couche translucide épaisse</span>

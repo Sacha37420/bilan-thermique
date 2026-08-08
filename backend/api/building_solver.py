@@ -257,6 +257,16 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
         for kind, ref, value in wall_solver._propagate_solar(layers, e_glo, mesh):
             if kind == 'surface':
                 f_local[ref] += value
+            elif kind == 'interior':
+                # Rayonnement transmis intégralement (aucune couche opaque
+                # rencontrée, ex. un simple/double vitrage) : a fini de
+                # traverser la paroi, chauffe directement l'air plutôt que de
+                # disparaître du bilan — voir wall_solver._propagate_solar.
+                # air_idx (contrairement à f_local) est un indice GLOBAL,
+                # partagé entre tous les triangles : ajouté directement à F,
+                # à l'échelle de CE triangle (value est par m², d'où *area).
+                if air_idx is not None:
+                    F[air_idx] += value * area
             else:
                 layer_idx = ref
                 s0, s1 = mesh['layer_start_node'][layer_idx], mesh['layer_end_node'][layer_idx]

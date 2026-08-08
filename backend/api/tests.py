@@ -174,6 +174,174 @@ class Building1D3DConsistencyTest(SimpleTestCase):
         )
 
 
+class TransmittedSolarGainTest(SimpleTestCase):
+    """Rayonnement solaire qui traverse INTÉGRALEMENT une paroi sans jamais
+    rencontrer de couche opaque (typiquement un vitrage sans encadrement
+    opaque en fond, contrairement au mur Trombe déjà géré par le mécanisme
+    existant) — avant ce correctif (2026-08-08), cette énergie disparaissait
+    purement et simplement du bilan au lieu de chauffer l'air intérieur (voir
+    to_do.md). Partagé 1D/3D via solver._propagate_solar : un seul endroit
+    source de vérité, testé ici pour les deux solveurs."""
+
+    databases = []
+
+    # ── Formule pure (oracle indépendant, aucun appel au solveur complet) ──
+    def test_single_opaque_layer_unaffected_no_interior_gain(self):
+        # Non-régression : le cas historique (mur opaque) ne change pas.
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        mesh = solver._build_mesh(layers, dx_max=0.05)
+        sources = solver._propagate_solar(layers, e_glo=500.0, mesh=mesh)
+        self.assertNotIn('interior', [s[0] for s in sources])
+        self.assertIn('surface', [s[0] for s in sources])
+
+    def test_trombe_wall_translucent_then_opaque_unaffected(self):
+        # Cas documenté (page Théorie, section 05) : couche translucide SUIVIE
+        # d'une couche opaque — toute l'énergie s'arrête à l'opaque, non-
+        # régression du comportement déjà géré (rien ne doit fuiter en
+        # "interior").
+        translucent = {'e': 0.01, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': 0.9, 'r': 0.0, 'alpha': 0.1}
+        opaque = _flat_wall_layer(e=0.1, lam=1.0)
+        layers = [translucent, opaque]
+        mesh = solver._build_mesh(layers, dx_max=0.02)
+        sources = solver._propagate_solar(layers, e_glo=500.0, mesh=mesh)
+        self.assertNotIn('interior', [s[0] for s in sources])
+
+    def test_single_translucent_layer_matches_hand_derived_transmission(self):
+        tau, alpha = 0.87, 0.06
+        layers = [{'e': 0.004, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': tau, 'r': 1 - tau - alpha, 'alpha': alpha}]
+        mesh = solver._build_mesh(layers, dx_max=0.001)
+        e_glo = 500.0
+        sources = solver._propagate_solar(layers, e_glo, mesh)
+        interior = [v for k, r, v in sources if k == 'interior']
+        self.assertEqual(len(interior), 1)
+        self.assertAlmostEqual(interior[0], tau * e_glo, places=6)
+
+    def test_double_glazing_matches_hand_derived_product_of_transmittances(self):
+        # 3 couches translucides successives (double vitrage réel du
+        # catalogue) : le reliquat intérieur doit être le PRODUIT des tau,
+        # preuve que chaque couche réduit bien e_inc pour la suivante avant
+        # d'atteindre l'intérieur — pas seulement le tau de la dernière.
+        layers = [
+            {'e': 0.004, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': 0.88, 'r': 0.06, 'alpha': 0.06},
+            {'e': 0.016, 'lam': 0.094, 'rho': 1.2, 'c': 1000, 'tau': 0.97, 'r': 0.01, 'alpha': 0.02},
+            {'e': 0.004, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': 0.88, 'r': 0.06, 'alpha': 0.06},
+        ]
+        mesh = solver._build_mesh(layers, dx_max=0.001)
+        e_glo = 500.0
+        sources = solver._propagate_solar(layers, e_glo, mesh)
+        interior = [v for k, r, v in sources if k == 'interior']
+        self.assertEqual(len(interior), 1)
+        self.assertAlmostEqual(interior[0], e_glo * 0.88 * 0.97 * 0.88, places=6)
+
+    def test_zero_incident_radiation_gives_no_sources(self):
+        layers = [{'e': 0.004, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': 0.87, 'r': 0.07, 'alpha': 0.06}]
+        mesh = solver._build_mesh(layers, dx_max=0.001)
+        self.assertEqual(solver._propagate_solar(layers, e_glo=0.0, mesh=mesh), [])
+
+    # ── Intégration 1D — conservation d'énergie étendue au nouveau terme ───
+    def test_1d_free_mode_conserves_energy_with_transmitted_solar_gain(self):
+        tau, alpha = 0.87, 0.06
+        window = {'e': 0.004, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': tau, 'r': 1 - tau - alpha, 'alpha': alpha}
+        h_e, h_i, c_air_int = 25.0, 8.0, 500.0  # C_air FAIBLE, comme le cas rapporté par l'utilisateur
+        hours = 20
+        weather = [
+            {'t_ext': 5.0 + 3.0 * math.sin(h / 5.0), 'h_s': 30.0, 'theta_i': 0.0,
+             'e_dir': 500.0, 'e_dif': 80.0}
+            for h in range(hours)
+        ]
+        payload = {
+            'layers': [window], 'dx_max': 0.01, 'h_e': h_e,
+            'interior': {'mode': 'free', 'h_i': h_i, 'c_air_int': c_air_int},
+            't_init': 15.0, 'weather': weather,
+        }
+        result = solver.run_simulation(payload)
+        temps = result['temperatures']
+        n_wall = result['n_wall_nodes']
+        air_idx = n_wall  # mode 'free' : dernier DOF = nœud d'air
+
+        t_air = [T[air_idx] for T in temps]
+        t_last = [T[n_wall - 1] for T in temps]  # dernier nœud du mur (interface air)
+
+        # Oracle indépendant de _propagate_solar : f_ciel par défaut
+        # (wall_tilt_deg=90°) = (1+cos(90°))/2 = 0,5 ; theta_i=0° -> cos_ti=1.
+        f_ciel = 0.5
+        e_glo = 500.0 * 1.0 + 80.0 * f_ciel
+        e_interior_expected = tau * e_glo
+
+        energy_stored_air = c_air_int * (t_air[-1] - t_air[0])
+        energy_from_wall_and_solar = sum(
+            (h_i * (t_last_next - t_air_next) + e_interior_expected) * DT_SECONDS
+            for t_last_next, t_air_next in zip(t_last[1:], t_air[1:])
+        )
+
+        self.assertAlmostEqual(
+            energy_stored_air, energy_from_wall_and_solar,
+            delta=abs(energy_from_wall_and_solar) * 1e-6 + 1e-3,
+        )
+
+    # ── Intégration 3D — conservation d'énergie étendue au nouveau terme ───
+    def test_3d_free_mode_conserves_energy_with_transmitted_solar_gain(self):
+        tau, alpha = 0.87, 0.06
+        window = {'e': 0.004, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': tau, 'r': 1 - tau - alpha, 'alpha': alpha}
+        area = 2.5
+        # Normale +Z (tilt=0°, toiture) : voit le soleil dès que elevation>0,
+        # quel que soit l'azimuth.
+        envelope = _single_triangle_envelope(area=area)
+        hours = 20
+        weather = [
+            {'t_ext': 5.0 + 3.0 * math.sin(h / 5.0), 'sun_azimuth': 180.0, 'sun_elevation': 30.0,
+             'e_dir': 500.0, 'e_dif': 80.0}
+            for h in range(hours)
+        ]
+        c_air_int = 500.0  # C_air FAIBLE, comme le cas rapporté par l'utilisateur
+        payload = {
+            'dx_max': 0.01, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': c_air_int},
+            't_init': 15.0, 'weather': weather,
+        }
+        result = building_solver.run_building_simulation(envelope, {1: [window]}, None, payload)
+
+        t_air = result['t_air']
+        flux = result['envelope_flux_w']
+
+        # Oracle indépendant de _propagate_solar/_assemble_F_hour : cos(theta_i)
+        # = normale · direction (normale +Z, direction issue de
+        # shadow.sun_direction — déjà testée indépendamment ailleurs) ; f_ciel
+        # (toiture plate, tilt=0°) = (1+cos(0°))/2 = 1.
+        direction = shadow.sun_direction(180.0, 30.0)
+        cos_ti = max(float(direction[2]), 0.0)
+        f_ciel = 1.0
+        e_glo = 500.0 * cos_ti + 80.0 * f_ciel
+        e_interior_expected = tau * e_glo * area
+
+        energy_stored = c_air_int * (t_air[-1] - t_air[0])
+        energy_from_walls_and_solar = sum((f + e_interior_expected) * DT_SECONDS for f in flux)
+
+        self.assertAlmostEqual(
+            energy_stored, energy_from_walls_and_solar,
+            delta=abs(energy_from_walls_and_solar) * 1e-6 + 1e-3,
+        )
+
+    def test_low_c_air_int_heats_air_faster_than_glazing_nodes(self):
+        # Reproduit directement le symptôme rapporté par l'utilisateur : avec
+        # un C_air FAIBLE, l'air doit désormais chauffer plus vite que les
+        # nœuds du vitrage (le rayonnement transmis les contourne pour aller
+        # droit sur l'air) — avant ce correctif, c'était l'inverse quel que
+        # soit C_air, faute de tout gain solaire direct sur l'air.
+        tau, alpha = 0.87, 0.06
+        window = {'e': 0.004, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': tau, 'r': 1 - tau - alpha, 'alpha': alpha}
+        weather = [{'t_ext': 10.0, 'h_s': 45.0, 'theta_i': 0.0, 'e_dir': 800.0, 'e_dif': 100.0}] * 5
+        payload = {
+            'layers': [window], 'dx_max': 0.001, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 500.0},
+            't_init': 10.0, 'weather': weather,
+        }
+        result = solver.run_simulation(payload)
+        last = result['temperatures'][-1]
+        t_air, t_glazing_nodes = last[-1], last[:-1]
+        self.assertGreater(t_air, max(t_glazing_nodes))
+
+
 class BuildingAirNodeEnergyBalanceTest(SimpleTestCase):
     """Lot F, étape 2 (volet 3D) + étape 4 (mode thermostat) — identité exacte sur
     le nœud d'air global, dérivée de la même façon qu'en 1D : sa variation

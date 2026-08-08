@@ -93,16 +93,26 @@ def _assemble_kc(mesh):
 def _propagate_solar(layers, e_glo, mesh):
     """Bilan réfléchi/absorbé/transmis couche par couche (section 05 de la théorie).
 
-    Retourne une liste de contributions : ('surface', nœud, flux W/m²) pour
-    l'absorption à la première interface opaque rencontrée, ou
-    ('volumetric', indice de couche, énergie totale absorbée W/m²) pour une
-    couche translucide traversée.
+    Retourne une liste de contributions :
+    - ('surface', nœud, flux W/m²) pour l'absorption à la première interface
+      opaque rencontrée — la propagation s'arrête net (mur Trombe...).
+    - ('volumetric', indice de couche, énergie totale absorbée W/m²) pour
+      chaque couche translucide traversée.
+    - ('interior', None, énergie W/m²) — AU PLUS une fois, seulement si TOUTES
+      les couches sont translucides (aucune n'a jamais arrêté la propagation,
+      contrairement au mur Trombe) : l'énergie qui a fini de traverser toute
+      la paroi sans rencontrer de couche opaque (ex. un simple/double vitrage
+      sans encadrement opaque en fond — le cas de tout le catalogue de
+      vitrages actuel). Physiquement entrée dans la pièce : à ajouter comme
+      gain direct sur le nœud d'air par l'appelant, plutôt que de disparaître
+      du bilan (piège identifié le 2026-08-08, voir to_do.md).
     """
     sources = []
     e_inc = e_glo
 
     for i, layer in enumerate(layers):
         if e_inc <= 1e-9:
+            e_inc = 0.0
             break
         absorbed = layer['alpha'] * e_inc
         transmitted = layer['tau'] * e_inc
@@ -113,6 +123,12 @@ def _propagate_solar(layers, e_glo, mesh):
             break
         sources.append(('volumetric', i, absorbed))
         e_inc = transmitted
+    else:
+        # Boucle terminée SANS "break" : aucune couche opaque n'a jamais
+        # arrêté la propagation — e_inc (dernier `transmitted` calculé) a
+        # traversé toute la paroi.
+        if e_inc > 1e-9:
+            sources.append(('interior', None, e_inc))
 
     return sources
 
@@ -140,6 +156,14 @@ def _assemble_F(layers, mesh, h_e, weather_point, f_ciel, n_dof, air_idx=None, g
     for kind, ref, value in _propagate_solar(layers, e_glo, mesh):
         if kind == 'surface':
             F[ref] += value
+        elif kind == 'interior':
+            # Rayonnement transmis intégralement (aucune couche opaque
+            # rencontrée, ex. un simple/double vitrage) : a fini de traverser
+            # la paroi, chauffe directement l'air plutôt que de disparaître du
+            # bilan. Sans nœud d'air (mode 'imposed', 1D) : ne s'applique pas,
+            # même convention que g_vent ci-dessous.
+            if air_idx is not None:
+                F[air_idx] += value
         else:
             layer_idx = ref
             s0, s1 = mesh['layer_start_node'][layer_idx], mesh['layer_end_node'][layer_idx]
