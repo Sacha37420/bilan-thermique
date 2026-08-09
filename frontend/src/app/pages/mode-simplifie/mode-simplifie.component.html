@@ -64,8 +64,14 @@
       }
     } @else if (selectedCandidate) {
       <p class="hint">
-        Bâtiment choisi à {{ selectedCandidate.distance_m }} m, {{ selectedCandidate.n_walls }} paroi(s).
+        Bâtiment choisi à {{ selectedCandidate.distance_m }} m, {{ selectedCandidate.n_walls }} paroi(s),
+        source : {{ selectedCandidate.source === 'ign' ? 'IGN BD TOPO' : 'OpenStreetMap' }}.
       </p>
+      @if (step() === 'creation') {
+        <div class="editor-actions">
+          <button type="button" class="btn-secondary" (click)="backToSearch()">Changer de bâtiment</button>
+        </div>
+      }
     }
   </section>
 
@@ -174,6 +180,12 @@
                   </label>
                 }
               </div>
+              @if (actualGlazingPct()[g] !== undefined) {
+                <p class="hint">
+                  Obtenu : <strong>{{ actualGlazingPct()[g] | number:'1.0-1' }} %</strong> de l'aire de
+                  cette paroi, pour {{ groupConfig[g].tauxVitragePct }} % demandé(s).
+                </p>
+              }
             </div>
           }
         </div>
@@ -183,6 +195,14 @@
         @if (!allGroupsConfigured) {
           <p class="hint">Choisissez un modèle opaque pour chaque paroi avant de générer l'assignation.</p>
         }
+        <p class="hint">
+          Le vitrage est réparti régulièrement sur les petits triangles de chaque paroi : le taux
+          demandé n'est donc jamais atteint exactement, seulement approché au plus près de ce que le
+          maillage permet. L'écart est d'autant plus grand que la paroi compte peu de triangles —
+          revenez à l'étape 2 avec une subdivision plus fine s'il vous gêne. Le taux réellement
+          obtenu, mesuré en aire, s'affiche sous chaque paroi après génération : c'est celui-là qui
+          sera calculé.
+        </p>
 
         @if (vertices().length > 0) {
           <h3>Aperçu — <span class="hint" style="color: var(--accent)">vitrage</span> / <span class="hint">opaque</span> / <span class="hint" style="color: var(--warning)">non assigné</span></h3>

@@ -101,8 +101,46 @@ export class ModeSimplifieComponent implements OnInit {
     });
   }
 
+  /** Nom proposé par défaut à l'étape 2. Les coordonnées plutôt que la distance
+   * ou la source : `Building.name` est UNIQUE côté serveur (BuildingSerializer.
+   * validate_name), et deux bâtiments cherchés depuis deux points différents
+   * doivent pouvoir coexister sans que l'utilisateur ait à renommer. */
+  private defaultNameFor(c: Candidate): string {
+    return `Bâtiment ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`;
+  }
+
   selectCandidate(i: number): void {
+    const candidate = this.candidates()[i];
+    if (!candidate) return;
+
+    // Le nom proposé ne doit jamais écraser une saisie de l'utilisateur : on ne
+    // le (re)pose que si le champ est vide, ou s'il contient encore le nom
+    // proposé pour le candidat précédent (cas « Changer de bâtiment » sans
+    // avoir renommé).
+    const previous = this.selectedCandidate;
+    const current = this.buildingName.trim();
+    if (!current || (previous && current === this.defaultNameFor(previous))) {
+      this.buildingName = this.defaultNameFor(candidate);
+    }
+
     this.selectedCandidateIndex.set(i);
+    this.createError.set('');
+    // Sans ce passage à 'creation', l'étape 2 reste masquée
+    // (`@if (selectedCandidate && step() !== 'recherche')`) et cliquer
+    // « Choisir » n'a aucun effet visible : c'est très exactement le bug qui a
+    // rendu tout le mode simplifié inutilisable de sa livraison (2026-08-08) au
+    // Lot W — voir to_do_bilan_thermique.md.
+    this.step.set('creation');
+  }
+
+  /** Revenir au choix du bâtiment sans relancer la recherche réseau (les
+   * candidats déjà extrudés sont conservés). Volontairement limité à l'étape
+   * 'creation' : au-delà, le bâtiment existe côté serveur et changer de
+   * candidat laisserait un `Building` orphelin. */
+  backToSearch(): void {
+    if (this.step() !== 'creation') return;
+    this.createError.set('');
+    this.step.set('recherche');
   }
 
   // ── Étape 2 : création + subdivision fine ───────────────────────────────
@@ -232,6 +270,7 @@ export class ModeSimplifieComponent implements OnInit {
             tauxVitragePct: g === 'sol' || g === 'toiture' ? 0 : 20,
           };
         }
+        this.actualGlazingPct.set({});
         this.creating.set(false);
         this.step.set('configuration');
       },
@@ -247,6 +286,15 @@ export class ModeSimplifieComponent implements OnInit {
     return this.triangles().filter(t => t.group === group).length;
   }
 
+  // Taux de vitrage RÉELLEMENT obtenu par paroi (%), calculé une fois par
+  // génération d'assignation plutôt qu'à chaque cycle de détection de
+  // changement. Mesuré en AIRE et non en nombre de triangles : c'est l'aire qui
+  // compte physiquement, et deux triangles d'un même groupe n'ont pas
+  // forcément la même aire (le raffinement, geometry.refine_envelope, ne
+  // descend pas partout au même niveau — cascade documentée au Lot T). Une
+  // paroi absente du dict = aucun vitrage demandé.
+  actualGlazingPct = signal<Record<string, number>>({});
+
   generateAssignment(): void {
     const updated = this.triangles().map(t => ({ ...t }));
     for (const group of this.groups()) {
@@ -259,14 +307,53 @@ export class ModeSimplifieComponent implements OnInit {
 
       if (cfg.glazingModelId !== null && cfg.tauxVitragePct > 0) {
         const ratio = Math.min(cfg.tauxVitragePct, 95) / 100;
-        const step = Math.max(1, Math.round(1 / ratio));
+        // Répartition par accumulateur (Bresenham) plutôt qu'un « un triangle
+        // sur N » avec N = round(1/ratio) entier : ce pas entier ne pouvait
+        // atteindre que les taux 1/N, et l'arrondi rendait deux consignes
+        // différentes indiscernables — 30 % et 40 % donnaient TOUS DEUX ≈ 33 %
+        // (1/0,4 vaut exactement 2,5, et Math.round arrondit au supérieur).
+        // Mesuré en navigateur au Lot W : 40 % demandés → 37,5 % obtenus sur
+        // une paroi de 16 triangles. L'accumulateur pose exactement
+        // ⌊n·ratio⌋ triangles, également répartis : c'est le plus proche
+        // atteignable pour un maillage donné, quel que soit le taux.
+        // `Math.round` et non `Math.floor` dans l'accumulateur : il pose
+        // round(n·ratio) triangles au lieu de ⌊n·ratio⌋, donc le comptage le
+        // PLUS PROCHE du taux demandé et non systématiquement celui du dessous
+        // (sur une paroi de 16 triangles, 10 % donne 2 triangles = 12,5 % et
+        // non 1 = 6,25 %). La répartition reste également espacée.
         indices.forEach((triIdx, pos) => {
-          if (pos % step === 0) updated[triIdx] = { ...updated[triIdx], paroi_model_id: cfg.glazingModelId };
+          if (Math.round((pos + 1) * ratio) > Math.round(pos * ratio)) {
+            updated[triIdx] = { ...updated[triIdx], paroi_model_id: cfg.glazingModelId };
+          }
         });
       }
     }
     this.triangles.set(updated);
+    this.actualGlazingPct.set(this.measureGlazingPct(updated));
     this.viewer?.repaint();
+  }
+
+  /** Même avec une répartition optimale (voir generateAssignment), un taux
+   * quelconque reste inatteignable sur un nombre FINI de triangles d'aires
+   * inégales : c'est la valeur mesurée ici qui entrera dans le calcul, pas le
+   * taux saisi. À afficher, donc, plutôt que de laisser croire à une consigne
+   * exacte — d'autant que l'écart grandit quand la paroi est peu maillée. */
+  private measureGlazingPct(triangles: WorkingTriangle[]): Record<string, number> {
+    const obtained: Record<string, number> = {};
+    for (const group of this.groups()) {
+      const glazingId = this.groupConfig[group]?.glazingModelId ?? null;
+      if (glazingId === null) continue;
+      let total = 0;
+      let glazed = 0;
+      for (const t of triangles) {
+        if (t.group !== group) continue;
+        const area = t.area ?? 0;
+        total += area;
+        if (t.paroi_model_id === glazingId) glazed += area;
+      }
+      if (total > 0) obtained[group] = (glazed / total) * 100;
+    }
+    return obtained;
   }
 
   colorForTriangle = (index: number): string => {
