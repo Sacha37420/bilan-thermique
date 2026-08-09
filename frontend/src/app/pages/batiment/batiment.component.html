@@ -227,6 +227,13 @@
             <span class="job-message">{{ job.message }}</span>
           </div>
         }
+        @if (envGenWarnings().length > 0) {
+          <ul class="env-warnings">
+            @for (w of envGenWarnings(); track $index) {
+              <li>{{ w }}</li>
+            }
+          </ul>
+        }
       </div>
     }
 

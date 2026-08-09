@@ -2025,3 +2025,178 @@ class SearchNearbyBuildingsSerializerTest(SimpleTestCase):
         s = serializers.SearchNearbyBuildingsRequestSerializer(data={'lat': 200.0, 'lon': 2.35})
         self.assertFalse(s.is_valid())
         self.assertIn('lat', s.errors)
+
+
+class SelfBuildingFilterTest(SimpleTestCase):
+    """Lot X — écarter le bâtiment étudié de son propre maillage d'environnement.
+
+    Partie pure (pas de réseau) : `envelope_footprint_polygon` et
+    `_is_studied_building` portent toute la décision, `generate_environment_mesh`
+    ne fait que les câbler. Le bâtiment étudié étant un bâtiment réel de BD
+    TOPO/OSM, il ressortait jusqu'ici comme n'importe quel voisin et
+    api.shadow fusionnant enveloppe + environnement, le solveur voyait deux
+    exemplaires superposés du même bâtiment.
+    """
+
+    databases = []
+
+    @staticmethod
+    def _box_envelope(x0, y0, x1, y1, height=6.0):
+        """Enveloppe fermée d'une boîte rectangulaire, dans le repère LOCAL du
+        bâtiment (mêmes conventions que Building.envelope)."""
+        v = [
+            [x0, y0, 0.0], [x1, y0, 0.0], [x1, y1, 0.0], [x0, y1, 0.0],
+            [x0, y0, height], [x1, y0, height], [x1, y1, height], [x0, y1, height],
+        ]
+        t = [
+            # sol / toiture : porteurs de l'empreinte
+            {'v': [0, 2, 1], 'boundary': 'ground'}, {'v': [0, 3, 2], 'boundary': 'ground'},
+            {'v': [4, 5, 6], 'boundary': 'exterior_air'}, {'v': [4, 6, 7], 'boundary': 'exterior_air'},
+            # murs : projection XY d'aire nulle
+            {'v': [0, 1, 5], 'boundary': 'exterior_air'}, {'v': [0, 5, 4], 'boundary': 'exterior_air'},
+            {'v': [1, 2, 6], 'boundary': 'exterior_air'}, {'v': [1, 6, 5], 'boundary': 'exterior_air'},
+            {'v': [2, 3, 7], 'boundary': 'exterior_air'}, {'v': [2, 7, 6], 'boundary': 'exterior_air'},
+            {'v': [3, 0, 4], 'boundary': 'exterior_air'}, {'v': [3, 4, 7], 'boundary': 'exterior_air'},
+        ]
+        return {'vertices': v, 'triangles': t}
+
+    @staticmethod
+    def _rect(x0, y0, x1, y1):
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+    # ── Empreinte du bâtiment étudié ────────────────────────────────────────
+
+    def test_footprint_area_ignores_vertical_walls(self):
+        """Les murs se projettent en segments : l'aire doit être celle de
+        l'empreinte seule (8 x 6 = 48), pas une somme incluant les murs."""
+        polygon = geodata.envelope_footprint_polygon(self._box_envelope(0, 0, 8, 6))
+        self.assertAlmostEqual(polygon.area, 48.0, places=6)
+
+    def test_footprint_without_ground_boundary(self):
+        """Un OBJ importé n'a aucun triangle marqué 'ground' — l'empreinte doit
+        quand même sortir (via la toiture), sans quoi le filtrage ne
+        s'appliquerait qu'aux bâtiments du mode simplifié."""
+        envelope = self._box_envelope(0, 0, 8, 6)
+        for tri in envelope['triangles']:
+            tri['boundary'] = 'exterior_air'
+        polygon = geodata.envelope_footprint_polygon(envelope)
+        self.assertAlmostEqual(polygon.area, 48.0, places=6)
+
+    def test_footprint_none_when_envelope_empty(self):
+        for envelope in (None, {}, {'vertices': [], 'triangles': []}):
+            self.assertIsNone(geodata.envelope_footprint_polygon(envelope))
+
+    def test_footprint_preserves_concavity(self):
+        """Empreinte en L : l'aire doit être celle du L (pas de son enveloppe
+        convexe), sinon un voisin logé dans le creux serait écarté à tort."""
+        v = [[0, 0, 0], [4, 0, 0], [4, 2, 0], [2, 2, 0], [2, 4, 0], [0, 4, 0]]
+        t = [{'v': [0, 1, 2]}, {'v': [0, 2, 3]}, {'v': [0, 3, 4]}, {'v': [0, 4, 5]}]
+        polygon = geodata.envelope_footprint_polygon({'vertices': v, 'triangles': t})
+        self.assertAlmostEqual(polygon.area, 12.0, places=6)  # 16 - 4 (convexe = 16)
+
+    # ── Décision « c'est le bâtiment étudié » ───────────────────────────────
+
+    def test_exact_duplicate_is_filtered(self):
+        self_polygon = geodata.envelope_footprint_polygon(self._box_envelope(0, 0, 8, 6))
+        self.assertTrue(geodata._is_studied_building(self._rect(0, 0, 8, 6), self_polygon))
+
+    def test_party_wall_neighbour_is_kept(self):
+        """Mitoyen partageant EXACTEMENT une arête : intersection d'aire nulle.
+        C'est le cas que `intersects` (vrai au moindre contact) supprimerait à
+        tort — un mitoyen est un obstacle légitime."""
+        self_polygon = geodata.envelope_footprint_polygon(self._box_envelope(0, 0, 8, 6))
+        self.assertFalse(geodata._is_studied_building(self._rect(8, 0, 16, 6), self_polygon))
+
+    def test_disjoint_neighbour_is_kept(self):
+        self_polygon = geodata.envelope_footprint_polygon(self._box_envelope(0, 0, 8, 6))
+        self.assertFalse(geodata._is_studied_building(self._rect(20, 20, 28, 26), self_polygon))
+
+    def test_partial_overlap_above_threshold_is_filtered(self):
+        """Modélisation approximative (OBJ/boîte) décalée de 2 m sur 8 :
+        recouvrement 6/8 = 75 % > seuil, donc écarté."""
+        self_polygon = geodata.envelope_footprint_polygon(self._box_envelope(0, 0, 8, 6))
+        self.assertTrue(geodata._is_studied_building(self._rect(2, 0, 10, 6), self_polygon))
+
+    def test_slight_digitisation_overlap_is_kept(self):
+        """Voisin qui déborde de 10 cm sur 8 m (imprécision de digitalisation) :
+        1,25 % de recouvrement, très en dessous du seuil — conservé sans avoir
+        besoin d'un buffer négatif."""
+        self_polygon = geodata.envelope_footprint_polygon(self._box_envelope(0, 0, 8, 6))
+        self.assertFalse(geodata._is_studied_building(self._rect(7.9, 0, 15.9, 6), self_polygon))
+
+    def test_smaller_candidate_fully_inside_is_filtered(self):
+        """Donnée IGN plus petite que la modélisation de l'utilisateur : le
+        rapport est pris sur le MINIMUM des deux aires, donc détecté quand même
+        (sur l'aire du bâtiment étudié seul, 24/48 = 50 %, ce serait limite)."""
+        self_polygon = geodata.envelope_footprint_polygon(self._box_envelope(0, 0, 8, 6))
+        self.assertTrue(geodata._is_studied_building(self._rect(1, 1, 5, 4), self_polygon))
+
+    def test_no_self_envelope_filters_nothing(self):
+        """Génération autonome (page Environnement) : aucun bâtiment de
+        référence, donc aucun filtrage — comportement d'origine préservé."""
+        self.assertFalse(geodata._is_studied_building(self._rect(0, 0, 8, 6), None))
+
+
+class SelfBuildingFilterFrameTest(SimpleTestCase):
+    """Lot X — le piège de repère : les empreintes candidates sont converties
+    en repère LOCAL du bâtiment (local_xy puis _rotate_xy(north_offset_deg)),
+    alors que Building.envelope y est DÉJÀ. Appliquer une seconde rotation à
+    l'empreinte du bâtiment étudié ferait rater le doublon dès que
+    georef_north_offset_deg n'est pas nul. On rejoue donc ici la chaîne réelle
+    de generate_environment_mesh, sans réseau."""
+
+    databases = []
+
+    LAT, LON = 47.90123, 1.68345
+
+    def _candidate_footprint_local(self, footprint_latlon, north_offset_deg):
+        """Exactement la transformation appliquée par generate_environment_mesh."""
+        return [
+            geodata._rotate_xy(*geodata.local_xy(plat, plon, self.LAT, self.LON), north_offset_deg)
+            for plat, plon in footprint_latlon
+        ]
+
+    def _self_envelope_from(self, footprint_latlon, north_offset_deg):
+        """Le bâtiment tel que l'utilisateur l'a modélisé : même empreinte
+        réelle, déjà exprimée dans son repère local."""
+        xy = self._candidate_footprint_local(footprint_latlon, north_offset_deg)
+        vertices = [[x, y, 0.0] for x, y in xy] + [[x, y, 6.0] for x, y in xy]
+        n = len(xy)
+        triangles = [{'v': [0, i, i + 1], 'boundary': 'ground'} for i in range(1, n - 1)]
+        triangles += [{'v': [n, n + i, n + i + 1], 'boundary': 'exterior_air'} for i in range(1, n - 1)]
+        return {'vertices': vertices, 'triangles': triangles}
+
+    @staticmethod
+    def _latlon_rect(lat0, lon0, dlat, dlon):
+        return [
+            [lat0, lon0], [lat0, lon0 + dlon],
+            [lat0 + dlat, lon0 + dlon], [lat0 + dlat, lon0],
+        ]
+
+    def test_duplicate_detected_at_every_north_offset(self):
+        footprint = self._latlon_rect(self.LAT, self.LON, 0.00006, 0.00010)
+        for offset in (0.0, 37.0, 90.0, 180.0, 270.0):
+            with self.subTest(north_offset_deg=offset):
+                self_polygon = geodata.envelope_footprint_polygon(
+                    self._self_envelope_from(footprint, offset),
+                )
+                candidate = self._candidate_footprint_local(footprint, offset)
+                self.assertTrue(
+                    geodata._is_studied_building(candidate, self_polygon),
+                    f"doublon non détecté à north_offset_deg={offset}",
+                )
+
+    def test_real_neighbour_kept_at_every_north_offset(self):
+        own = self._latlon_rect(self.LAT, self.LON, 0.00006, 0.00010)
+        # Voisin nettement décalé vers l'est (~30 m), jamais recouvrant.
+        neighbour = self._latlon_rect(self.LAT, self.LON + 0.0004, 0.00006, 0.00010)
+        for offset in (0.0, 37.0, 90.0, 180.0, 270.0):
+            with self.subTest(north_offset_deg=offset):
+                self_polygon = geodata.envelope_footprint_polygon(
+                    self._self_envelope_from(own, offset),
+                )
+                candidate = self._candidate_footprint_local(neighbour, offset)
+                self.assertFalse(
+                    geodata._is_studied_building(candidate, self_polygon),
+                    f"voisin écarté à tort à north_offset_deg={offset}",
+                )

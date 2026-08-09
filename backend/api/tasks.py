@@ -177,6 +177,11 @@ def generate_environment_for_building(self, job_id, building_id, radius_m):
         result = geodata.generate_environment_mesh(
             building.georef_lat, building.georef_lon, radius_m, progress_cb=progress_cb,
             north_offset_deg=building.georef_north_offset_deg, ground_z_ref=building.georef_ground_z,
+            # Lot X : le bâtiment étudié est lui-même dans BD TOPO/OSM et
+            # ressortirait comme n'importe quel voisin — écarté par recouvrement
+            # d'empreinte. Seule cette tâche-ci le fait : generate_environment
+            # (page Environnement, autonome) n'a aucun bâtiment de référence.
+            self_envelope=building.envelope,
         )
 
         env = Environment.objects.create(
@@ -197,7 +202,9 @@ def generate_environment_for_building(self, job_id, building_id, radius_m):
         job.set_state(
             status=Job.DONE, progress=100,
             message=f"« {env.name} » créé et lié — {stats['buildings_used']} bâtiment(s), "
-                    f"{n_triangles} triangles (IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']}).",
+                    f"{n_triangles} triangles (IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']})."
+                    + (f" {stats['buildings_self']} écarté(s) : bâtiment étudié lui-même."
+                       if stats.get('buildings_self') else ""),
         )
     except geodata.GeodataError as exc:
         job.set_state(status=Job.ERROR, message=str(exc))

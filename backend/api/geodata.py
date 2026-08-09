@@ -22,6 +22,7 @@ import time
 
 import requests
 import shapely.geometry
+import shapely.ops
 import trimesh.creation
 
 from . import geometry
@@ -385,8 +386,83 @@ def search_nearby_buildings(lat, lon, radius_m, max_results=5):
     return candidates, n_skipped_too_complex
 
 
+# ── Lot X : écarter le bâtiment étudié de son propre environnement ────────────────
+
+SELF_OVERLAP_RATIO = 0.3
+# Un candidat est considéré comme étant LE BÂTIMENT ÉTUDIÉ lui-même si son
+# empreinte recouvre plus que cette fraction de la plus petite des deux
+# empreintes (la sienne ou celle du bâtiment étudié). Rapporté au MINIMUM des
+# deux aires et non à celle du candidat : « ces deux empreintes désignent le
+# même bâtiment » doit se détecter que la modélisation de l'utilisateur soit
+# plus petite ou plus grande que la donnée IGN/OSM (un OBJ approximatif, une
+# boîte du générateur…).
+#
+# Un doublon exact donne un rapport de 1 ; un MITOYEN réel, qui partage un mur
+# avec le bâtiment étudié, donne une intersection d'aire NULLE (deux polygones
+# qui se touchent par une arête) et reste donc conservé — c'est voulu, un
+# mitoyen est un obstacle légitime. C'est aussi pourquoi le critère porte sur
+# une AIRE et non sur `intersects` : `intersects` est vrai dès qu'il y a
+# contact, donc supprimerait tous les mitoyens d'un tissu urbain dense.
+
+
+def envelope_footprint_polygon(envelope):
+    """Empreinte 2D du bâtiment étudié, dans le plan XY de SON repère local —
+    exactement le repère dans lequel generate_environment_mesh place les
+    empreintes candidates (local_xy puis _rotate_xy(north_offset_deg)). Aucune
+    rotation supplémentaire à appliquer ici, donc : le piège serait précisément
+    d'en appliquer une deuxième.
+
+    Projette TOUS les triangles, sans se limiter à ceux marqués
+    boundary='ground' : les murs verticaux se projettent en segments d'aire
+    nulle (éliminés par le seuil d'aire), les triangles de sol et de toiture
+    donnent la silhouette réelle, concavités et cours intérieures comprises. Ça
+    évite surtout de dépendre d'un marquage 'ground' que l'utilisateur n'a pas
+    forcément fait (un OBJ importé n'en a aucun par défaut).
+
+    Retourne un polygone shapely, ou None si l'enveloppe est vide/inexploitable
+    (auquel cas l'appelant ne filtre rien plutôt que de deviner)."""
+    vertices = (envelope or {}).get('vertices') or []
+    triangles = (envelope or {}).get('triangles') or []
+    if not vertices or not triangles:
+        return None
+
+    n = len(vertices)
+    polygons = []
+    for tri in triangles:
+        idx = tri.get('v') if isinstance(tri, dict) else None
+        if not idx or len(idx) != 3 or any(not (0 <= i < n) for i in idx):
+            continue
+        ring = [(vertices[i][0], vertices[i][1]) for i in idx]
+        polygon = shapely.geometry.Polygon(ring)
+        # Un mur vertical se projette en segment : aire nulle, écarté ici.
+        if polygon.is_valid and polygon.area > 1e-9:
+            polygons.append(polygon)
+
+    if not polygons:
+        return None
+    merged = shapely.ops.unary_union(polygons)
+    if merged.is_empty or merged.area < 1e-3:
+        return None
+    return merged
+
+
+def _is_studied_building(footprint_xy, self_polygon):
+    """footprint_xy : empreinte d'un candidat, DÉJÀ dans le repère local du
+    bâtiment étudié. self_polygon : sortie de envelope_footprint_polygon."""
+    if self_polygon is None:
+        return False
+    candidate = shapely.geometry.Polygon(footprint_xy)
+    if not candidate.is_valid:
+        candidate = candidate.buffer(0)
+    if candidate.is_empty or candidate.area < 1e-9:
+        return False
+    intersection = candidate.intersection(self_polygon).area
+    return intersection / min(candidate.area, self_polygon.area) > SELF_OVERLAP_RATIO
+
+
 def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
-                               north_offset_deg=0.0, ground_z_ref=None):
+                               north_offset_deg=0.0, ground_z_ref=None,
+                               self_envelope=None):
     """Orchestrateur principal. progress_cb(stage: str, pct: int) est optionnel (appelé
     par la tâche Celery pour la barre de progression du Job).
 
@@ -394,6 +470,18 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
     local d'un Building géoréférencé (voir Building.georef_* et _rotate_xy) plutôt
     que dans le repère « est/nord réel » brut — valeurs par défaut = comportement
     d'origine (génération autonome, non alignée à un bâtiment) inchangé.
+
+    self_envelope (Lot X, optionnel) : enveloppe du bâtiment ÉTUDIÉ
+    (`Building.envelope`). Le bâtiment étudié étant lui-même un bâtiment réel
+    présent dans BD TOPO / OSM, il ressort de la recherche comme n'importe quel
+    voisin — et api.shadow fusionne ensuite enveloppe + environnement, donc le
+    solveur verrait DEUX exemplaires superposés du même bâtiment (doublon exact
+    s'il vient du mode simplifié, volumes qui s'interpénètrent s'il vient d'un
+    OBJ ou du générateur de boîte). Fourni, tout candidat qui recouvre
+    significativement cette empreinte est écarté — voir _is_studied_building.
+    Absent (défaut) : aucun filtrage, comportement d'origine — c'est le cas de
+    la génération AUTONOME (page Environnement), qui n'a aucun bâtiment de
+    référence à écarter.
 
     Retourne {'vertices': [[x,y,z],...], 'triangles': [{'v':[i,j,k]},...],
     'warnings': [str, ...], 'stats': {...}} — 'vertices'/'triangles' déjà dans le
@@ -434,7 +522,7 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
             'vertices': [], 'triangles': [],
             'warnings': warnings + ["Aucun bâtiment trouvé dans ce rayon."],
             'stats': {'buildings_used': 0, 'buildings_ign': n_ign, 'buildings_osm': n_osm,
-                      'buildings_skipped': 0},
+                      'buildings_skipped': 0, 'buildings_self': 0},
         }
 
     for b in buildings:
@@ -444,15 +532,24 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
     buildings.sort(key=lambda b: b['_dist'])
 
     report('extrude', 60)
+    self_polygon = envelope_footprint_polygon(self_envelope)
     vertices = []
     triangles = []
     n_approx_height = 0
+    n_self = 0
     processed = 0
     for b in buildings:
         footprint_xy = [
             _rotate_xy(*local_xy(plat, plon, lat, lon), north_offset_deg)
             for plat, plon in b['footprint_latlon']
         ]
+        # Filtré AVANT l'extrusion et avant le contrôle de limite de maillage :
+        # sinon le doublon consommerait des sommets/triangles sur
+        # MAX_VERTICES/MAX_TRIANGLES et pourrait, via le `break` ci-dessous,
+        # évincer un vrai voisin plus éloigné.
+        if _is_studied_building(footprint_xy, self_polygon):
+            n_self += 1
+            continue
         try:
             v, f = extrude_footprint(footprint_xy, b['height_m'])
         except GeodataError:
@@ -473,11 +570,31 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
         if b.get('approx_height'):
             n_approx_height += 1
 
-    n_skipped = len(buildings) - processed
+    # n_self retranché : un bâtiment écarté parce qu'il EST le bâtiment étudié
+    # n'a rien à voir avec la limite de maillage, et le compter ici donnerait un
+    # message faux (« réduire le rayon »).
+    n_skipped = len(buildings) - processed - n_self
     if n_skipped > 0:
         warnings.append(
             f"Zone dense : {processed} bâtiment(s) le(s) plus proche(s) conservé(s), "
             f"{n_skipped} ignoré(s) (limite de maillage atteinte — réduire le rayon pour tous les inclure)."
+        )
+    if n_self > 0:
+        warnings.append(
+            f"{n_self} bâtiment(s) écarté(s) : recouvrement avec le bâtiment étudié — c'est lui-même, "
+            "tel qu'il figure dans IGN BD TOPO / OpenStreetMap. Le garder en ferait un obstacle "
+            "superposé à sa propre enveloppe."
+            + (
+                " Plus d'un bâtiment écarté : c'est inhabituel et signale plutôt un géoréférencement "
+                "erroné (latitude/longitude ou cap nord) qu'un vrai doublon — à vérifier."
+                if n_self > 1 else ""
+            )
+        )
+    elif self_polygon is not None:
+        warnings.append(
+            "Aucun bâtiment écarté : le bâtiment étudié n'a pas été retrouvé dans les données "
+            "IGN/OpenStreetMap à cet endroit. Normal s'il n'y figure pas (construction récente, "
+            "zone non couverte) ; sinon, vérifiez son géoréférencement."
         )
     if n_approx_height > 0:
         warnings.append(
@@ -492,6 +609,6 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
         'warnings': warnings,
         'stats': {
             'buildings_used': processed, 'buildings_ign': n_ign, 'buildings_osm': n_osm,
-            'buildings_skipped': n_skipped,
+            'buildings_skipped': n_skipped, 'buildings_self': n_self,
         },
     }

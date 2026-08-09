@@ -73,6 +73,12 @@ export class BatimentComponent implements OnInit, OnDestroy {
   envGenJob = signal<Job | null>(null);
   envGenerating = signal(false);
   envGenRadius = 150;
+  // Avertissements de la dernière génération (job.result.warnings) — jamais
+  // affichés jusqu'au Lot X, alors que c'est le seul canal qui dise ce qui a
+  // été écarté et pourquoi : bâtiment étudié retiré de son propre
+  // environnement, hauteurs estimées faute de donnée, limite de maillage
+  // atteinte. Un filtrage silencieux est un filtrage invérifiable.
+  envGenWarnings = signal<string[]>([]);
   private envGenPollHandle?: ReturnType<typeof setInterval>;
 
   vertices = signal<number[][]>([]);
@@ -364,6 +370,11 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     this.error.set('');
     this.message.set('');
+    // Remis à zéro ICI (synchrone, avant la requête) et non dans le callback :
+    // la génération d'environnement rappelle loadBuilding() puis repose ses
+    // avertissements juste après — un reset asynchrone les effacerait, exactement
+    // comme il efface déjà envGenJob (voir startEnvGenPoll).
+    this.envGenWarnings.set([]);
     this.api.getBuilding(summary.id).subscribe({
       next: (res) => {
         const b = res as Building;
@@ -420,6 +431,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.shadowJob.set(null);
     this.stopPoll();
     this.envGenJob.set(null);
+    this.envGenWarnings.set([]);
     this.stopEnvGenPoll();
     this.error.set('');
     this.message.set('');
@@ -501,6 +513,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
     if (id === null || this.georefLat === null || this.georefLon === null) return;
     this.error.set('');
     this.message.set('');
+    this.envGenWarnings.set([]);
     this.envGenerating.set(true);
     this.api.generateBuildingEnvironment(id, this.envGenRadius).subscribe({
       next: (res) => {
@@ -528,9 +541,13 @@ export class BatimentComponent implements OnInit, OnDestroy {
             this.stopEnvGenPoll();
             this.envGenerating.set(false);
             if (updated.status === 'DONE') {
+              const warnings = updated.result?.['warnings'];
               this.refreshEnvironments();
+              // loadBuilding() remet l'état du bâtiment à plat : les
+              // avertissements sont posés APRÈS, sinon ils seraient effacés.
               this.loadBuilding({ id: buildingId });
               this.message.set(updated.message);
+              this.envGenWarnings.set(Array.isArray(warnings) ? warnings as string[] : []);
             } else {
               this.error.set(updated.message || 'Échec de la génération.');
             }
