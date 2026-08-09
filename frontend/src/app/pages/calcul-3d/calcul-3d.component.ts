@@ -189,6 +189,10 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   // Lot K — température de sol constante, utilisée uniquement par les
   // triangles marqués 'ground' (page Bâtiment) ; sans effet sinon.
   tGround = 12;
+  // Lot AB3 : résistance du sol lui-même sous les triangles « Sol ». Remplace
+  // h_e pour eux — un dallage est en contact direct avec la terre, sans film
+  // convectif, et depuis le Lot R son couplage se mettait à varier avec le vent.
+  rGround = 0.5;
 
   // ── Renouvellement d'air (modes 'free'/'thermostat' uniquement) ──────
   ventilationProfiles = VENTILATION_PROFILES;
@@ -539,7 +543,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
 
     const payload: Record<string, unknown> = {
       dx_max: this.dxMax, h_e: this.hE, h_e_dynamic: this.hEDynamic, interior, t_init: this.tInit,
-      weather: weatherPayload, shadow_mode: this.shadowMode, t_ground: this.tGround,
+      weather: weatherPayload, shadow_mode: this.shadowMode, t_ground: this.tGround, r_ground: this.rGround,
     };
     // Planning horaire (Lot Q) : n'est envoyé QUE s'il est actif et complet —
     // sinon comportement inchangé (constantes de `interior` ci-dessus).

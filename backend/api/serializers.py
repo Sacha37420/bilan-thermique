@@ -488,6 +488,13 @@ class BuildingCalculRequestSerializer(serializers.Serializer):
     # usuelle en France (10-14°C) — dérivation automatique depuis la météo
     # reportée au Lot L (météo réelle datée), voir to_do.md racine.
     t_ground = serializers.FloatField(required=False, min_value=-10.0, max_value=30.0, default=12.0)
+    # Lot AB3 : résistance du SOL sous un triangle 'ground', en remplacement de
+    # h_e (un dallage n'a pas de film convectif, et depuis le Lot R son couplage
+    # à la terre variait avec le vent). Minimum 0,05 plutôt que 0 : la
+    # conductance vaut 1/r_ground, et un contact « parfait » n'a pas de sens
+    # physique ici. Voir building_solver.DEFAULT_R_GROUND.
+    r_ground = serializers.FloatField(required=False, min_value=0.05, max_value=10.0,
+                                       default=building_solver.DEFAULT_R_GROUND)
     # Lot Q : profil "jour type" (24 heures, index 0 = minuit) qui remplace heure
     # par heure debit_vent_m3h/eta_recup_vent/apports_internes_w de `interior` —
     # modes 'free'/'thermostat' uniquement (ignoré en 'imposed', comme les

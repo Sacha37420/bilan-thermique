@@ -56,6 +56,16 @@
           <input type="number" step="0.5" [(ngModel)]="tGround" name="tGround" />
           <small>Utilisée uniquement par les triangles marqués « Sol » (page Bâtiment) ; 12°C ≈ moyenne annuelle usuelle en France.</small>
         </label>
+        <label>
+          <span>Résistance du sol (m²·K/W)</span>
+          <input type="number" step="0.1" min="0.05" max="10" [(ngModel)]="rGround" name="rGround" />
+          <small>
+            Résistance de la terre elle-même, en série sous les triangles « Sol » — elle remplace
+            h_e pour eux (un dallage n'a pas de film convectif, et le vent n'a rien à y faire).
+            0,5 est le bas de la fourchette usuelle (ISO 13370 : 0,5 à 3 selon la forme du plancher
+            et le sol) ; l'augmenter réduit les déperditions par le bas.
+          </small>
+        </label>
       </div>
       <label class="mode-option">
         <input type="checkbox" [(ngModel)]="hEDynamic" name="hEDynamic" />

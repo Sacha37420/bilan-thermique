@@ -76,6 +76,33 @@ def h_e_from_wind(wind_m_s):
     return JURGES_A + JURGES_B * max(wind_m_s, 0.0)
 
 
+# ── Lot AB3 : plancher au contact du sol ─────────────────────────────────────
+
+DEFAULT_R_GROUND = 0.5
+# Résistance thermique (m²·K/W) du SOL lui-même, en série sous un triangle
+# `boundary='ground'` (Lot K). Remplace l'usage de h_e pour ces triangles, qui
+# était faux à deux titres :
+#   - un dallage n'a pas de film convectif : il est en contact direct avec la
+#     terre. Avec h_e = 25, sa résistance côté extérieur valait 0,04 m²·K/W,
+#     c'est-à-dire un contact quasi parfait avec une source à `t_ground` — d'où
+#     une SURESTIMATION importante des déperditions par le sol, d'autant plus
+#     forte que le plancher est bien isolé (la résistance manquante est en série
+#     avec la sienne) ;
+#   - depuis le Lot R (h_e dérivé du vent), ce couplage à la terre se mettait à
+#     osciller avec la vitesse du vent à 10 m, ce qui n'a aucun sens physique.
+#     Le Lot K avait noté « un h_e distinct pour le sol reste une extension
+#     possible » ; le Lot R a transformé cette approximation acceptable en
+#     incohérence.
+# 0,5 m²·K/W est le BAS de la fourchette usuelle (ISO 13370 : ~0,5 à 3 selon la
+# dimension caractéristique B' = A/(0,5·P) et la conductivité du sol) — choix
+# volontairement conservateur, ajustable par calcul. Valeur indicative, pas
+# réglementaire : même statut que le catalogue de parois.
+
+
+def h_ground_from_r(r_ground):
+    return 1.0 / max(r_ground, 1e-6)
+
+
 # ISO 6946 (Rsi) — résistance superficielle intérieure selon la direction du
 # flux de chaleur : classée par TYPE d'élément (mur/plafond/plancher), pas par
 # le signe instantané du flux à un instant donné — même convention que la
@@ -473,6 +500,12 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     weather[h]['t_ext'] pour tout triangle dont envelope.triangles[i]['boundary'] == 'ground'.
     Sans effet sur les triangles 'exterior_air' (comportement historique, défaut).
 
+    r_ground (payload, Lot AB3, défaut DEFAULT_R_GROUND) : résistance du SOL
+    (m²·K/W) sous ces mêmes triangles. Leur conductance côté extérieur vaut
+    1/r_ground, en remplacement de h_e — un dallage n'a pas de film convectif, et
+    depuis le Lot R son couplage à la terre variait avec le vent. Voir
+    DEFAULT_R_GROUND pour le choix de la valeur.
+
     planning (payload, optionnel — Lot Q) : liste de 24 dicts {debit_vent_m3h?,
     eta_recup_vent?, apports_internes_w?, volets_fermes?}, un par heure de la
     journée (index 0 = minuit), qui REMPLACENT les constantes de `interior`
@@ -633,6 +666,12 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # SI le dispositif est fermé (volets_fermes, planning). Défauts (1.0/1.0)
     # neutres : un triangle sans shading_profile_id n'est jamais affecté, même
     # si volets_fermes est actif à cette heure (delta_r=0.0 -> h_e inchangé).
+    # Lot AB3 : un triangle au contact du sol n'échange ni avec l'air extérieur
+    # ni au travers d'un volet — sa conductance côté extérieur est la seule
+    # résistance du sol, constante dans le temps (ni vent, ni planning).
+    is_ground = [tri.get('boundary') == 'ground' for tri in triangles]
+    h_ground = h_ground_from_r(payload.get('r_ground', DEFAULT_R_GROUND))
+
     shading_delta_r = []
     shading_fs_dir = []
     shading_fs_dif = []
@@ -785,10 +824,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             # h_e_vec : uniforme (= h_e) si les volets sont ouverts cette heure,
             # sinon réduit PAR TRIANGLE selon shading_delta_r (0.0 pour un
             # triangle sans dispositif -> h_e inchangé pour lui, voir Lot J).
-            if volet_closed:
-                h_e_vec = [1.0 / (1.0 / h_e + shading_delta_r[i]) for i in range(len(triangles))]
-            else:
-                h_e_vec = [h_e] * len(triangles)
+            # Un triangle 'ground' (Lot AB3) est hors de ces deux mécanismes :
+            # ni vent (h_e), ni volet — la terre, pas l'air extérieur.
+            h_e_vec = [
+                h_ground if is_ground[i]
+                else (1.0 / (1.0 / h_e + shading_delta_r[i]) if volet_closed else h_e)
+                for i in range(len(triangles))
+            ]
             h_e_addition = _h_e_diagonal(h_e_vec, systems, offsets, n_dof, areas)
             bundle = _factorize_for(K_global, C_global, air_idx, mode, g_vent, h_e_addition)
             bundle['h_e_vec'] = h_e_vec

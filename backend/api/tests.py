@@ -528,7 +528,12 @@ class GroundBoundaryTest(SimpleTestCase):
     par une identité EXACTE (pas une convergence de régime permanent) : le
     triangle 'ground' voit une météo t_ext très différente et variable, mais
     doit reproduire au chiffre près un mur 1D alimenté par une météo
-    CONSTANTE égale à t_ground (même dx_max/h_e/h_i/t_int/t_init/heures)."""
+    CONSTANTE égale à t_ground (même dx_max/h_i/t_int/t_init/heures).
+
+    Mis à jour au Lot AB3 : la conductance côté sol vaut désormais 1/r_ground et
+    non plus h_e. Le `h_e` du payload 3D est laissé volontairement à une valeur
+    TRÈS différente (25 contre 1/r_ground = 2) — le test vérifie donc du même
+    coup qu'il est bien ignoré pour ce triangle."""
 
     databases = []
 
@@ -537,6 +542,7 @@ class GroundBoundaryTest(SimpleTestCase):
         h_e, h_i, t_int, dx_max = 25.0, 8.0, 19.0, 0.02
         hours = 20
         t_ground = 13.0
+        r_ground = 0.5
 
         vertices = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
         triangles = geometry.compute_envelope_geometry(
@@ -550,11 +556,14 @@ class GroundBoundaryTest(SimpleTestCase):
             'dx_max': dx_max, 'h_e': h_e,
             'interior': {'mode': 'imposed', 'h_i': h_i, 't_int': t_int},
             't_init': 15.0, 'weather': _no_sun_weather_3d(t_ext_series), 't_ground': t_ground,
+            'r_ground': r_ground,
         }
         result_ground = building_solver.run_building_simulation(envelope_ground, {1: layers}, None, payload_ground)
 
         payload_ref = {
-            'layers': layers, 'dx_max': dx_max, 'h_e': h_e,
+            # h_e = 1/r_ground côté référence (Lot AB3) : c'est la résistance du
+            # sol, et non un film convectif, qui ferme ce bord.
+            'layers': layers, 'dx_max': dx_max, 'h_e': 1.0 / r_ground,
             'interior': {'mode': 'imposed', 'h_i': h_i, 't_int': t_int},
             't_init': 15.0, 'weather': _no_sun_weather_1d([t_ground] * hours),
         }
@@ -2519,3 +2528,145 @@ class EnergyBalanceBreakdownTest(SimpleTestCase):
         des valeurs sans effet sur la solution."""
         result = self._run(mode='imposed', t_int=20.0, glazing=True, sun=True, apports=300.0)
         self.assertIsNone(result['balance'])
+
+
+class GroundResistanceTest(SimpleTestCase):
+    """Lot AB3 — un plancher au contact du sol échange à travers la résistance
+    de la TERRE, pas à travers h_e.
+
+    Deux défauts corrigés ici. (1) Physique : avec h_e = 25, la résistance côté
+    extérieur d'un dallage valait 0,04 m²·K/W — un contact quasi parfait avec
+    une source à `t_ground`, d'où une surestimation des déperditions par le bas
+    d'autant plus forte que le plancher est isolé. (2) Cohérence : depuis le Lot
+    R, ce couplage à la terre se mettait à osciller avec la vitesse du vent à
+    10 m.
+    """
+
+    databases = []
+
+    LAYERS = [{'e': 0.2, 'lam': 1.0, 'rho': 2000.0, 'c': 900.0, 'tau': 0.0, 'r': 0.9, 'alpha': 0.1}]
+
+    def _envelope(self, boundary):
+        vertices = [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 2.0, 0.0]]
+        triangles = geometry.compute_envelope_geometry(
+            vertices, [{'v': [0, 1, 2], 'paroi_model_id': 1, 'boundary': boundary}],
+        )
+        return {'vertices': vertices, 'triangles': triangles}
+
+    @staticmethod
+    def _weather(winds, t_ext=-5.0):
+        return [{'t_ext': t_ext, 'sun_azimuth': 0.0, 'sun_elevation': -10.0,
+                 'e_dir': 0.0, 'e_dif': 0.0, 'wind_m_s': w} for w in winds]
+
+    def _run(self, boundary, weather, *, h_e_dynamic=False, h_e=25.0, **extra):
+        payload = {
+            'dx_max': 0.05, 'h_e': h_e, 'h_e_dynamic': h_e_dynamic,
+            'interior': {'mode': 'imposed', 'h_i': 8.0, 't_int': 20.0},
+            't_init': 20.0, 'weather': weather, 't_ground': 12.0, **extra,
+        }
+        return building_solver.run_building_simulation(
+            self._envelope(boundary), {1: self.LAYERS}, None, payload,
+        )
+
+    def test_ground_triangle_ignores_wind(self):
+        """LE correctif : un dallage ne doit plus rien devoir au vent."""
+        calm = self._run('ground', self._weather([0.0] * 24), h_e_dynamic=True)
+        gale = self._run('ground', self._weather([25.0] * 24), h_e_dynamic=True)
+        self.assertEqual(calm['envelope_flux_w'], gale['envelope_flux_w'])
+
+    def test_exterior_air_triangle_still_follows_wind(self):
+        """Non-régression du Lot R : une paroi exposée, elle, doit toujours
+        réagir au vent — sinon le test ci-dessus passerait pour une raison
+        triviale (h_e_dynamic cassé partout)."""
+        calm = self._run('exterior_air', self._weather([0.0] * 24), h_e_dynamic=True)
+        gale = self._run('exterior_air', self._weather([25.0] * 24), h_e_dynamic=True)
+        self.assertNotEqual(calm['envelope_flux_w'], gale['envelope_flux_w'])
+
+    def test_ground_triangle_ignores_h_e_constant_too(self):
+        """Même en h_e constant : la valeur de h_e ne doit plus entrer dans
+        l'équation d'un triangle au sol."""
+        low = self._run('ground', self._weather([3.0] * 12), h_e=5.0)
+        high = self._run('ground', self._weather([3.0] * 12), h_e=90.0)
+        self.assertEqual(low['envelope_flux_w'], high['envelope_flux_w'])
+
+    def test_r_ground_is_exactly_a_series_resistance(self):
+        """Identité EXACTE (pas une convergence) : un triangle 'ground' avec
+        r_ground doit reproduire au chiffre près un triangle 'exterior_air'
+        soumis à une météo constante à t_ground et à h_e = 1/r_ground. C'est la
+        définition même d'une résistance en série, vérifiée hors du code qui la
+        pose."""
+        r_ground = 0.8
+        ground = self._run('ground', self._weather([7.0] * 24), r_ground=r_ground)
+        equivalent = self._run(
+            'exterior_air', self._weather([7.0] * 24, t_ext=12.0), h_e=1.0 / r_ground,
+        )
+        for a, b in zip(ground['envelope_flux_w'], equivalent['envelope_flux_w']):
+            self.assertAlmostEqual(a, b, places=9)
+
+    def test_more_ground_resistance_means_fewer_losses(self):
+        """Sens physique : plus la terre résiste, moins le plancher déperd."""
+        thin = self._run('ground', self._weather([3.0] * 24), r_ground=0.1)
+        thick = self._run('ground', self._weather([3.0] * 24), r_ground=3.0)
+        # t_ground (12 °C) < t_int (20 °C) : le flux est négatif (pertes).
+        self.assertLess(sum(thin['envelope_flux_w']), sum(thick['envelope_flux_w']))
+
+    def test_previous_behaviour_overestimated_losses(self):
+        """Chiffre l'écart corrigé : l'ancien couplage (h_e = 25, soit
+        R = 0,04) contre le défaut actuel (0,5). Les déperditions par le sol
+        étaient nettement surestimées."""
+        old = self._run('ground', self._weather([3.0] * 24), r_ground=0.04)
+        new = self._run('ground', self._weather([3.0] * 24))  # défaut 0,5
+        self.assertLess(sum(old['envelope_flux_w']), sum(new['envelope_flux_w']))
+        self.assertGreater(abs(sum(old['envelope_flux_w'])), 1.2 * abs(sum(new['envelope_flux_w'])))
+
+    def test_shutter_never_applies_to_a_ground_triangle(self):
+        """Un volet sur un plancher n'a aucun sens : même avec un dispositif
+        assigné et un planning qui le ferme, le triangle 'ground' ne doit pas
+        bouger."""
+        envelope = self._envelope('ground')
+        envelope['triangles'][0]['shading_profile_id'] = 'volet-roulant'
+        planning = [{'debit_vent_m3h': 0.0, 'eta_recup_vent': 0.0,
+                     'apports_internes_w': 0.0, 'volets_fermes': h >= 12} for h in range(24)]
+        payload = {
+            'dx_max': 0.05, 'h_e': 25.0,
+            'interior': {'mode': 'imposed', 'h_i': 8.0, 't_int': 20.0},
+            't_init': 20.0, 'weather': self._weather([3.0] * 24), 't_ground': 12.0,
+        }
+        without = building_solver.run_building_simulation(
+            envelope, {1: self.LAYERS}, None, payload,
+        )
+        with_planning = building_solver.run_building_simulation(
+            envelope, {1: self.LAYERS}, None, {**payload, 'planning': planning, 'heure_debut': 0},
+        )
+        self.assertEqual(without['envelope_flux_w'], with_planning['envelope_flux_w'])
+
+
+class GroundSlabCatalogueTest(SimpleTestCase):
+    """Lot AB3 — le catalogue doit proposer un plancher bas : le mode simplifié
+    impose de choisir un modèle opaque pour le groupe `sol`, et la liste
+    n'offrait que des murs et des toitures."""
+
+    databases = []
+
+    def test_catalogue_has_slab_models(self):
+        from api.management.commands.seed_paroi_catalogue import CATALOGUE
+        slabs = [e for e in CATALOGUE if 'terre-plein' in e['name']]
+        self.assertEqual(len(slabs), 3)
+        for entry in slabs:
+            with self.subTest(name=entry['name']):
+                self.assertFalse(entry.get('is_glazing', False))
+                # Couches de l'extérieur (côté terre) vers l'intérieur : la
+                # première doit être la dalle, jamais l'isolant.
+                self.assertGreater(entry['layers'][0]['lam'], 1.0)
+                for layer in entry['layers']:
+                    self.assertEqual(layer['tau'], 0)
+                    self.assertAlmostEqual(
+                        layer['tau'] + layer['r'] + layer['alpha'], 1.0, places=6,
+                    )
+
+    def test_slab_models_pass_the_serializer(self):
+        from api.management.commands.seed_paroi_catalogue import CATALOGUE
+        for entry in [e for e in CATALOGUE if 'terre-plein' in e['name']]:
+            with self.subTest(name=entry['name']):
+                s = serializers.LayerSerializer(data=entry['layers'], many=True)
+                self.assertTrue(s.is_valid(), s.errors)

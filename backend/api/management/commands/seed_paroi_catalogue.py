@@ -50,6 +50,26 @@ def toiture(epaisseur_isolant):
     return [dict(COUVERTURE_TUILE), dict(SUPPORT_TOITURE), isolant(epaisseur_isolant), dict(PLACO)]
 
 
+# ── Plancher bas sur terre-plein (Lot AB3) ──────────────────────────────────
+# Manquait au catalogue : le mode simplifié impose de choisir un « modèle
+# opaque » pour le groupe `sol`, et la liste n'offrait que des murs et des
+# toitures. Ordre des couches : de l'EXTÉRIEUR (nœud 0 = côté terre) vers
+# l'intérieur, comme partout ailleurs — donc dalle, puis isolant, puis chape.
+# tau/r/alpha sans incidence physique ici (aucun rayonnement solaire n'atteint
+# un plancher au contact du sol) : valeurs neutres.
+DALLE_BETON = {'e': 0.15, 'lam': 1.75, 'rho': 2300, 'c': 1000, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+CHAPE = {'e': 0.05, 'lam': 1.15, 'rho': 2000, 'c': 1000, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+
+
+def isolant_sous_chape(epaisseur):
+    """Polystyrène extrudé, épaisseur en m."""
+    return {'e': epaisseur, 'lam': 0.034, 'rho': 30, 'c': 1450, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+
+
+def plancher_terre_plein(epaisseur_isolant):
+    return [dict(DALLE_BETON), isolant_sous_chape(epaisseur_isolant), dict(CHAPE)]
+
+
 # ── Vitrages ─────────────────────────────────────────────────────────────
 
 VITRAGE_SIMPLE = [
@@ -172,6 +192,37 @@ CATALOGUE = [
             "représentatif d'une toiture RE2020."
         ),
         'layers': toiture(0.40),
+    },
+    {
+        'name': 'Plancher bas sur terre-plein — RT2005 (isolant 40 mm)',
+        'description': (
+            "Dallage sur terre-plein : dalle béton 15 cm + 40 mm polystyrène "
+            "extrudé + chape 5 cm. À utiliser sur les triangles marqués « Sol » "
+            "(page Bâtiment). U indicatif ≈ 0,51 W/m²·K, résistances superficielle "
+            "intérieure (Rsi = 0,17, flux descendant) et de sol (r_ground = 0,5, "
+            "réglable page Calcul 3D) comprises."
+        ),
+        'layers': plancher_terre_plein(0.04),
+    },
+    {
+        'name': 'Plancher bas sur terre-plein — RT2012 (isolant 80 mm)',
+        'description': (
+            "Dallage sur terre-plein : dalle béton 15 cm + 80 mm polystyrène "
+            "extrudé + chape 5 cm. À utiliser sur les triangles marqués « Sol » "
+            "(page Bâtiment). U indicatif ≈ 0,32 W/m²·K, mêmes conventions que "
+            "ci-dessus."
+        ),
+        'layers': plancher_terre_plein(0.08),
+    },
+    {
+        'name': 'Plancher bas sur terre-plein — RE2020 (isolant 120 mm)',
+        'description': (
+            "Dallage sur terre-plein : dalle béton 15 cm + 120 mm polystyrène "
+            "extrudé + chape 5 cm. À utiliser sur les triangles marqués « Sol » "
+            "(page Bâtiment). U indicatif ≈ 0,23 W/m²·K, mêmes conventions que "
+            "ci-dessus."
+        ),
+        'layers': plancher_terre_plein(0.12),
     },
 ]
 
