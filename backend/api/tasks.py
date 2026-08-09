@@ -230,21 +230,41 @@ def fetch_weather(self, job_id, params):
     try:
         job.set_state(status=Job.RUNNING, progress=10, message=f"Interrogation de {source_label}…")
         north_offset_deg = params.get('north_offset_deg', 0.0)
+
+        # Lot AB4 : décalage horaire local appliqué à `hour_index` (planning et
+        # calendrier d'occupation), jamais à la position solaire. Détecté si
+        # l'appelant ne l'impose pas ; repli silencieux sur UTC si la sonde
+        # échoue — mieux vaut un décalage nul qu'une récupération météo annulée.
+        utc_offset_h = params.get('utc_offset_h')
+        offset_warning = None
+        if utc_offset_h is None:
+            detected = weather_source.fetch_utc_offset_seconds(params['lat'], params['lon'])
+            if detected is None:
+                utc_offset_h = 0.0
+                offset_warning = ("Fuseau horaire non détecté — heures laissées en UTC. "
+                                  "Renseignez le décalage à la main si un planning horaire est utilisé.")
+            else:
+                utc_offset_h = detected / 3600.0
+        utc_offset_seconds = int(round(utc_offset_h * 3600.0))
+
         if params.get('source') == 'tmy':
             series, n_missing, source, warning = weather_source.build_tmy_or_fallback_series(
                 params['lat'], params['lon'], str(params['start_date']), str(params['end_date']),
-                north_offset_deg=north_offset_deg,
+                north_offset_deg=north_offset_deg, utc_offset_seconds=utc_offset_seconds,
             )
         else:
             series, n_missing = weather_source.build_weather_series(
                 params['lat'], params['lon'], str(params['start_date']), str(params['end_date']),
-                north_offset_deg=north_offset_deg,
+                north_offset_deg=north_offset_deg, utc_offset_seconds=utc_offset_seconds,
             )
             source, warning = 'open-meteo-archive', None
 
+        if offset_warning:
+            warning = f"{warning} {offset_warning}" if warning else offset_warning
+
         job.result = {
             'weather': series, 'n_hours': len(series), 'n_missing': n_missing,
-            'source': source, 'warning': warning,
+            'source': source, 'warning': warning, 'utc_offset_h': utc_offset_h,
         }
         job.save(update_fields=['result'])
 

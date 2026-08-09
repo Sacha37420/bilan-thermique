@@ -178,6 +178,17 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     return points.length > 0 && points.every(p => p.hour_index !== undefined);
   }
 
+  /** Aligne `jourDebut` (0 = lundi) sur la date de début effectivement chargée.
+   * Sur une année type PVGIS, la date de repli reste le meilleur repère
+   * disponible : une TMY n'a pas de vraie année, donc pas de vrai jour de la
+   * semaine — c'est une convention, pas une donnée. */
+  private syncCalendarStartDay(): void {
+    const parsed = new Date(`${this.weatherFetchStart}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) return;
+    // getUTCDay() : 0 = dimanche. Le calendrier attend 0 = lundi.
+    this.occupationCalendar.jourDebut = (parsed.getUTCDay() + 6) % 7;
+  }
+
   generateThermostatCalendar(): void {
     const profile = this.selectedUsageProfile;
     if (!profile || this.weather().length === 0) return;
@@ -289,6 +300,12 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   // Open-Meteo) — les dates ci-dessous servent toujours de repli si PVGIS ne
   // couvre pas la zone en mode 'tmy' (voir to_do.md, Lot S).
   weatherFetchSource: 'archive' | 'tmy' = 'tmy';
+  // Lot AB4 : décalage UTC -> heure locale appliqué aux heures de la série
+  // (donc au planning horaire et au calendrier d'occupation), jamais à la
+  // position solaire. null = détection automatique côté serveur ; rempli avec
+  // la valeur effectivement utilisée après chaque récupération, donc
+  // modifiable ensuite. Décalage FIXE : pas de changement d'heure.
+  weatherFetchUtcOffsetH: number | null = null;
   weatherFetchStart = this.isoDateDaysAgo(7);
   weatherFetchEnd = this.isoDateDaysAgo(0);
   weatherJob = signal<Job | null>(null);
@@ -452,6 +469,7 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
       lat: this.weatherFetchLat, lon: this.weatherFetchLon, source: this.weatherFetchSource,
       start_date: this.weatherFetchStart, end_date: this.weatherFetchEnd,
       north_offset_deg: this.weatherFetchNorthOffset,
+      utc_offset_h: this.weatherFetchUtcOffsetH,
     }).subscribe({
       next: (res) => {
         this.weatherJob.set(res as Job);
@@ -476,8 +494,18 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
             this.stopWeatherPoll();
             if (updated.status === 'DONE') {
               const result = updated.result as unknown as {
-                weather: WeatherPoint[]; source: 'pvgis-tmy' | 'open-meteo-archive'; warning: string | null;
+                weather: WeatherPoint[]; source: 'pvgis-tmy' | 'open-meteo-archive';
+                warning: string | null; utc_offset_h: number | null;
               };
+              // Lot AB4 : on adopte le décalage effectivement utilisé (détecté
+              // ou imposé) pour que le champ cesse d'être vide et reste
+              // modifiable, et on aligne le jour de la semaine du calendrier
+              // d'occupation sur la période réellement chargée — l'utilisateur
+              // n'a plus à savoir quel jour tombait le 1er janvier.
+              if (result.utc_offset_h !== null && result.utc_offset_h !== undefined) {
+                this.weatherFetchUtcOffsetH = result.utc_offset_h;
+              }
+              this.syncCalendarStartDay();
               this.weatherRaw = result.weather
                 .map(p => [
                   p.t_ext, p.sun_azimuth, p.sun_elevation, p.e_dir, p.e_dif,

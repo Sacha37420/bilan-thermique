@@ -118,6 +118,8 @@ export class ApiService {
   fetchWeather(payload: {
     lat: number; lon: number; source?: 'archive' | 'tmy';
     start_date: string; end_date: string; north_offset_deg?: number;
+    // Lot AB4 : null/absent = détection automatique du fuseau côté serveur.
+    utc_offset_h?: number | null;
   }): Observable<unknown> {
     return this.http.post(`${this.base}/api/meteo/recuperer/`, payload);
   }

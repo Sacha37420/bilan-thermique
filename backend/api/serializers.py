@@ -323,6 +323,14 @@ class WeatherFetchRequestSerializer(serializers.Serializer):
     # d'origine est géoréférencé) — 0.0 = pas de rotation (comportement par défaut,
     # correct pour un bâtiment non géoréférencé).
     north_offset_deg = serializers.FloatField(required=False, default=0.0)
+    # Lot AB4 : décalage UTC -> heure locale appliqué à `hour_index` (donc au
+    # planning horaire et au calendrier d'occupation), jamais à la position
+    # solaire qui reste un instant physique. null/absent = détection
+    # automatique via Open-Meteo (voir weather_source.fetch_utc_offset_seconds),
+    # avec repli sur UTC si la sonde échoue. Décalage FIXE, sans changement
+    # d'heure — arbitrage tranché avec l'utilisateur, voir to_do.md Lot AB4.
+    utc_offset_h = serializers.FloatField(required=False, allow_null=True, default=None,
+                                           min_value=-14.0, max_value=14.0)
 
     def validate(self, data):
         if data['start_date'] > data['end_date']:
@@ -396,8 +404,11 @@ class BuildingWeatherPointSerializer(serializers.Serializer):
     # dès le premier trou — et la dérive était définitive et silencieuse.
     # Absente (série collée à la main) : repli sur `heure_debut`, comportement
     # d'origine. Bornée à un an d'heures, comme la série elle-même.
+    # Borne haute : un an d'heures (8784) plus une journée de marge — depuis le
+    # Lot AB4 `hour_index` est en heure LOCALE, donc un décalage positif reporte
+    # les dernières heures de la série sur un jour supplémentaire.
     hour_index = serializers.IntegerField(required=False, allow_null=True, default=None,
-                                           min_value=0, max_value=8783)
+                                           min_value=0, max_value=8807)
     # Consignes thermostat de CETTE heure (Lot V, calendrier d'occupation) —
     # optionnelles, remplacent interior.t_min/t_max pour cette heure
     # uniquement (mode 'thermostat' seulement, sans effet sinon). Résolues

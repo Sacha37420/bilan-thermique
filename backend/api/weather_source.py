@@ -23,7 +23,7 @@ cas (latitudes/saisons/hémisphères variés, Paris/Sydney/New York/équateur) :
 
 import math
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -60,6 +60,59 @@ def _get_with_retry(url, params, retries=1, backoff_s=2.0):
             if attempt < retries:
                 time.sleep(backoff_s)
     raise last_exc
+
+
+# ── Décalage horaire local (Lot AB4) ────────────────────────────────────────────
+
+OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
+
+
+def fetch_utc_offset_seconds(lat, lon):
+    """Décalage UTC -> heure locale (secondes) pour ces coordonnées, via
+    Open-Meteo (`timezone=auto`). Sonde volontairement minimale (un jour de
+    prévision, dont on ne lit que l'en-tête) plutôt qu'un paramètre de la
+    requête d'archive : elle sert AUSSI au chemin PVGIS TMY, qui n'expose aucune
+    notion de fuseau.
+
+    Décalage FIXE, sans changement d'heure — vérifié en réel le 2026-08-09 :
+    Open-Meteo renvoie le même `utc_offset_seconds` (+7200 pour Paris) que la
+    période demandée soit en janvier ou en juillet, et une série d'un an
+    complet compte 8784 heures continues, sans journée de 23 h ni de 25 h. Une
+    vraie heure civile imposerait un mapping lat/lon -> fuseau (dépendance
+    supplémentaire) et casserait l'hypothèse d'un planning à 24 créneaux deux
+    fois par an, pour une heure d'écart — arbitrage tranché avec l'utilisateur
+    (voir to_do.md, Lot AB4).
+
+    Conséquence à connaître : la valeur renvoyée est le décalage en vigueur
+    AUJOURD'HUI à cet endroit, pas à la date de la série. Demandée en août pour
+    Paris, elle vaut +2 (heure d'été) ; une série de janvier est donc étiquetée
+    une heure en avance sur l'heure civile de l'époque. L'écart reste borné à
+    une heure sur la moitié de l'année, contre une à deux heures EN PERMANENCE
+    avant ce lot — et le champ reste modifiable pour qui veut trancher
+    autrement.
+
+    Best-effort : retourne None en cas d'échec, l'appelant retombant sur UTC
+    plutôt que d'annuler toute la récupération météo pour ça."""
+    try:
+        resp = _get_with_retry(OPEN_METEO_FORECAST_URL, {
+            'latitude': lat, 'longitude': lon, 'timezone': 'auto', 'forecast_days': 1,
+        })
+        offset = resp.json().get('utc_offset_seconds')
+    except (requests.RequestException, ValueError, AttributeError):
+        return None
+    return int(offset) if isinstance(offset, (int, float)) else None
+
+
+def _hour_index_from(dt_utc, first_local_date, utc_offset_seconds):
+    """(date locale de référence, heure absolue locale) — `hour_index` est en
+    heure LOCALE depuis le Lot AB4, pour qu'un profil d'occupation « 7 h - 19 h »
+    veuille bien dire 7 h - 19 h à l'horloge de l'utilisateur. La position
+    solaire, elle, reste calculée sur dt_utc : c'est un instant physique, il ne
+    se décale pas."""
+    dt_local = dt_utc + timedelta(seconds=utc_offset_seconds)
+    if first_local_date is None:
+        first_local_date = dt_local.date()
+    return first_local_date, (dt_local.date() - first_local_date).days * 24 + dt_local.hour
 
 
 # ── Position solaire réelle ─────────────────────────────────────────────────────
@@ -220,7 +273,7 @@ def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg
     }
 
 
-def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
+def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0, utc_offset_seconds=0):
     """Partie pure (testable sans réseau) : transforme la réponse JSON brute
     d'Open-Meteo Archive en liste de dicts {t_ext, sun_azimuth, sun_elevation,
     e_dir, e_dif, wind_m_s} prête pour BuildingWeatherPointSerializer."""
@@ -262,9 +315,9 @@ def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
         # hour_index dérivé de la DATE de la ligne, jamais de sa position :
         # c'est ce qui le rend insensible aux heures sautées juste au-dessus,
         # y compris si une journée entière manque (l'écart de dates la compte).
-        if first_date is None:
-            first_date = dt_utc.date()
-        hour_index = (dt_utc.date() - first_date).days * 24 + dt_utc.hour
+        # En heure LOCALE depuis le Lot AB4 (dt_utc reste l'instant physique
+        # utilisé pour la position solaire).
+        first_date, hour_index = _hour_index_from(dt_utc, first_date, utc_offset_seconds)
         series.append(_enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg,
                                     wind_m_s=wind_m_s, hour_index=hour_index))
 
@@ -274,12 +327,13 @@ def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
     return series, n_missing
 
 
-def build_weather_series(lat, lon, start_date, end_date, north_offset_deg=0.0):
+def build_weather_series(lat, lon, start_date, end_date, north_offset_deg=0.0, utc_offset_seconds=0):
     """Point d'entrée « année réelle datée » — orchestration réseau + assemblage.
     Retourne (series, n_missing) : series prête pour BuildingWeatherPointSerializer,
     n_missing = nombre d'heures ignorées faute de donnée (0 la plupart du temps)."""
     data = fetch_open_meteo_archive(lat, lon, start_date, end_date)
-    return _assemble_weather_series(lat, lon, data, north_offset_deg=north_offset_deg)
+    return _assemble_weather_series(lat, lon, data, north_offset_deg=north_offset_deg,
+                                     utc_offset_seconds=utc_offset_seconds)
 
 
 # ── PVGIS TMY (Lot S — année type) ───────────────────────────────────────────────
@@ -328,7 +382,7 @@ def fetch_pvgis_tmy(lat, lon):
     return data
 
 
-def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
+def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0, utc_offset_seconds=0):
     """Partie pure (testable sans réseau) : transforme la réponse JSON brute de
     PVGIS TMY en liste de dicts {t_ext, sun_azimuth, sun_elevation, e_dir, e_dif,
     wind_m_s} — Gb(n) (irradiance directe normale au rayon) et Gd(h) (irradiance
@@ -355,6 +409,7 @@ def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
     # chronologique (janvier -> décembre) en a.
     day_index = -1
     previous_day = None
+    # Comptage sur la date LOCALE (Lot AB4), cohérent avec l'archive.
     for row in hourly:
         ts = row.get('time(UTC)')
         t_ext = row.get('T2m')
@@ -365,13 +420,14 @@ def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
             continue
 
         dt_utc = _parse_pvgis_timestamp(ts)
-        current_day = (dt_utc.month, dt_utc.day)
+        dt_local = dt_utc + timedelta(seconds=utc_offset_seconds)
+        current_day = (dt_local.month, dt_local.day)
         if current_day != previous_day:
             day_index += 1
             previous_day = current_day
         series.append(_enrich_hour(
             lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg, wind_m_s=row.get('WS10m'),
-            hour_index=day_index * 24 + dt_utc.hour,
+            hour_index=day_index * 24 + dt_local.hour,
         ))
 
     if not series:
@@ -380,16 +436,18 @@ def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
     return series, n_missing
 
 
-def build_tmy_series(lat, lon, north_offset_deg=0.0):
+def build_tmy_series(lat, lon, north_offset_deg=0.0, utc_offset_seconds=0):
     """Point d'entrée « année type » seul (sans repli) — orchestration réseau +
     assemblage PVGIS TMY. Lève WeatherSourceError si la zone n'est pas couverte
     (voir fetch_pvgis_tmy) ; utiliser build_tmy_or_fallback_series pour un repli
     automatique sur une année réelle Open-Meteo Archive."""
     data = fetch_pvgis_tmy(lat, lon)
-    return _assemble_tmy_series(lat, lon, data, north_offset_deg=north_offset_deg)
+    return _assemble_tmy_series(lat, lon, data, north_offset_deg=north_offset_deg,
+                                 utc_offset_seconds=utc_offset_seconds)
 
 
-def build_tmy_or_fallback_series(lat, lon, fallback_start_date, fallback_end_date, north_offset_deg=0.0):
+def build_tmy_or_fallback_series(lat, lon, fallback_start_date, fallback_end_date, north_offset_deg=0.0,
+                                  utc_offset_seconds=0):
     """Point d'entrée principal du Lot S : tente PVGIS TMY (année type,
     statistiquement représentative) en priorité ; si la zone n'est pas couverte
     (ou toute autre erreur PVGIS), replie automatiquement sur une année réelle
@@ -402,11 +460,13 @@ def build_tmy_or_fallback_series(lat, lon, fallback_start_date, fallback_end_dat
     ambiguë, un résultat en kWh/m²/an n'a pas le même sens statistique selon la
     source)."""
     try:
-        series, n_missing = build_tmy_series(lat, lon, north_offset_deg=north_offset_deg)
+        series, n_missing = build_tmy_series(lat, lon, north_offset_deg=north_offset_deg,
+                                             utc_offset_seconds=utc_offset_seconds)
         return series, n_missing, 'pvgis-tmy', None
     except WeatherSourceError as exc:
         series, n_missing = build_weather_series(
             lat, lon, fallback_start_date, fallback_end_date, north_offset_deg=north_offset_deg,
+            utc_offset_seconds=utc_offset_seconds,
         )
         warning = (
             f"PVGIS TMY indisponible pour cette zone ({exc}) — repli sur l'historique réel "

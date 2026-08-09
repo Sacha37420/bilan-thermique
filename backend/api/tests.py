@@ -949,12 +949,20 @@ class TmyFallbackTest(SimpleTestCase):
         ), mock.patch.object(weather_source, 'build_weather_series', return_value=(fake_series, 0)) as m_archive:
             series, n_missing, source, warning = weather_source.build_tmy_or_fallback_series(
                 0.0, -160.0, '2023-01-01', '2023-01-02', north_offset_deg=15.0,
+                utc_offset_seconds=-11 * 3600,
             )
         self.assertEqual(series, fake_series)
         self.assertEqual(source, 'open-meteo-archive')
         self.assertIsNotNone(warning)
         self.assertIn('over the sea', warning)
-        m_archive.assert_called_once_with(0.0, -160.0, '2023-01-01', '2023-01-02', north_offset_deg=15.0)
+        # Assertion volontairement stricte sur la signature complète : le repli
+        # doit transmettre TOUS les paramètres, pas seulement ceux qu'il
+        # connaissait au Lot S. C'est ce qui a fait remonter, au Lot AB4, qu'un
+        # nouveau paramètre devait bien traverser ce chemin-là aussi.
+        m_archive.assert_called_once_with(
+            0.0, -160.0, '2023-01-01', '2023-01-02',
+            north_offset_deg=15.0, utc_offset_seconds=-11 * 3600,
+        )
 
 
 class HourlyPlanningTest(SimpleTestCase):
@@ -2670,3 +2678,99 @@ class GroundSlabCatalogueTest(SimpleTestCase):
             with self.subTest(name=entry['name']):
                 s = serializers.LayerSerializer(data=entry['layers'], many=True)
                 self.assertTrue(s.is_valid(), s.errors)
+
+
+class LocalTimeOffsetTest(SimpleTestCase):
+    """Lot AB4 — `hour_index` en heure LOCALE, pour qu'un profil d'occupation
+    « 7 h - 19 h » veuille dire 7 h - 19 h à l'horloge de l'utilisateur.
+
+    La météo est demandée en UTC (indispensable à la position solaire, qui est
+    un instant physique) ; seul l'étiquetage horaire est décalé. Décalage FIXE,
+    sans changement d'heure : vérifié en réel que Open-Meteo renvoie le même
+    `utc_offset_seconds` en janvier et en juillet, et une année continue de
+    8784 heures — arbitrage tranché avec l'utilisateur (to_do.md, Lot AB4).
+    """
+
+    databases = []
+
+    @staticmethod
+    def _payload(times):
+        n = len(times)
+        return {'hourly': {
+            'time': times, 'temperature_2m': [10.0] * n,
+            'direct_normal_irradiance': [0.0] * n, 'diffuse_radiation': [0.0] * n,
+            'wind_speed_10m': [3.0] * n,
+        }}
+
+    def test_offset_shifts_hour_index(self):
+        times = [f'2024-01-10T{h:02d}:00' for h in range(24)]
+        series, _ = weather_source._assemble_weather_series(
+            48.85, 2.35, self._payload(times), utc_offset_seconds=3600,
+        )
+        # 00:00 UTC = 01:00 locale le même jour -> hour_index part à 1.
+        self.assertEqual(series[0]['hour_index'], 1)
+        # 23:00 UTC = 00:00 locale le LENDEMAIN -> jour 1, heure 0.
+        self.assertEqual(series[-1]['hour_index'], 24)
+        self.assertEqual(series[-1]['hour_index'] % 24, 0)
+
+    def test_zero_offset_is_the_previous_behaviour(self):
+        times = [f'2024-01-10T{h:02d}:00' for h in range(24)]
+        series, _ = weather_source._assemble_weather_series(48.85, 2.35, self._payload(times))
+        self.assertEqual([p['hour_index'] for p in series], list(range(24)))
+
+    def test_negative_offset_never_produces_a_negative_index(self):
+        """Fuseau très à l'ouest : la première heure locale tombe la veille. Le
+        jour 0 est celui du PREMIER point, donc hour_index reste positif — sans
+        quoi le serializer (min_value=0) rejetterait la série."""
+        times = [f'2024-01-10T{h:02d}:00' for h in range(24)]
+        series, _ = weather_source._assemble_weather_series(
+            48.85, 2.35, self._payload(times), utc_offset_seconds=-8 * 3600,
+        )
+        self.assertTrue(all(p['hour_index'] >= 0 for p in series))
+        self.assertEqual(series[0]['hour_index'], 16)  # 00:00 UTC -> 16:00 la veille
+
+    def test_solar_position_is_untouched_by_the_offset(self):
+        """Le point clé : décaler l'étiquette horaire ne doit RIEN changer à la
+        position du soleil, qui est un instant physique. Sans quoi on
+        corrigerait un confort d'usage en cassant la physique."""
+        times = [f'2024-06-21T{h:02d}:00' for h in range(24)]
+        utc, local = (weather_source._assemble_weather_series(
+            48.85, 2.35, self._payload(times), utc_offset_seconds=off,
+        )[0] for off in (0, 2 * 3600))
+        for a, b in zip(utc, local):
+            self.assertAlmostEqual(a['sun_elevation'], b['sun_elevation'], places=12)
+            self.assertAlmostEqual(a['sun_azimuth'], b['sun_azimuth'], places=12)
+
+    def test_full_year_stays_within_serializer_bounds(self):
+        """Un décalage positif reporte les dernières heures sur un jour de plus :
+        la borne haute du serializer doit l'accepter (8807 et non 8783)."""
+        times = [f'2024-{m:02d}-{d:02d}T{h:02d}:00'
+                 for m, d in ((1, 1), (12, 31)) for h in range(24)]
+        series, _ = weather_source._assemble_weather_series(
+            48.85, 2.35, self._payload(times), utc_offset_seconds=2 * 3600,
+        )
+        field = serializers.BuildingWeatherPointSerializer().fields['hour_index']
+        biggest = max(p['hour_index'] for p in series)
+        self.assertLessEqual(biggest, field.max_value)
+
+    def test_tmy_offset_applies_too(self):
+        rows = [{'time(UTC)': f'20110101:{h:02d}00', 'T2m': 5.0, 'Gb(n)': 0.0,
+                 'Gd(h)': 0.0, 'WS10m': 2.0} for h in range(24)]
+        series, _ = weather_source._assemble_tmy_series(
+            48.85, 2.35, {'outputs': {'tmy_hourly': rows}}, utc_offset_seconds=3600,
+        )
+        self.assertEqual(series[0]['hour_index'], 1)
+        self.assertEqual(series[-1]['hour_index'], 24)
+
+    def test_fetch_request_accepts_and_defaults_the_offset(self):
+        base = {'lat': 48.85, 'lon': 2.35, 'start_date': '2024-01-01', 'end_date': '2024-01-02'}
+        s = serializers.WeatherFetchRequestSerializer(data=base)
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertIsNone(s.validated_data['utc_offset_h'])  # None = détection auto
+
+        s = serializers.WeatherFetchRequestSerializer(data={**base, 'utc_offset_h': 5.5})
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertEqual(s.validated_data['utc_offset_h'], 5.5)
+
+        s = serializers.WeatherFetchRequestSerializer(data={**base, 'utc_offset_h': 20})
+        self.assertFalse(s.is_valid())
