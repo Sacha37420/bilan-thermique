@@ -210,6 +210,14 @@ def generate_environment_for_building(self, job_id, building_id, radius_m, terra
     try:
         job.set_state(status=Job.RUNNING, progress=0, message=stage_messages['bbox'])
         building = Building.objects.get(pk=building_id)
+
+        # Altitude des obstacles sans altitude propre (végétation, bâtiments OSM)
+        # — injectée plutôt qu'importée : api.elevation importe déjà api.geodata,
+        # l'inverse créerait un cycle. Best-effort : geodata retombe sur 0 avec un
+        # avertissement si l'appel échoue.
+        def elevation_lookup(points):
+            return elevation.fetch_elevations(points)[0]
+
         result = geodata.generate_environment_mesh(
             building.georef_lat, building.georef_lon, radius_m, progress_cb=progress_cb,
             north_offset_deg=building.georef_north_offset_deg, ground_z_ref=building.georef_ground_z,
@@ -218,6 +226,7 @@ def generate_environment_for_building(self, job_id, building_id, radius_m, terra
             # d'empreinte. Seule cette tâche-ci le fait : generate_environment
             # (page Environnement, autonome) n'a aucun bâtiment de référence.
             self_envelope=building.envelope,
+            elevation_lookup=elevation_lookup,
         )
 
         vertices = result['vertices']
@@ -243,6 +252,7 @@ def generate_environment_for_building(self, job_id, building_id, radius_m, terra
                     north_offset_deg=building.georef_north_offset_deg,
                     ground_z_ref=building.georef_ground_z,
                     self_footprint=self_footprint,
+                    elevation_lookup=elevation_lookup,
                 )
                 warnings.extend(veg['warnings'])
                 veg_stats = veg['stats']

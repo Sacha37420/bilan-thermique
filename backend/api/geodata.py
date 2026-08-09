@@ -133,6 +133,55 @@ def _request_with_retry(method, url, retries=1, backoff_s=2.0, **kwargs):
     raise last_exc
 
 
+def resolve_base_z(items, ground_z_ref, elevation_lookup, warnings=None,
+                    label="obstacles"):
+    """Altitude de base (Z local) de chaque élément, dans le repère du bâtiment.
+
+    Trois sources, dans cet ordre : l'altitude portée par la donnée elle-même
+    (`base_z` — seule BD TOPO en fournit une, via `altitude_minimale_sol`), sinon
+    une interrogation d'altimétrie sur le point de l'élément, sinon 0.
+
+    Sans cette résolution, un élément sans altitude propre se retrouve posé au
+    niveau 0 du bâtiment étudié pendant que les bâtiments IGN, eux, suivent le
+    relief réel : sur un site en pente, les uns flottent ou s'enterrent par
+    rapport aux autres. C'était le cas de TOUTE la végétation et de tous les
+    bâtiments OpenStreetMap (constaté à l'usage, 2026-08-09).
+
+    elevation_lookup : callable([(lat, lon), ...]) -> [altitude_m, ...], injecté
+    par l'appelant — `api.elevation` importe déjà ce module, l'importer en retour
+    créerait un cycle. Absent ou en échec : repli sur 0, avec un avertissement,
+    plutôt que de perdre les obstacles.
+    """
+    base = [0.0] * len(items)
+    missing = []
+    for i, item in enumerate(items):
+        if item.get('base_z') is not None:
+            base[i] = item['base_z'] - (ground_z_ref or 0.0)
+        else:
+            missing.append(i)
+
+    if not missing or elevation_lookup is None:
+        if missing and warnings is not None:
+            warnings.append(
+                f"{len(missing)} {label} sans altitude propre, posé(s) au niveau du bâtiment "
+                "— sur un terrain en pente, leur hauteur relative est approximative."
+            )
+        return base
+
+    try:
+        altitudes = elevation_lookup([items[i]['point_latlon'] for i in missing])
+    except Exception as exc:  # noqa: BLE001 — best-effort par conception
+        if warnings is not None:
+            warnings.append(
+                f"Altitude des {label} indisponible ({exc}) — posé(s) au niveau du bâtiment."
+            )
+        return base
+
+    for i, alt in zip(missing, altitudes):
+        base[i] = alt - (ground_z_ref or 0.0)
+    return base
+
+
 def _footprint_center(footprint_latlon):
     lat = sum(p[0] for p in footprint_latlon) / len(footprint_latlon)
     lon = sum(p[1] for p in footprint_latlon) / len(footprint_latlon)
@@ -481,7 +530,7 @@ def _is_studied_building(footprint_xy, self_polygon):
 
 def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
                                north_offset_deg=0.0, ground_z_ref=None,
-                               self_envelope=None):
+                               self_envelope=None, elevation_lookup=None):
     """Orchestrateur principal. progress_cb(stage: str, pct: int) est optionnel (appelé
     par la tâche Celery pour la barre de progression du Job).
 
@@ -552,12 +601,21 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
 
     report('extrude', 60)
     self_polygon = envelope_footprint_polygon(self_envelope)
+
+    # Altitude de base de chaque bâtiment (Lot AA, usage 2) : BD TOPO la porte
+    # (`altitude_minimale_sol`), OpenStreetMap non — sans interrogation
+    # d'altimétrie, tous les bâtiments OSM se retrouvaient posés au niveau 0.
+    for b in buildings:
+        b['point_latlon'] = _footprint_center(b['footprint_latlon'])
+    base_z_by_building = resolve_base_z(
+        buildings, ground_z_ref, elevation_lookup, warnings, label="bâtiment(s)",
+    )
     vertices = []
     triangles = []
     n_approx_height = 0
     n_self = 0
     processed = 0
-    for b in buildings:
+    for b_index, b in enumerate(buildings):
         footprint_xy = [
             _rotate_xy(*local_xy(plat, plon, lat, lon), north_offset_deg)
             for plat, plon in b['footprint_latlon']
@@ -575,13 +633,7 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
             continue
         if len(vertices) + len(v) > geometry.MAX_VERTICES or len(triangles) + len(f) > geometry.MAX_TRIANGLES:
             break
-        # Sans ground_z_ref (génération autonome, non attachée à un Building), on
-        # garde le comportement d'origine : altitude réelle telle quelle si connue
-        # (IGN), 0 sinon. Avec ground_z_ref, on la recale sur le Z=0 du bâtiment.
-        if b.get('base_z') is not None:
-            base_z = b['base_z'] - (ground_z_ref or 0.0)
-        else:
-            base_z = 0.0
+        base_z = base_z_by_building[b_index]
         offset = len(vertices)
         vertices.extend([vx, vy, vz + base_z] for vx, vy, vz in v)
         triangles.extend({'v': [i0 + offset, i1 + offset, i2 + offset]} for i0, i1, i2 in f)
@@ -796,7 +848,7 @@ def _regular_polygon_xy(cx, cy, radius_m, sides=TREE_CROWN_SIDES):
 
 
 def generate_vegetation_mesh(lat, lon, radius_m, north_offset_deg=0.0, ground_z_ref=None,
-                              self_footprint=None):
+                              self_footprint=None, elevation_lookup=None):
     """Maillage de végétation dans le repère local d'un bâtiment géoréférencé.
 
     Retourne {'vertices', 'triangles', 'warnings', 'stats'} — chaque triangle
@@ -835,19 +887,36 @@ def generate_vegetation_mesh(lat, lon, radius_m, north_offset_deg=0.0, ground_z_
     objects = []
     for zone in zones:
         clat, clon = _footprint_center(zone['footprint_latlon'])
+        zone['point_latlon'] = (clat, clon)
         x, y = local_xy(clat, clon, lat, lon)
         objects.append((math.hypot(x, y), 'zone', zone))
     for tree in trees:
+        tree['point_latlon'] = (tree['lat'], tree['lon'])
         x, y = local_xy(tree['lat'], tree['lon'], lat, lon)
         objects.append((math.hypot(x, y), 'tree', tree))
     objects.sort(key=lambda o: o[0])
+
+    # Altitude de base (Lot AA / correctif du 2026-08-09) : ni la couche IGN
+    # `zone_de_vegetation` ni OpenStreetMap ne portent d'altitude, alors que les
+    # bâtiments BD TOPO en ont une. Toute la végétation se retrouvait donc posée
+    # au niveau 0 pendant que les bâtiments suivaient le relief — signalé à
+    # l'usage. Résolu par altimétrie, comme pour les bâtiments OSM. Le plafond
+    # est appliqué AVANT, pour n'interroger l'altimétrie que sur ce qu'on garde.
+    kept = [item for _d, _k, item in objects[:MAX_VEGETATION_OBJECTS]]
+    base_z_by_object = resolve_base_z(
+        kept, ground_z_ref, elevation_lookup, warnings, label="élément(s) de végétation",
+    )
 
     vertices, triangles = [], []
     transmittances = []
     n_used = 0
     n_skipped = 0
-    for _dist, kind, item in objects:
-        if n_used >= MAX_VEGETATION_OBJECTS:
+    for obj_rank, (_dist, kind, item) in enumerate(objects):
+        # Au-delà des MAX_VEGETATION_OBJECTS premiers, aucune altitude n'a été
+        # résolue (on n'interroge l'altimétrie que sur ce qu'on garde) : borne
+        # sur obj_rank et non sur n_used, sinon un objet écarté plus bas
+        # (recouvrement, empreinte dégénérée) décalerait l'indexation.
+        if obj_rank >= len(base_z_by_object):
             n_skipped += 1
             continue
         if kind == 'zone':
@@ -876,7 +945,7 @@ def generate_vegetation_mesh(lat, lon, radius_m, north_offset_deg=0.0, ground_z_
             n_skipped += 1
             break
 
-        base_z = -(ground_z_ref or 0.0) * 0.0  # végétation posée sur le sol local (z = 0)
+        base_z = base_z_by_object[obj_rank]
         offset = len(vertices)
         obj_index = len(transmittances)
         vertices.extend([vx, vy, vz + base_z] for vx, vy, vz in v)

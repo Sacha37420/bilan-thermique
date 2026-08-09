@@ -3006,3 +3006,87 @@ class VegetationOccluderTest(SimpleTestCase):
         rise_veg = t_veg - 20.0
         self.assertGreater(rise_free, 0.0)
         self.assertAlmostEqual(rise_veg / rise_free, 0.25, places=2)
+
+
+class BaseAltitudeResolutionTest(SimpleTestCase):
+    """Correctif du 2026-08-09 — tous les obstacles doivent partager la MÊME
+    référence d'altitude que le bâtiment étudié.
+
+    Seule la BD TOPO porte une altitude par bâtiment (`altitude_minimale_sol`) :
+    la végétation (IGN comme OSM) et les bâtiments OpenStreetMap n'en ont
+    aucune, et se retrouvaient donc posés au niveau 0 du bâtiment étudié pendant
+    que les bâtiments IGN suivaient le relief réel. Sur un site en pente, les uns
+    flottaient ou s'enterraient par rapport aux autres — signalé à l'usage.
+    """
+
+    databases = []
+
+    def test_uses_the_altitude_carried_by_the_data(self):
+        items = [{'base_z': 112.0, 'point_latlon': (47.9, 1.68)}]
+        base = geodata.resolve_base_z(items, ground_z_ref=106.9, elevation_lookup=None)
+        self.assertAlmostEqual(base[0], 5.1, places=6)
+
+    def test_falls_back_to_elevation_lookup(self):
+        """Sans altitude propre, on interroge l'altimétrie — et on la ramène au
+        repère local du bâtiment."""
+        called = []
+
+        def lookup(points):
+            called.append(list(points))
+            return [120.0, 130.0]
+
+        items = [{'point_latlon': (47.9, 1.68)}, {'point_latlon': (47.91, 1.69)}]
+        base = geodata.resolve_base_z(items, ground_z_ref=110.0, elevation_lookup=lookup)
+        self.assertEqual(called, [[(47.9, 1.68), (47.91, 1.69)]])
+        self.assertAlmostEqual(base[0], 10.0, places=6)
+        self.assertAlmostEqual(base[1], 20.0, places=6)
+
+    def test_lookup_is_only_asked_for_what_it_needs(self):
+        """Un mélange BD TOPO / OSM ne doit interroger l'altimétrie que pour les
+        éléments qui n'ont pas d'altitude — pas pour toute la liste."""
+        asked = []
+
+        def lookup(points):
+            asked.extend(points)
+            return [200.0] * len(points)
+
+        items = [
+            {'base_z': 100.0, 'point_latlon': (1.0, 1.0)},
+            {'point_latlon': (2.0, 2.0)},
+            {'base_z': 105.0, 'point_latlon': (3.0, 3.0)},
+        ]
+        base = geodata.resolve_base_z(items, ground_z_ref=100.0, elevation_lookup=lookup)
+        self.assertEqual(asked, [(2.0, 2.0)])
+        self.assertAlmostEqual(base[0], 0.0, places=6)
+        self.assertAlmostEqual(base[1], 100.0, places=6)
+        self.assertAlmostEqual(base[2], 5.0, places=6)
+
+    def test_lookup_failure_falls_back_without_losing_obstacles(self):
+        """Best-effort : une panne d'altimétrie ne doit pas faire perdre les
+        obstacles, seulement les poser au niveau du bâtiment avec un
+        avertissement."""
+        def boom(_points):
+            raise RuntimeError("altimétrie indisponible")
+
+        warnings = []
+        items = [{'point_latlon': (47.9, 1.68)}]
+        base = geodata.resolve_base_z(items, 100.0, boom, warnings, label="arbres")
+        self.assertEqual(base, [0.0])
+        self.assertTrue(any('altimétrie indisponible' in w for w in warnings))
+
+    def test_no_lookup_available_warns(self):
+        warnings = []
+        geodata.resolve_base_z([{'point_latlon': (1.0, 1.0)}], 0.0, None, warnings, label="arbres")
+        self.assertTrue(any('sans altitude propre' in w for w in warnings))
+
+    def test_vegetation_and_buildings_share_the_same_reference(self):
+        """Le cœur du correctif : sur un terrain à 150 m, un arbre et un bâtiment
+        situés au même endroit doivent recevoir la MÊME altitude de base."""
+        ground_z_ref = 145.0
+        terrain_altitude = 150.0
+        building = [{'base_z': terrain_altitude, 'point_latlon': (45.9, 6.13)}]
+        tree = [{'point_latlon': (45.9, 6.13)}]
+        b = geodata.resolve_base_z(building, ground_z_ref, None)
+        t = geodata.resolve_base_z(tree, ground_z_ref, lambda pts: [terrain_altitude] * len(pts))
+        self.assertAlmostEqual(b[0], t[0], places=6)
+        self.assertAlmostEqual(t[0], 5.0, places=6)
