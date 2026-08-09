@@ -127,3 +127,82 @@ export function computeThermostatSetpoints(
     return setpointsFor(profile, isWeekend, isVacation, hourOfDay);
   });
 }
+
+// ── Vacances scolaires françaises (Lot AF) ──────────────────────────────────
+// Sans elles, `vacances: []` laisse la branche « hors gel vacances » de
+// setpointsFor() inerte — et comme le hors-gel du week-end est commun au
+// scolaire et au tertiaire, les deux profils rendaient EXACTEMENT le même
+// résultat. Le seul trait qui distingue un bâtiment scolaire ne servait à rien.
+//
+// Dates TYPIQUES (calendrier 2024-2025 pris comme représentatif), pas les dates
+// d'une année précise : elles glissent de quelques jours chaque année, et le
+// mode simplifié travaille de toute façon sur une ANNÉE TYPE météo, qui n'a pas
+// de millésime. Même statut assumé que le catalogue de parois.
+export type SchoolZone = 'A' | 'B' | 'C';
+
+interface DateRange { from: [number, number]; to: [number, number]; }  // [mois, jour]
+
+const HOLIDAYS_ALL_ZONES: DateRange[] = [
+  { from: [10, 19], to: [11, 3] },   // Toussaint
+  { from: [12, 21], to: [1, 5] },    // Noël — chevauche le 1er janvier
+  { from: [7, 5], to: [8, 31] },     // Été
+];
+
+const HOLIDAYS_BY_ZONE: Record<SchoolZone, DateRange[]> = {
+  A: [{ from: [2, 22], to: [3, 9] }, { from: [4, 19], to: [5, 4] }],
+  B: [{ from: [2, 8], to: [2, 23] }, { from: [4, 5], to: [4, 20] }],
+  C: [{ from: [2, 15], to: [3, 2] }, { from: [4, 12], to: [4, 27] }],
+};
+
+export const SCHOOL_ZONES: { id: SchoolZone; label: string }[] = [
+  { id: 'A', label: 'Zone A (Besançon, Bordeaux, Clermont-Ferrand, Dijon, Grenoble, Limoges, Lyon, Poitiers)' },
+  { id: 'B', label: 'Zone B (Aix-Marseille, Amiens, Lille, Nancy-Metz, Nantes, Nice, Normandie, Orléans-Tours, Reims, Rennes, Strasbourg)' },
+  { id: 'C', label: 'Zone C (Créteil, Montpellier, Paris, Toulouse, Versailles)' },
+];
+
+/** Jour de l'année (1-365) d'un couple [mois, jour], année non bissextile —
+ * le 29 février n'a pas de sens sur une année type. */
+function dayOfYear(month: number, day: number): number {
+  const cumulative = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+  return cumulative[month - 1] + day;
+}
+
+/** Ensemble des jours de l'année en vacances, pour une zone donnée. */
+function holidayDaysOfYear(zone: SchoolZone): Set<number> {
+  const days = new Set<number>();
+  for (const range of [...HOLIDAYS_ALL_ZONES, ...HOLIDAYS_BY_ZONE[zone]]) {
+    const from = dayOfYear(range.from[0], range.from[1]);
+    const to = dayOfYear(range.to[0], range.to[1]);
+    // Une plage qui « passe » le 1er janvier (Noël) enjambe la fin de l'année :
+    // on la parcourt modulo 365 plutôt que de la couper à la main.
+    const length = ((to - from + 365) % 365) + 1;
+    for (let i = 0; i < length; i++) days.add(((from - 1 + i) % 365) + 1);
+  }
+  return days;
+}
+
+/** Plages de vacances exprimées en INDICE DE JOUR relatif au début du run —
+ * l'unité qu'attend OccupationCalendar, qui ne connaît aucune date réelle
+ * (décision du Lot V, conservée).
+ *
+ * `startDayOfYear` : jour de l'année du premier point météo (1 pour une année
+ * type PVGIS, qui commence au 1er janvier). Les plages sont recalculées dans ce
+ * repère, ce qui gère aussi bien un run d'un an complet qu'une période courte. */
+export function schoolHolidayRanges(
+  zone: SchoolZone, startDayOfYear: number, nDays: number,
+): { debut: number; fin: number }[] {
+  const holidays = holidayDaysOfYear(zone);
+  const ranges: { debut: number; fin: number }[] = [];
+  let open: number | null = null;
+  for (let i = 0; i < nDays; i++) {
+    const doy = ((startDayOfYear - 1 + i) % 365) + 1;
+    if (holidays.has(doy)) {
+      if (open === null) open = i;
+    } else if (open !== null) {
+      ranges.push({ debut: open, fin: i - 1 });
+      open = null;
+    }
+  }
+  if (open !== null) ranges.push({ debut: open, fin: nDays - 1 });
+  return ranges;
+}

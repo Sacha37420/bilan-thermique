@@ -9,7 +9,8 @@ import { BuildingSearchComponent } from '../../components/building-search/buildi
 import { VENTILATION_PROFILES, VentilationProfile } from '../../core/ventilation-profiles';
 import {
   USAGE_PROFILES, UsageProfile, UsageProfileId,
-  defaultOccupationCalendar, computeThermostatSetpoints,
+  defaultOccupationCalendar, computeThermostatSetpoints, schoolHolidayRanges,
+  SCHOOL_ZONES, SchoolZone,
 } from '../../core/usage-profiles';
 import { Job } from '../../core/building.types';
 
@@ -437,6 +438,15 @@ export class ModeSimplifieComponent implements OnInit {
   // ══ Étape 5 — Météo et calcul ═════════════════════════════════════════════
   usageProfiles = USAGE_PROFILES;
   selectedUsageProfileId: UsageProfileId = 'habitation';
+  schoolZones = SCHOOL_ZONES;
+  selectedZone: SchoolZone = 'C';
+
+  /** Vrai pour les deux profils scolaires : eux seuls traitent les vacances en
+   * hors-gel (le tertiaire ignore le calendrier scolaire — cadrage tranché au
+   * Lot V). C'est donc la seule situation où la zone de vacances a un effet. */
+  get usesSchoolHolidays(): boolean {
+    return this.selectedUsageProfile?.vacancesHorsGel === true;
+  }
   calcBusy = signal(false);
   calcStatus = signal('');
   calcError = signal('');
@@ -502,10 +512,16 @@ export class ModeSimplifieComponent implements OnInit {
     this.calcStatus.set('Simulation heure par heure…');
     const profile = this.selectedUsageProfile!;
     const volume = this.estimatedVolumeM3 ?? 250;
-    const setpoints = computeThermostatSetpoints(
-      profile, defaultOccupationCalendar(),
-      weather.map((w, i) => (w['hour_index'] as number | undefined) ?? i),
-    );
+    const absoluteHours = weather.map((w, i) => (w['hour_index'] as number | undefined) ?? i);
+    const calendar = defaultOccupationCalendar();
+    if (this.usesSchoolHolidays) {
+      // L'année type PVGIS commence au 1er janvier : le premier jour du run est
+      // donc le jour 1 de l'année, et les plages se posent directement.
+      const nDays = Math.ceil((Math.max(...absoluteHours) + 1) / 24);
+      calendar.vacances = schoolHolidayRanges(this.selectedZone, 1, nDays);
+      calendar.jourDebut = 0;  // le 1er janvier d'une année type n'a pas de jour réel
+    }
+    const setpoints = computeThermostatSetpoints(profile, calendar, absoluteHours);
 
     this.api.runBuildingCalcul(buildingId, {
       dx_max: 0.02,

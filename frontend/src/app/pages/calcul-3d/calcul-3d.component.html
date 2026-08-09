@@ -260,7 +260,27 @@
           }
           <div class="weather-actions">
             <button type="button" class="btn-secondary" (click)="addVacanceRange()">+ Ajouter une plage de vacances</button>
+            @if (usesSchoolHolidays) {
+              <label class="inline-label">
+                <span>Zone</span>
+                <select [(ngModel)]="selectedZone" name="selectedZone">
+                  @for (z of schoolZones; track z.id) {
+                    <option [ngValue]="z.id">Zone {{ z.id }}</option>
+                  }
+                </select>
+              </label>
+              <button type="button" class="btn-secondary" (click)="loadSchoolHolidays()">
+                Charger les vacances scolaires
+              </button>
+            }
           </div>
+          @if (usesSchoolHolidays && occupationCalendar.vacances.length === 0) {
+            <p class="hint">
+              Aucune plage de vacances : le profil scolaire se comportera <strong>exactement comme
+              un tertiaire</strong> (seul le hors-gel du week-end les distingue). Chargez-les
+              ci-dessus ou saisissez-les à la main.
+            </p>
+          }
 
           <div class="weather-actions">
             <button type="button" class="btn-primary" (click)="generateThermostatCalendar()" [disabled]="weather().length === 0">

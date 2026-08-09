@@ -8,7 +8,8 @@ import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.co
 import { VENTILATION_PROFILES } from '../../core/ventilation-profiles';
 import {
   USAGE_PROFILES, UsageProfile, UsageProfileId, OccupationCalendar,
-  defaultOccupationCalendar, computeThermostatSetpoints,
+  defaultOccupationCalendar, computeThermostatSetpoints, schoolHolidayRanges,
+  SCHOOL_ZONES, SchoolZone,
 } from '../../core/usage-profiles';
 
 interface BuildingSummary {
@@ -146,6 +147,29 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   usageProfiles = USAGE_PROFILES;
   selectedUsageProfileId: UsageProfileId | null = null;
   occupationCalendar: OccupationCalendar = defaultOccupationCalendar();
+  schoolZones = SCHOOL_ZONES;
+  selectedZone: SchoolZone = 'C';
+
+  /** Seuls les profils scolaires traitent les vacances en hors-gel : proposer
+   * de les charger ailleurs laisserait croire à un effet inexistant. */
+  get usesSchoolHolidays(): boolean {
+    return this.selectedUsageProfile?.vacancesHorsGel === true;
+  }
+
+  /** Remplace les plages saisies par les vacances scolaires usuelles de la zone,
+   * converties dans l'unité du calendrier (indice de jour depuis le début de la
+   * série). Les saisir une par une était possible mais demandait de connaître
+   * les dates ET de les convertir en numéros de jour. */
+  loadSchoolHolidays(): void {
+    const start = new Date(`${this.weatherFetchStart}T00:00:00Z`);
+    const startDayOfYear = Number.isNaN(start.getTime())
+      ? 1
+      : Math.floor((start.getTime() - Date.UTC(start.getUTCFullYear(), 0, 0)) / 86400000);
+    const nHours = this.weather().length || 8760;
+    this.occupationCalendar.vacances = schoolHolidayRanges(
+      this.selectedZone, startDayOfYear, Math.ceil(nHours / 24),
+    );
+  }
   readonly joursSemaine = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
   thermostatSetpoints = signal<{ t_min: number; t_max: number }[] | null>(null);
 

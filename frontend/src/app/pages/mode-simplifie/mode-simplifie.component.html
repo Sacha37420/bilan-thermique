@@ -251,7 +251,7 @@
       @if (step() === 'calcul') {
         <div class="field-grid">
           <label>
-            <span>Usage du bâtiment</span>
+            <span>Régime d'occupation</span>
             <select [(ngModel)]="selectedUsageProfileId" name="selectedUsageProfileId">
               @for (p of usageProfiles; track p.id) {
                 <option [ngValue]="p.id">{{ p.label }}</option>
@@ -259,8 +259,32 @@
             </select>
           </label>
         </div>
+        <p class="hint">
+          Ce réglage fixe les <strong>consignes de chauffage et de climatisation heure par
+          heure</strong> : température visée en journée, repli la nuit, et mise hors gel quand le
+          bâtiment est fermé. C'est ce qui distingue une maison occupée en continu d'une école vide
+          le week-end et pendant les vacances.
+        </p>
         @if (selectedUsageProfile; as prof) {
           <p class="hint">{{ prof.description }}</p>
+        }
+        @if (usesSchoolHolidays) {
+          <div class="field-grid">
+            <label>
+              <span>Zone de vacances scolaires</span>
+              <select [(ngModel)]="selectedZone" name="selectedZone">
+                @for (z of schoolZones; track z.id) {
+                  <option [ngValue]="z.id">{{ z.label }}</option>
+                }
+              </select>
+              <small>
+                Les vacances scolaires françaises usuelles (Toussaint, Noël, hiver, printemps, été)
+                sont appliquées en hors gel. Dates typiques et non celles d'une année précise :
+                elles glissent de quelques jours d'une année à l'autre, et l'année type météo
+                utilisée ici n'a de toute façon pas de millésime.
+              </small>
+            </label>
+          </div>
         }
         <p class="hint">
           Choisi pour vous : <strong>année type PVGIS</strong> aux coordonnées du bâtiment
