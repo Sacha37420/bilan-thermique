@@ -417,9 +417,22 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
                              environment_envelope=None, progress_cb=None, paroi_frame_by_id=None):
     """payload : {dx_max, h_e, h_e_dynamic?, interior: {mode, h_i?, h_i_auto?, c_air_int,
     t_int?, t_min?, t_max?, debit_vent_m3h?, eta_recup_vent?, apports_internes_w?}, t_init,
-    weather: [{t_ext, sun_azimuth, sun_elevation, e_dir, e_dif, wind_m_s?}, ...],
+    weather: [{t_ext, sun_azimuth, sun_elevation, e_dir, e_dif, wind_m_s?, t_min?, t_max?}, ...],
     shadow_mode: 'precomputed' | 'realtime' (défaut 'precomputed')} — h_e_dynamic/h_i_auto :
     voir plus bas (Lot R).
+
+    weather[h].t_min/t_max (optionnels, mode 'thermostat' uniquement — Lot V,
+    calendrier d'occupation) : consignes de CETTE heure, remplacent
+    interior.t_min/t_max (qui restent le repli pour toute heure sans
+    surcharge). Résolus côté client à partir d'un profil d'usage (scolaire,
+    tertiaire, habitation — climatisés ou non) et d'un calendrier
+    (jour de la semaine du premier point, jours ouvrés, plages de vacances) —
+    aucune notion de date calendaire réelle côté serveur, qui reçoit
+    simplement deux nombres optionnels par heure. Sans incidence sur la
+    factorisation (contrairement à g_vent/h_e/volets_fermes) : t_min/t_max
+    n'entrent jamais dans K, seulement dans le choix du second membre à
+    chaque heure (voir la boucle horaire) — donc pas de nouvelle combinaison
+    à mettre en cache.
 
     paroi_frame_by_id (Lot I, optionnel) : {paroi_model_id: (frame_u, frame_fraction)} pour
     les seuls modèles de paroi qui ont un cadre (voir ParoiModel.frame_u/frame_fraction —
@@ -653,8 +666,10 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         C_global[air_idx, air_idx] += interior['c_air_int']
         C_global = C_global.tocsc()
         if mode == 'thermostat':
-            t_min = interior['t_min']
-            t_max = interior['t_max']
+            # Constantes de repli — voir plus bas (boucle horaire) pour la
+            # surcharge optionnelle par heure (Lot V, calendrier d'occupation).
+            t_min_constant = interior['t_min']
+            t_max_constant = interior['t_max']
     elif mode != 'imposed':
         raise BuildingSimulationError(f"Mode intérieur inconnu : {mode!r}")
     # mode == 'imposed' : T_air figée par Dirichlet, sans nœud d'air libre — la
@@ -737,6 +752,23 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             T_next = bundle['solver'].solve(b_free)
             hvac = 0.0
         else:  # thermostat
+            # Lot V : t_min/t_max de CETTE heure si le calendrier d'occupation
+            # (résolu côté client à partir d'un profil d'usage) en fournit un
+            # pour ce point météo, sinon repli sur les constantes du run —
+            # sans incidence sur la factorisation (voir plus haut, t_min/t_max
+            # n'entrent jamais dans K, seulement dans le second membre).
+            # ATTENTION : point.get('t_min', repli) est FAUX ici — le serializer
+            # (default=None) rend la clé toujours présente, avec la valeur
+            # None quand rien n'est fourni ; .get() ne retombe alors JAMAIS
+            # sur le repli (piège vérifié en réel avant d'écrire ce code).
+            point_t_min = point.get('t_min')
+            point_t_max = point.get('t_max')
+            t_min = point_t_min if point_t_min is not None else t_min_constant
+            t_max = point_t_max if point_t_max is not None else t_max_constant
+            if t_min >= t_max:
+                raise BuildingSimulationError(
+                    f"Heure {hour_idx} : t_min ({t_min!r}) doit être strictement inférieur à t_max ({t_max!r})."
+                )
             T_candidate = bundle['solver'].solve(b_free)
             air_temp = T_candidate[air_idx]
             if air_temp < t_min:

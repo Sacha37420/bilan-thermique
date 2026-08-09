@@ -6,6 +6,10 @@ import { ApiService } from '../../core/api.service';
 import { Building, Job } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 import { VENTILATION_PROFILES } from '../../core/ventilation-profiles';
+import {
+  USAGE_PROFILES, UsageProfile, UsageProfileId, OccupationCalendar,
+  defaultOccupationCalendar, computeThermostatSetpoints,
+} from '../../core/usage-profiles';
 
 interface BuildingSummary {
   id: number;
@@ -22,6 +26,11 @@ interface WeatherPoint {
   // fetch météo (Open-Meteo/PVGIS) ; requis heure par heure uniquement si
   // h_e dynamique est activé (voir hEDynamic ci-dessous).
   wind_m_s?: number;
+  // Consignes thermostat de cette heure (Lot V, calendrier d'occupation) —
+  // fusionnées à la soumission depuis thermostatSetpoints(), jamais éditées
+  // directement dans le CSV (voir generateThermostatCalendar()).
+  t_min?: number;
+  t_max?: number;
 }
 
 interface PlanningEntry {
@@ -103,6 +112,38 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   tMin = 19;
   tMax = 26;
   tInit = 15;
+
+  // ── Calendrier d'occupation (Lot V, mode thermostat uniquement) — dérive
+  // t_min/t_max PAR HEURE à partir d'un profil d'usage (scolaire, tertiaire,
+  // habitation, climatisés ou non) plutôt que les deux constantes ci-dessus,
+  // qui restent le repli pour toute heure sans consigne générée. Résolu
+  // entièrement côté client (voir core/usage-profiles.ts), fusionné dans la
+  // météo à la soumission uniquement — jamais visible dans le CSV météo.
+  usageProfiles = USAGE_PROFILES;
+  selectedUsageProfileId: UsageProfileId | null = null;
+  occupationCalendar: OccupationCalendar = defaultOccupationCalendar();
+  readonly joursSemaine = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+  thermostatSetpoints = signal<{ t_min: number; t_max: number }[] | null>(null);
+
+  get selectedUsageProfile(): UsageProfile | null {
+    return this.usageProfiles.find(p => p.id === this.selectedUsageProfileId) ?? null;
+  }
+
+  addVacanceRange(): void {
+    this.occupationCalendar.vacances.push({ debut: 0, fin: 0 });
+  }
+
+  removeVacanceRange(index: number): void {
+    this.occupationCalendar.vacances.splice(index, 1);
+  }
+
+  generateThermostatCalendar(): void {
+    const profile = this.selectedUsageProfile;
+    if (!profile || this.weather().length === 0) return;
+    this.thermostatSetpoints.set(
+      computeThermostatSetpoints(profile, this.occupationCalendar, this.heureDebut, this.weather().length),
+    );
+  }
   shadowMode: 'precomputed' | 'realtime' = 'precomputed';
   // Lot K — température de sol constante, utilisée uniquement par les
   // triangles marqués 'ground' (page Bâtiment) ; sans effet sinon.
@@ -286,6 +327,11 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     // les appelants qui SAVENT d'où vient la série (fetch auto, démo) réaffectent
     // le label juste après cet appel, l'écrasant.
     this.weatherSourceLabel.set('');
+    // Lot V : un calendrier de consignes déjà généré n'a de sens que pour la
+    // LONGUEUR de série météo sur laquelle il a été calculé — invalidé à
+    // chaque nouvelle météo plutôt que risquer une fusion décalée au moment
+    // de la soumission.
+    this.thermostatSetpoints.set(null);
     const text = this.weatherRaw.trim();
     if (!text) { this.weather.set([]); return; }
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
@@ -431,9 +477,18 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     }
     if (this.interiorMode === 'thermostat') { interior['t_min'] = this.tMin; interior['t_max'] = this.tMax; }
 
+    // Calendrier d'occupation (Lot V) : fusionne t_min/t_max PAR HEURE dans la
+    // météo envoyée si un calendrier a été généré pour CETTE série météo
+    // exacte (longueur identique — sinon, décalage silencieux, on ignore le
+    // calendrier périmé plutôt que d'envoyer des consignes désalignées).
+    const calendar = this.thermostatSetpoints();
+    const weatherPayload = (this.interiorMode === 'thermostat' && calendar && calendar.length === this.weather().length)
+      ? this.weather().map((w, i) => ({ ...w, t_min: calendar[i].t_min, t_max: calendar[i].t_max }))
+      : this.weather();
+
     const payload: Record<string, unknown> = {
       dx_max: this.dxMax, h_e: this.hE, h_e_dynamic: this.hEDynamic, interior, t_init: this.tInit,
-      weather: this.weather(), shadow_mode: this.shadowMode, t_ground: this.tGround,
+      weather: weatherPayload, shadow_mode: this.shadowMode, t_ground: this.tGround,
     };
     // Planning horaire (Lot Q) : n'est envoyé QUE s'il est actif et complet —
     // sinon comportement inchangé (constantes de `interior` ci-dessus).

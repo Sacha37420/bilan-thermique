@@ -1859,6 +1859,80 @@ class TriangleShadingSerializerTest(SimpleTestCase):
         self.assertFalse(s.validated_data['volets_fermes'])
 
 
+class ThermostatCalendarTest(SimpleTestCase):
+    """Lot V — consignes t_min/t_max variables par heure (calendrier
+    d'occupation résolu côté client à partir d'un profil d'usage : scolaire,
+    tertiaire, habitation, climatisés ou non). Contrairement à g_vent/h_e/
+    volets_fermes, t_min/t_max n'entrent JAMAIS dans K (seulement dans le
+    choix du second membre à chaque heure) — aucun impact sur le cache de
+    bundles, donc aucun risque de la famille des pièges Lots R/J."""
+
+    databases = []
+
+    def _envelope_and_layers(self, area=2.5):
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _single_triangle_envelope(area=area)
+        return envelope, {1: layers}
+
+    def _run(self, envelope, paroi_layers, weather, c_air_int=500.0):
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'thermostat', 'h_i': 8.0, 'c_air_int': c_air_int, 't_min': 19.0, 't_max': 21.0},
+            't_init': 19.0, 'weather': weather,
+        }
+        return building_solver.run_building_simulation(envelope, paroi_layers, None, payload)
+
+    def test_defaults_unchanged_without_per_hour_override(self):
+        # Non-régression : sans aucune surcharge, le comportement doit rester
+        # celui des constantes interior.t_min/t_max — la clim doit s'engager
+        # dès que l'air chaud dépasse t_max=21.
+        envelope, paroi_layers = self._envelope_and_layers()
+        weather = _no_sun_weather_3d([25.0] * 5)
+        result = self._run(envelope, paroi_layers, weather)
+        self.assertGreater(result['cooling_kwh'], 0.0)
+
+    def test_explicit_none_in_weather_point_falls_back_to_constant(self):
+        # Régression DIRECTE du piège trouvé en écrivant ce lot, AVANT tout
+        # bug réel : BuildingWeatherPointSerializer (default=None) rend
+        # 't_min'/'t_max' TOUJOURS présents dans le dict validé, avec la
+        # valeur None si le client n'a rien fourni — point.get('t_min', repli)
+        # ne retombe alors JAMAIS sur le repli (vérifié en réel avant
+        # correction, voir _run_building_simulation). Reproduit ici le dict
+        # EXACT que produirait le serializer, pas juste l'absence de la clé.
+        envelope, paroi_layers = self._envelope_and_layers()
+        weather = [
+            {'t_ext': 25.0, 'sun_azimuth': 0.0, 'sun_elevation': -10.0, 'e_dir': 0.0, 'e_dif': 0.0,
+             'wind_m_s': None, 't_min': None, 't_max': None}
+            for _ in range(5)
+        ]
+        result = self._run(envelope, paroi_layers, weather)
+        self.assertGreater(result['cooling_kwh'], 0.0)
+
+    def test_per_hour_override_suspends_cooling_for_that_hour_only(self):
+        envelope, paroi_layers = self._envelope_and_layers()
+        hours = 10
+        weather_const = _no_sun_weather_3d([25.0] * hours)
+        weather_override = [dict(w) for w in weather_const]
+        weather_override[5]['t_min'] = 19.0
+        weather_override[5]['t_max'] = 100.0  # "hors gel" cette heure précise
+
+        result_const = self._run(envelope, paroi_layers, weather_const)
+        result_override = self._run(envelope, paroi_layers, weather_override)
+
+        # Moins de refroidissement au total (une heure sans clim) et l'air
+        # dépasse librement t_max=21 PENDANT cette heure précise seulement.
+        self.assertLess(result_override['cooling_kwh'], result_const['cooling_kwh'])
+        self.assertGreater(result_override['t_air'][6], 21.0)
+        self.assertAlmostEqual(result_override['t_air'][7], 21.0, places=6)  # reclampé dès l'heure suivante
+
+    def test_invalid_per_hour_bounds_raise(self):
+        envelope, paroi_layers = self._envelope_and_layers()
+        weather = [{'t_ext': 20.0, 'sun_azimuth': 0.0, 'sun_elevation': -10.0, 'e_dir': 0.0, 'e_dif': 0.0,
+                    't_min': 22.0, 't_max': 20.0}]
+        with self.assertRaises(building_solver.BuildingSimulationError):
+            self._run(envelope, paroi_layers, weather)
+
+
 class ExtrudeFootprintGroupedTest(SimpleTestCase):
     """Lot T (mode simplifié) — geodata.extrude_footprint_grouped. Partie pure
     (pas de réseau, contrairement à search_nearby_buildings) : la structure de

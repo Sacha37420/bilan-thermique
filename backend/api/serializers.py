@@ -387,6 +387,15 @@ class BuildingWeatherPointSerializer(serializers.Serializer):
     # constante du payload).
     wind_m_s = serializers.FloatField(required=False, allow_null=True, default=None,
                                        min_value=0.0, max_value=100.0)
+    # Consignes thermostat de CETTE heure (Lot V, calendrier d'occupation) —
+    # optionnelles, remplacent interior.t_min/t_max pour cette heure
+    # uniquement (mode 'thermostat' seulement, sans effet sinon). Résolues
+    # côté client à partir d'un profil d'usage (scolaire/tertiaire/habitation)
+    # — le serveur ne connaît que ces deux nombres, jamais de date calendaire.
+    t_min = serializers.FloatField(required=False, allow_null=True, default=None,
+                                    min_value=-30.0, max_value=50.0)
+    t_max = serializers.FloatField(required=False, allow_null=True, default=None,
+                                    min_value=-30.0, max_value=50.0)
 
 
 class BuildingInteriorSerializer(serializers.Serializer):

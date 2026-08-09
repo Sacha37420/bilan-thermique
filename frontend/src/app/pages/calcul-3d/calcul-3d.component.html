@@ -150,6 +150,80 @@
         }
       </div>
 
+      @if (interiorMode === 'thermostat') {
+        <h3>Calendrier d'occupation (optionnel)</h3>
+        <p class="hint">
+          Dérive T_min/T_max PAR HEURE à partir d'un profil d'usage plutôt que les deux constantes
+          ci-dessus, qui restent le repli pour toute heure sans consigne générée.
+        </p>
+        <div class="field-grid">
+          <label>
+            <span>Profil d'usage</span>
+            <select [(ngModel)]="selectedUsageProfileId" name="selectedUsageProfileId">
+              <option [ngValue]="null">— aucun (constantes ci-dessus) —</option>
+              @for (p of usageProfiles; track p.id) {
+                <option [ngValue]="p.id">{{ p.label }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        @if (selectedUsageProfile) {
+          <p class="hint">{{ selectedUsageProfile.description }}</p>
+
+          <div class="field-grid">
+            <label>
+              <span>Jour de la semaine du premier point météo</span>
+              <select [(ngModel)]="occupationCalendar.jourDebut" name="jourDebut">
+                @for (j of joursSemaine; track j; let i = $index) {
+                  <option [ngValue]="i">{{ j }}</option>
+                }
+              </select>
+            </label>
+          </div>
+
+          <p class="hint">Jours ouvrés (décochés = week-end) :</p>
+          <div class="weather-actions">
+            @for (j of joursSemaine; track j; let i = $index) {
+              <label class="mode-option">
+                <input type="checkbox" [(ngModel)]="occupationCalendar.joursOuvres[i]" name="jourOuvre_{{i}}" />
+                <span>{{ j }}</span>
+              </label>
+            }
+          </div>
+
+          <p class="hint">
+            Plages de vacances (indice de jour depuis le début de la série météo — 0 = premier jour) :
+          </p>
+          @for (v of occupationCalendar.vacances; track $index; let i = $index) {
+            <div class="weather-actions">
+              <label>
+                <span>Jour début</span>
+                <input type="number" step="1" min="0" [(ngModel)]="v.debut" name="vacanceDebut_{{i}}" />
+              </label>
+              <label>
+                <span>Jour fin</span>
+                <input type="number" step="1" min="0" [(ngModel)]="v.fin" name="vacanceFin_{{i}}" />
+              </label>
+              <button type="button" class="btn-secondary" (click)="removeVacanceRange(i)">Retirer</button>
+            </div>
+          }
+          <div class="weather-actions">
+            <button type="button" class="btn-secondary" (click)="addVacanceRange()">+ Ajouter une plage de vacances</button>
+          </div>
+
+          <div class="weather-actions">
+            <button type="button" class="btn-primary" (click)="generateThermostatCalendar()" [disabled]="weather().length === 0">
+              Générer le calendrier ({{ weather().length }} heure(s) de météo)
+            </button>
+            @if (thermostatSetpoints(); as setpoints) {
+              <span class="weather-count">
+                Calendrier généré pour {{ setpoints.length }} heure(s) — appliqué au lancement du calcul.
+              </span>
+            }
+          </div>
+        }
+      }
+
       @if (interiorMode === 'free' || interiorMode === 'thermostat') {
         <h3>Renouvellement d'air</h3>
         <p class="hint">
