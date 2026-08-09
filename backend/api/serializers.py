@@ -159,6 +159,14 @@ class EnvironmentSerializer(serializers.Serializer):
         for field, value in validated_data.items():
             setattr(instance, field, value)
         instance.save()
+        if envelope is not None:
+            # L1 : sans ça, un bâtiment lié gardait une grille d'ombrage calculée
+            # contre l'ANCIENNE géométrie de l'environnement, et le calcul suivant
+            # rendait un résultat faux sans le moindre signe. Le mécanisme existait
+            # déjà pour les deux autres causes (enveloppe du bâtiment modifiée,
+            # lien d'environnement changé) — seule la propagation depuis
+            # l'environnement vers ses bâtiments manquait.
+            Building.objects.filter(environment=instance).update(sun_visibility_stale=True)
         return instance
 
 
@@ -294,11 +302,21 @@ class GenerateEnvironmentRequestSerializer(serializers.Serializer):
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
     lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
     radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
-    # Lot Z : même option que sur la génération attachée à un bâtiment. Elle
-    # manquait ici à la livraison du lot — la page Environnement ne pouvait donc
-    # produire QUE des bâtiments, ce qui rendait la végétation introuvable pour
-    # qui passait par cette page.
     include_vegetation = serializers.BooleanField(required=False, default=False)
+    terrain_spacing_m = serializers.FloatField(required=False, allow_null=True, default=None,
+                                                min_value=2.0, max_value=100.0)
+    # Lot AD : bâtiment de référence, optionnel. Fourni, la génération est
+    # ALIGNÉE sur son repère local (rotation, altitude) et confrontée à son
+    # empreinte — le bâtiment étudié lui-même est écarté, les obstacles qui
+    # l'empiètent sont rognés. Absent, on retombe sur la génération exploratoire
+    # d'origine, non alignée et sans filtrage : c'est le seul cas où un
+    # environnement peut contenir le bâtiment en double, et l'interface le dit.
+    #
+    # Ce champ est ce qui permet de n'avoir plus QU'UN générateur : avant le Lot
+    # AD il y en avait deux, sur deux pages, dont un strictement inférieur.
+    building_id = serializers.PrimaryKeyRelatedField(
+        queryset=Building.objects.all(), required=False, allow_null=True, default=None,
+    )
 
 
 class SearchNearbyBuildingsRequestSerializer(serializers.Serializer):
@@ -327,22 +345,6 @@ class GroundAltitudeRequestSerializer(serializers.Serializer):
 
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
     lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
-
-
-class GenerateBuildingEnvironmentRequestSerializer(serializers.Serializer):
-    """POST /api/batiments/<id>/generer-environnement/ — voir tasks.generate_environment_for_building."""
-
-    radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
-    # Lot AA : pas de la grille de terrain (m). null/absent = pas de terrain,
-    # comportement d'origine. Le terrain est le plus gros contributeur en
-    # triangles du maillage d'obstacles (2 par maille), d'où un opt-in explicite
-    # plutôt qu'un défaut.
-    terrain_spacing_m = serializers.FloatField(required=False, allow_null=True, default=None,
-                                                min_value=2.0, max_value=100.0)
-    # Lot Z : végétation (zones IGN + arbres isolés OSM) ajoutée comme
-    # occulteurs NON opaques. Opt-in : coût en triangles, et surtout
-    # transmittance non saisonnière (voir geodata.VEGETATION_PROFILES).
-    include_vegetation = serializers.BooleanField(required=False, default=False)
 
 
 class WeatherFetchRequestSerializer(serializers.Serializer):

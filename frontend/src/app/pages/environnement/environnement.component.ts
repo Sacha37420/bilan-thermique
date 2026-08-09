@@ -53,6 +53,16 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
   // Lot Z : manquait sur cette page à la livraison du lot — la génération
   // autonome ne produisait que des bâtiments.
   genVegetation = false;
+  // Lot AD : bâtiment de référence, optionnel. Choisi, la génération est alignée
+  // sur son repère et confrontée à son empreinte (bâtiment étudié écarté,
+  // obstacles empiétants rognés) ; sinon, exploration libre non alignée. C'est
+  // ce qui a permis de supprimer le second générateur, qui vivait sur la page
+  // Bâtiment et faisait exactement ça sans qu'on puisse relire le résultat.
+  genBuildingId: number | null = null;
+  genTerrain = false;
+  genTerrainSpacing = 10;
+  buildings = signal<{ id: number; name: string }[]>([]);
+  generateWarnings = signal<string[]>([]);
   generating = signal(false);
   generateJob = signal<Job | null>(null);
   private pollHandle?: ReturnType<typeof setInterval>;
@@ -71,6 +81,10 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.refresh();
+    this.api.getBuildings().subscribe({
+      next: (bs) => this.buildings.set(bs as { id: number; name: string }[]),
+      error: () => {},
+    });
   }
 
   ngOnDestroy(): void {
@@ -185,9 +199,12 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
     this.generating.set(true);
     this.generateJob.set(null);
 
+    this.generateWarnings.set([]);
     this.api.generateEnvironment({
       lat: this.genLat, lon: this.genLon, radius_m: this.genRadius,
       include_vegetation: this.genVegetation,
+      terrain_spacing_m: this.genTerrain ? this.genTerrainSpacing : null,
+      building_id: this.genBuildingId,
     }).subscribe({
       next: (res) => {
         this.generateJob.set(res as Job);
@@ -216,7 +233,9 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
             this.stopGeneratePoll();
             this.generating.set(false);
             if (updated.status === 'DONE') {
-              this.applyGeneratedResult(updated.result as unknown as GenerateEnvironmentResult);
+              const r = updated.result as unknown as GenerateEnvironmentResult;
+              this.generateWarnings.set(r.warnings ?? []);
+              this.applyGeneratedResult(r);
             } else {
               this.error.set(updated.message || 'Échec de la génération.');
             }

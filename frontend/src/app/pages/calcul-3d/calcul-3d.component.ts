@@ -197,6 +197,67 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     );
   }
   shadowMode: 'precomputed' | 'realtime' = 'precomputed';
+
+  // ── Association bâtiment ↔ environnement + précalcul d'ombrage (Lot AD) ──
+  // Déplacés ici depuis la page Bâtiment : l'ombrage est la seule grandeur qui
+  // dépend du COUPLE (bâtiment, environnement), et c'est ici que son absence
+  // bloque — la page Bâtiment le proposait, Calcul 3D se contentait de refuser
+  // en renvoyant l'utilisateur en arrière.
+  environments = signal<{ id: number; name: string }[]>([]);
+  selectedEnvironmentId: number | null = null;
+  sunVisibilityStale = signal(true);
+  shadowJob = signal<Job | null>(null);
+  private shadowPollHandle?: ReturnType<typeof setInterval>;
+
+  onEnvironmentChange(): void {
+    const b = this.currentBuilding();
+    if (!b) return;
+    this.api.updateBuilding(b.id, { environment_id: this.selectedEnvironmentId }).subscribe({
+      next: (res) => {
+        // Changer d'environnement périme l'ombrage côté serveur : on relit
+        // l'état plutôt que de le supposer.
+        this.sunVisibilityStale.set((res as Building).sun_visibility_stale);
+      },
+      error: () => this.error.set("Échec de l'association de l'environnement."),
+    });
+  }
+
+  triggerPrecompute(): void {
+    const b = this.currentBuilding();
+    if (!b) return;
+    this.error.set('');
+    this.api.precomputeShadows(b.id).subscribe({
+      next: (res) => {
+        this.shadowJob.set(res as Job);
+        this.startShadowPoll(b.id);
+      },
+      error: (err) => this.error.set(err?.error?.detail ?? "Échec du lancement du précalcul."),
+    });
+  }
+
+  private startShadowPoll(buildingId: number): void {
+    this.stopShadowPoll();
+    const job = this.shadowJob();
+    if (!job) return;
+    this.shadowPollHandle = setInterval(() => {
+      this.api.getJob(job.id).subscribe({
+        next: (res) => {
+          const updated = res as Job;
+          this.shadowJob.set(updated);
+          if (updated.status === 'DONE' || updated.status === 'ERROR') {
+            this.stopShadowPoll();
+            if (updated.status === 'DONE') this.sunVisibilityStale.set(false);
+            else this.error.set(updated.message || "Échec du précalcul d'ombrage.");
+            void buildingId;
+          }
+        },
+      });
+    }, POLL_INTERVAL_MS);
+  }
+
+  private stopShadowPoll(): void {
+    if (this.shadowPollHandle) { clearInterval(this.shadowPollHandle); this.shadowPollHandle = undefined; }
+  }
   // Lot K — température de sol constante, utilisée uniquement par les
   // triangles marqués 'ground' (page Bâtiment) ; sans effet sinon.
   tGround = 12;
@@ -339,16 +400,25 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
       next: (b) => this.buildings.set(b as BuildingSummary[]),
       error: () => {},
     });
+    this.api.getEnvironments().subscribe({
+      next: (e) => this.environments.set(e as { id: number; name: string }[]),
+      error: () => {},
+    });
   }
 
   ngOnDestroy(): void {
     this.stopPoll();
     this.stopWeatherPoll();
+    this.stopShadowPoll();
   }
 
   onBuildingChange(): void {
     this.job.set(null);
     this.currentBuilding.set(null);
+    this.shadowJob.set(null);
+    this.stopShadowPoll();
+    this.selectedEnvironmentId = null;
+    this.sunVisibilityStale.set(true);
     if (this.selectedBuildingId === null) return;
     this.loadingBuilding.set(true);
     this.api.getBuilding(this.selectedBuildingId).subscribe({
@@ -356,6 +426,10 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
         const building = b as Building;
         this.currentBuilding.set(building);
         this.loadingBuilding.set(false);
+        // Lot AD : l'association bâtiment ↔ environnement et l'état de l'ombrage
+        // se pilotent désormais depuis cette page.
+        this.selectedEnvironmentId = building.environment_id;
+        this.sunVisibilityStale.set(building.sun_visibility_stale);
         // Pré-remplit le panneau météo auto depuis le géoréférencement du bâtiment
         // s'il existe — reste modifiable ensuite (bâtiment non géoréférencé, ou
         // météo d'un autre point que le bâtiment lui-même).

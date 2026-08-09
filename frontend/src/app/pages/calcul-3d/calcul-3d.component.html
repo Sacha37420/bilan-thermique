@@ -83,6 +83,46 @@
       }
 
       <h3>Ombrage</h3>
+      <p class="hint">
+        C'est ici que le bâtiment et son environnement sont associés : l'ombrage est la seule
+        grandeur qui dépend des deux à la fois. Le maillage d'obstacles se construit sur la page
+        <a routerLink="/environnement">Environnement</a>.
+      </p>
+      <div class="field-grid">
+        <label>
+          <span>Environnement (obstacles alentour)</span>
+          <select [(ngModel)]="selectedEnvironmentId" name="selectedEnvironmentId"
+            (ngModelChange)="onEnvironmentChange()" [disabled]="currentBuilding() === null">
+            <option [ngValue]="null">— aucun (auto-ombrage seul) —</option>
+            @for (e of environments(); track e.id) {
+              <option [ngValue]="e.id">{{ e.name }}</option>
+            }
+          </select>
+          <small>
+            Sans environnement, seul le bâtiment se fait de l'ombre à lui-même — ce qui reste
+            correct, simplement optimiste en tissu urbain.
+          </small>
+        </label>
+      </div>
+      <div class="shadow-row">
+        <button type="button" class="btn-secondary" (click)="triggerPrecompute()"
+          [disabled]="currentBuilding() === null || shadowJob()?.status === 'PENDING' || shadowJob()?.status === 'RUNNING'">
+          {{ shadowJob()?.status === 'RUNNING' || shadowJob()?.status === 'PENDING'
+             ? 'Précalcul…' : 'Précalculer l’ombrage' }}
+        </button>
+        @if (sunVisibilityStale()) {
+          <span class="status-badge todo">périmé — à recalculer</span>
+        } @else {
+          <span class="status-badge done">✓ à jour</span>
+        }
+      </div>
+      @if (shadowJob(); as job) {
+        <div class="job-status" [class]="job.status.toLowerCase()">
+          <span class="job-label">{{ job.status }}</span>
+          <span class="job-progress">{{ job.progress }}%</span>
+          <span class="job-message">{{ job.message }}</span>
+        </div>
+      }
       <div class="mode-toggle" role="radiogroup" aria-label="Mode d'ombrage">
         <label class="mode-option">
           <input type="radio" name="shadowMode" value="precomputed" [(ngModel)]="shadowMode" />
@@ -95,9 +135,10 @@
       </div>
       @if (shadowMode === 'precomputed') {
         <p class="hint">
-          Utilise la grille d'ombrage et le facteur de vue du ciel précalculés (page Bâtiment,
-          bouton « Précalculer l'ombrage ») — rapide, mais arrondi à la case de grille la plus
-          proche. Échoue si le bâtiment n'a pas de précalcul à jour (badge « périmé »).
+          Utilise la grille d'ombrage et le facteur de vue du ciel précalculés ci-dessus — rapide,
+          mais arrondi à la case de grille la plus proche (15° en azimut comme en élévation). Le
+          calcul est refusé tant que le précalcul est périmé : préférez le temps réel dès que
+          l'ombrage est déterminant, ou relancez le précalcul ci-dessus.
         </p>
       } @else {
         <p class="hint">

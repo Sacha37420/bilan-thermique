@@ -14,10 +14,10 @@ testé — sinon un bug dans ces fonctions se reproduirait à l'identique côté
 import math
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from . import building_solver, elevation, geodata, geometry, serializers, shadow, solver, weather_source
-from .models import Building
+from .models import Building, Environment
 
 DT_SECONDS = 3600.0
 
@@ -3090,3 +3090,139 @@ class BaseAltitudeResolutionTest(SimpleTestCase):
         t = geodata.resolve_base_z(tree, ground_z_ref, lambda pts: [terrain_altitude] * len(pts))
         self.assertAlmostEqual(b[0], t[0], places=6)
         self.assertAlmostEqual(t[0], 5.0, places=6)
+
+
+class ClipAgainstStudiedBuildingTest(SimpleTestCase):
+    """Lot AD — un obstacle qui empiète sur le bâtiment étudié est ROGNÉ plutôt
+    qu'écarté (choix de l'utilisateur, 2026-08-09).
+
+    Le Lot X ne savait que garder ou jeter. Un voisin qui interpénètre
+    l'enveloppe modélisée — cas courant quand celle-ci est approximative (import
+    OBJ, boîte du générateur) — était donc soit conservé en s'enfonçant dans le
+    bâtiment, soit perdu en entier alors qu'il masque réellement le soleil.
+    """
+
+    databases = []
+
+    SELF = [(0.0, 0.0), (8.0, 0.0), (8.0, 6.0), (0.0, 6.0)]  # 48 m²
+
+    def _self_polygon(self):
+        import shapely.geometry
+        return shapely.geometry.Polygon(self.SELF)
+
+    @staticmethod
+    def _rect(x0, y0, x1, y1):
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+    def test_exact_duplicate_still_dropped(self):
+        parts, status = geodata.resolve_against_self(self.SELF, self._self_polygon())
+        self.assertEqual(status, 'self')
+        self.assertEqual(parts, [])
+
+    def test_disjoint_and_party_wall_untouched(self):
+        for name, fp in (('disjoint', self._rect(20, 20, 28, 26)),
+                         ('mitoyen', self._rect(8, 0, 16, 6))):
+            with self.subTest(name):
+                parts, status = geodata.resolve_against_self(fp, self._self_polygon())
+                self.assertEqual(status, 'kept')
+                self.assertAlmostEqual(parts[0].area, 48.0, places=6)
+
+    def test_partial_overlap_is_clipped_not_dropped(self):
+        """Voisin décalé de 1 m sur l'enveloppe : on retire les 6 m² d'empiétement
+        et on garde les 42 m² restants, au lieu de perdre l'obstacle entier."""
+        parts, status = geodata.resolve_against_self(self._rect(7, 0, 15, 6), self._self_polygon())
+        self.assertEqual(status, 'clipped')
+        self.assertEqual(len(parts), 1)
+        self.assertAlmostEqual(parts[0].area, 42.0, places=6)
+        self.assertAlmostEqual(parts[0].intersection(self._self_polygon()).area, 0.0, places=9)
+
+    def test_engulfing_block_is_clipped_with_a_hole(self):
+        """Cas que le critère d'origine ratait : un pâté de maisons digitalisé
+        d'un seul tenant CONTIENT le logement étudié sans être lui. L'écarter
+        supprimait tout le masque solaire du pâté ; il est désormais rogné, avec
+        un trou à l'emplacement du bâtiment."""
+        parts, status = geodata.resolve_against_self(self._rect(-5, -5, 20, 15), self._self_polygon())
+        self.assertEqual(status, 'clipped')
+        self.assertEqual(len(parts), 1)
+        self.assertAlmostEqual(parts[0].area, 25 * 20 - 48, places=6)
+        self.assertEqual(len(parts[0].interiors), 1, "le bâtiment étudié doit laisser un trou")
+
+    def test_clipping_can_split_an_obstacle_in_two(self):
+        """Un obstacle traversé de part en part par le bâtiment donne deux
+        morceaux — d'où une LISTE de polygones en retour."""
+        parts, status = geodata.resolve_against_self(self._rect(-5, 1, 20, 4), self._self_polygon())
+        self.assertEqual(status, 'clipped')
+        self.assertEqual(len(parts), 2)
+
+    def test_sliver_remainder_is_dropped(self):
+        """Reste inférieur à MIN_CLIPPED_AREA_M2 : un copeau extrudé sur toute la
+        hauteur coûte des triangles sans rien masquer."""
+        parts, status = geodata.resolve_against_self(self._rect(0, 0, 8.05, 6), self._self_polygon())
+        self.assertEqual(status, 'self')
+        self.assertEqual(parts, [])
+
+    def test_clipped_pieces_are_extrudable(self):
+        """Le rognage doit produire une géométrie que trimesh sait extruder,
+        trous compris — sans quoi l'obstacle serait perdu à l'étape suivante."""
+        parts, _ = geodata.resolve_against_self(self._rect(-5, -5, 20, 15), self._self_polygon())
+        vertices, faces = geodata.extrude_polygon_mesh(parts[0], 9.0)
+        self.assertGreater(len(vertices), 8)
+        self.assertGreater(len(faces), 12)
+        self.assertTrue(all(len(f) == 3 for f in faces))
+
+    def test_no_self_polygon_keeps_everything(self):
+        parts, status = geodata.resolve_against_self(self.SELF, None)
+        self.assertEqual(status, 'kept')
+        self.assertAlmostEqual(parts[0].area, 48.0, places=6)
+
+
+class EnvironmentInvalidatesShadowTest(TestCase):
+    """Lot AD (point L1) — modifier un environnement doit périmer l'ombrage de
+    TOUS les bâtiments qui l'utilisent.
+
+    Le mécanisme existait pour les deux autres causes (enveloppe du bâtiment
+    modifiée, lien d'environnement changé) mais pas pour celle-ci : un bâtiment
+    lié gardait une grille calculée contre l'ANCIENNE géométrie, et le calcul
+    suivant rendait un résultat faux sans aucun signe. Test avec DB (TestCase et
+    non SimpleTestCase) : c'est une requête de mise à jour groupée qui est en jeu.
+    """
+
+    def _building(self, name, environment=None):
+        b = Building.objects.create(name=name, envelope={'vertices': [], 'triangles': []},
+                                     environment=environment)
+        Building.objects.filter(pk=b.pk).update(sun_visibility_stale=False)
+        b.refresh_from_db()
+        return b
+
+    def test_changing_the_envelope_stales_every_linked_building(self):
+        env = Environment.objects.create(name='env', envelope={'vertices': [], 'triangles': []})
+        a, b = self._building('A', env), self._building('B', env)
+        other = self._building('C')
+        self.assertFalse(a.sun_visibility_stale)
+
+        s = serializers.EnvironmentSerializer(
+            env,
+            data={'name': 'env',
+                  'vertices': [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                  'triangles': [{'v': [0, 1, 2]}]},
+            partial=True,
+        )
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        a.refresh_from_db(); b.refresh_from_db(); other.refresh_from_db()
+        self.assertTrue(a.sun_visibility_stale)
+        self.assertTrue(b.sun_visibility_stale)
+        # Un bâtiment qui n'utilise PAS cet environnement ne doit pas être touché.
+        self.assertFalse(other.sun_visibility_stale)
+
+    def test_renaming_only_does_not_stale(self):
+        """Renommer un environnement ne change pas sa géométrie : périmer
+        l'ombrage forcerait un recalcul de plusieurs minutes pour rien."""
+        env = Environment.objects.create(name='env2', envelope={'vertices': [], 'triangles': []})
+        a = self._building('D', env)
+        s = serializers.EnvironmentSerializer(env, data={'name': 'renommé'}, partial=True)
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+        a.refresh_from_db()
+        self.assertFalse(a.sun_visibility_stale)

@@ -120,6 +120,15 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
 
 @shared_task(bind=True)
 def generate_environment(self, job_id, params):
+    """Génère un maillage d'obstacles et le renvoie via `job.result` pour
+    relecture avant enregistrement (page Environnement).
+
+    Lot AD — générateur UNIQUE du lab. `building_id` (optionnel) apporte tout ce
+    que faisait l'ancienne variante attachée à un bâtiment : alignement sur son
+    repère local, mise à l'écart du bâtiment étudié lui-même et rognage des
+    obstacles qui l'empiètent, altitude de référence. Sans lui, comportement
+    exploratoire d'origine — non aligné, sans filtrage.
+    """
     job = Job.objects.get(pk=job_id)
     job.celery_task_id = self.request.id
     job.save(update_fields=['celery_task_id'])
@@ -137,20 +146,34 @@ def generate_environment(self, job_id, params):
 
     try:
         job.set_state(status=Job.RUNNING, progress=0, message=stage_messages['bbox'])
+
+        building = None
+        if params.get('building_id'):
+            building = Building.objects.filter(pk=params['building_id']).first()
+
+        north_offset_deg = building.georef_north_offset_deg if building else 0.0
+        ground_z_ref = building.georef_ground_z if building else None
+        self_envelope = building.envelope if building else None
+
+        def elevation_lookup(points):
+            return elevation.fetch_elevations(points)[0]
+
         result = geodata.generate_environment_mesh(
             params['lat'], params['lon'], params['radius_m'], progress_cb=progress_cb,
+            north_offset_deg=north_offset_deg, ground_z_ref=ground_z_ref,
+            self_envelope=self_envelope, elevation_lookup=elevation_lookup,
         )
 
-        # Lot Z : même option que sur la génération attachée à un bâtiment.
-        # Sans self_footprint ni north_offset ici — cette génération autonome
-        # n'a aucun bâtiment de référence, exactement comme pour les obstacles
-        # bâtis (voir generate_environment_mesh).
+        self_footprint = geodata.envelope_footprint_polygon(self_envelope)
+
         n_vegetation = 0
         if params.get('include_vegetation'):
             try:
-                job.set_state(progress=75, message="Végétation (IGN / OpenStreetMap)…")
+                job.set_state(progress=62, message="Végétation (IGN / OpenStreetMap)…")
                 veg = geodata.generate_vegetation_mesh(
                     params['lat'], params['lon'], params['radius_m'],
+                    north_offset_deg=north_offset_deg, ground_z_ref=ground_z_ref,
+                    self_footprint=self_footprint, elevation_lookup=elevation_lookup,
                 )
                 result['warnings'].extend(veg['warnings'])
                 result['stats'].update(veg['stats'])
@@ -169,159 +192,46 @@ def generate_environment(self, job_id, params):
             except geodata.GeodataError as exc:
                 result['warnings'].append(f"Végétation non chargée ({exc}).")
 
-        job.result = result
-        job.save(update_fields=['result'])
-        n_triangles = len(result['triangles'])
-        stats = result['stats']
-        job.set_state(
-            status=Job.DONE, progress=100,
-            message=f"{stats['buildings_used']} bâtiment(s), {n_triangles} triangles "
-                    f"(IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']})."
-                    + (f" Végétation : {n_vegetation} élément(s)." if n_vegetation else ""),
-        )
-    except geodata.GeodataError as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
-    except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
-
-
-@shared_task(bind=True)
-def generate_environment_for_building(self, job_id, building_id, radius_m, terrain_spacing_m=None,
-                                       include_vegetation=False):
-    """Comme generate_environment, mais génère directement dans le repère local du
-    Building (via ses champs georef_*) et crée/lie l'Environment résultant — pas
-    d'étape de relecture manuelle nécessaire, contrairement à la génération autonome :
-    le repère est correct par construction dès lors que le bâtiment est géoréférencé."""
-    job = Job.objects.get(pk=job_id)
-    job.celery_task_id = self.request.id
-    job.save(update_fields=['celery_task_id'])
-
-    stage_messages = {
-        'bbox': "Préparation de la zone…",
-        'ign': "Interrogation de l'IGN (BD TOPO)…",
-        'osm': "Repli sur OpenStreetMap…",
-        'extrude': "Extrusion des bâtiments…",
-        'done': "Assemblage du maillage…",
-    }
-
-    def progress_cb(stage, pct):
-        job.set_state(status=Job.RUNNING, progress=pct, message=stage_messages.get(stage, ''))
-
-    try:
-        job.set_state(status=Job.RUNNING, progress=0, message=stage_messages['bbox'])
-        building = Building.objects.get(pk=building_id)
-
-        # Altitude des obstacles sans altitude propre (végétation, bâtiments OSM)
-        # — injectée plutôt qu'importée : api.elevation importe déjà api.geodata,
-        # l'inverse créerait un cycle. Best-effort : geodata retombe sur 0 avec un
-        # avertissement si l'appel échoue.
-        def elevation_lookup(points):
-            return elevation.fetch_elevations(points)[0]
-
-        result = geodata.generate_environment_mesh(
-            building.georef_lat, building.georef_lon, radius_m, progress_cb=progress_cb,
-            north_offset_deg=building.georef_north_offset_deg, ground_z_ref=building.georef_ground_z,
-            # Lot X : le bâtiment étudié est lui-même dans BD TOPO/OSM et
-            # ressortirait comme n'importe quel voisin — écarté par recouvrement
-            # d'empreinte. Seule cette tâche-ci le fait : generate_environment
-            # (page Environnement, autonome) n'a aucun bâtiment de référence.
-            self_envelope=building.envelope,
-            elevation_lookup=elevation_lookup,
-        )
-
-        vertices = result['vertices']
-        triangles = result['triangles']
-        warnings = list(result['warnings'])
-
-        # Lot AA : maillage de terrain, optionnel (opt-in). Ajouté au MÊME
-        # maillage d'obstacles que les bâtiments — api.shadow ne fait aucune
-        # différence entre les deux, seule compte la géométrie qui bloque les
-        # rayons. Best-effort : un échec d'altimétrie ne doit pas perdre les
-        # bâtiments déjà extrudés.
-        self_footprint = geodata.envelope_footprint_polygon(building.envelope)
-
-        # Lot Z : végétation, opt-in elle aussi. Ajoutée au même maillage, mais
-        # ses triangles portent `k`/`obj` — api.shadow les sépare et les traite
-        # comme des écrans atténuants plutôt que des obstacles opaques.
-        veg_stats = None
-        if include_vegetation:
+        n_terrain = 0
+        if params.get('terrain_spacing_m'):
             try:
-                job.set_state(progress=62, message="Végétation (IGN / OpenStreetMap)…")
-                veg = geodata.generate_vegetation_mesh(
-                    building.georef_lat, building.georef_lon, radius_m,
-                    north_offset_deg=building.georef_north_offset_deg,
-                    ground_z_ref=building.georef_ground_z,
-                    self_footprint=self_footprint,
-                    elevation_lookup=elevation_lookup,
-                )
-                warnings.extend(veg['warnings'])
-                veg_stats = veg['stats']
-                if (len(vertices) + len(veg['vertices']) > geometry.MAX_VERTICES
-                        or len(triangles) + len(veg['triangles']) > geometry.MAX_TRIANGLES):
-                    warnings.append("Végétation abandonnée : limite de maillage atteinte.")
-                else:
-                    offset = len(vertices)
-                    vertices.extend(veg['vertices'])
-                    triangles.extend(
-                        {'v': [i + offset for i in t['v']], 'k': t['k'], 'obj': t['obj']}
-                        for t in veg['triangles']
-                    )
-            except geodata.GeodataError as exc:
-                warnings.append(f"Végétation non chargée ({exc}) — obstacles bâtis conservés.")
-
-        terrain_source = None
-        n_terrain_points = 0
-        if terrain_spacing_m:
-            try:
-                job.set_state(progress=70, message="Altitude du terrain…")
-                terrain_mesh, terrain_source, n_terrain_points = elevation.build_terrain_for_building(
-                    building.georef_lat, building.georef_lon, radius_m, terrain_spacing_m,
-                    north_offset_deg=building.georef_north_offset_deg,
-                    ground_z_ref=building.georef_ground_z,
+                job.set_state(progress=75, message="Altitude du terrain…")
+                terrain_mesh, terrain_source, n_terrain = elevation.build_terrain_for_building(
+                    params['lat'], params['lon'], params['radius_m'], params['terrain_spacing_m'],
+                    north_offset_deg=north_offset_deg, ground_z_ref=ground_z_ref,
                     footprint_polygon=self_footprint,
                 )
-                offset = len(vertices)
-                if (len(vertices) + len(terrain_mesh['vertices']) > geometry.MAX_VERTICES
-                        or len(triangles) + len(terrain_mesh['triangles']) > geometry.MAX_TRIANGLES):
-                    warnings.append(
-                        "Terrain abandonné : le maillage d'obstacles atteindrait la limite. "
-                        "Augmentez le pas de la grille ou réduisez le rayon."
+                if (len(result['vertices']) + len(terrain_mesh['vertices']) > geometry.MAX_VERTICES
+                        or len(result['triangles']) + len(terrain_mesh['triangles']) > geometry.MAX_TRIANGLES):
+                    result['warnings'].append(
+                        "Terrain abandonné : le maillage atteindrait la limite. Augmentez le pas."
                     )
-                    terrain_source = None
+                    n_terrain = 0
                 else:
-                    vertices.extend(terrain_mesh['vertices'])
-                    triangles.extend({'v': [i + offset for i in t['v']]} for t in terrain_mesh['triangles'])
+                    offset = len(result['vertices'])
+                    result['vertices'].extend(terrain_mesh['vertices'])
+                    result['triangles'].extend(
+                        {'v': [i + offset for i in t['v']]} for t in terrain_mesh['triangles']
+                    )
+                    result['stats']['terrain_source'] = terrain_source
+                    result['stats']['terrain_points'] = n_terrain
             except elevation.ElevationError as exc:
-                warnings.append(f"Terrain non chargé ({exc}) — obstacles bâtis conservés.")
-                terrain_source = None
+                result['warnings'].append(f"Terrain non chargé ({exc}) — obstacles bâtis conservés.")
+                n_terrain = 0
 
-        env = Environment.objects.create(
-            name=f"Auto — {building.name} — {timezone.now():%Y-%m-%d %H:%M}",
-            envelope={'vertices': vertices, 'triangles': triangles},
-        )
-        building.environment = env
-        building.sun_visibility_stale = True
-        building.save(update_fields=['environment', 'sun_visibility_stale', 'updated_at'])
-
-        job.result = {
-            'environment_id': env.id, 'environment_name': env.name,
-            'stats': {**result['stats'], 'terrain_source': terrain_source,
-                      'terrain_points': n_terrain_points, **(veg_stats or {})},
-            'warnings': warnings,
-        }
+        job.result = result
         job.save(update_fields=['result'])
         stats = result['stats']
-        n_triangles = len(triangles)
         job.set_state(
             status=Job.DONE, progress=100,
-            message=f"« {env.name} » créé et lié — {stats['buildings_used']} bâtiment(s), "
-                    f"{n_triangles} triangles (IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']})."
-                    + (f" {stats['buildings_self']} écarté(s) : bâtiment étudié lui-même."
+            message=f"{stats['buildings_used']} bâtiment(s), {len(result['triangles'])} triangles "
+                    f"(IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']})."
+                    + (f" {stats['buildings_self']} écarté(s) : bâtiment étudié."
                        if stats.get('buildings_self') else "")
-                    + (f" Terrain : {n_terrain_points} points ({terrain_source})."
-                       if terrain_source else "")
-                    + (f" Végétation : {veg_stats['vegetation_used']} élément(s)."
-                       if veg_stats and veg_stats.get('vegetation_used') else ""),
+                    + (f" {stats['buildings_clipped']} rogné(s)."
+                       if stats.get('buildings_clipped') else "")
+                    + (f" Végétation : {n_vegetation}." if n_vegetation else "")
+                    + (f" Terrain : {n_terrain} points." if n_terrain else ""),
         )
     except geodata.GeodataError as exc:
         job.set_state(status=Job.ERROR, message=str(exc))

@@ -57,11 +57,32 @@
         OpenStreetMap hors de France ou si l'IGN est indisponible. Terrain supposé plat.
       </p>
       <p class="hint">
-        Génération exploratoire — ne garantit <strong>pas</strong> l'alignement (position, rotation,
-        altitude) avec un bâtiment existant. Pour un résultat aligné automatiquement, utilisez
-        l'action dédiée sur la page <a routerLink="/batiment">Bâtiment</a> (nécessite de géoréférencer
-        le bâtiment au préalable).
+        Bâtiments voisins extrudés depuis l'IGN (BD TOPO, France) ou OpenStreetMap, avec
+        éventuellement le relief du terrain et la végétation. Choisissez un bâtiment de référence
+        ci-dessous pour que tout soit placé dans <strong>son</strong> repère — sinon la génération
+        reste exploratoire et n'est alignée sur rien.
       </p>
+      <div class="field-grid">
+        <label>
+          <span>Aligner sur le bâtiment</span>
+          <select [(ngModel)]="genBuildingId" name="genBuildingId">
+            <option [ngValue]="null">— aucun (exploration libre) —</option>
+            @for (b of buildings(); track b.id) {
+              <option [ngValue]="b.id">{{ b.name }}</option>
+            }
+          </select>
+          <small>
+            @if (genBuildingId === null) {
+              Sans bâtiment de référence : pas d'alignement (position, rotation, altitude), et
+              surtout <strong>le bâtiment étudié se retrouvera en double</strong> dans les obstacles
+              — il figure lui-même dans IGN/OpenStreetMap. À réserver à l'exploration.
+            } @else {
+              Position, rotation et altitude alignées sur ce bâtiment. Il sera écarté des obstacles,
+              et tout obstacle qui empiète sur son enveloppe sera rogné plutôt que perdu.
+            }
+          </small>
+        </label>
+      </div>
       <div class="field-grid">
         <label>
           <span>Latitude</span>
@@ -80,6 +101,23 @@
         <input type="checkbox" [(ngModel)]="genVegetation" name="genVegetation" />
         <span>Inclure la végétation (arbres, haies, bois)</span>
       </label>
+      <label class="inline-check">
+        <input type="checkbox" [(ngModel)]="genTerrain" name="genTerrain" />
+        <span>Inclure le relief du terrain</span>
+      </label>
+      @if (genTerrain) {
+        <div class="field-grid">
+          <label>
+            <span>Pas de la grille (m)</span>
+            <input type="number" step="1" min="2" max="100" [(ngModel)]="genTerrainSpacing" name="genTerrainSpacing" />
+            <small>
+              Un relief amont masque le soleil rasant, ce qu'aucun bâtiment voisin ne reproduit.
+              C'est de loin le plus gros contributeur en triangles (deux par maille) : au pas de
+              10 m sur 150 m de rayon, environ 1 800.
+            </small>
+          </label>
+        </div>
+      }
       @if (genVegetation) {
         <p class="hint">
           Zones boisées et haies depuis l'IGN, arbres isolés depuis OpenStreetMap — seule source à
@@ -93,6 +131,11 @@
         {{ generating() ? 'Génération…' : 'Générer' }}
       </button>
 
+      @if (generateWarnings().length > 0) {
+        <ul class="env-warnings">
+          @for (w of generateWarnings(); track $index) { <li>{{ w }}</li> }
+        </ul>
+      }
       @if (generateJob(); as job) {
         <div class="job-status" [class]="job.status.toLowerCase()">
           <span class="job-label">{{ job.status }}</span>

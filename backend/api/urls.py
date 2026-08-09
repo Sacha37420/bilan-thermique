@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     MeView, DepartmentListView, UserListView, Calcul1DView,
     ParoiModelListCreateView, ParoiModelDetailView,
-    BuildingListCreateView, BuildingDetailView, GenerateBuildingEnvironmentView,
+    BuildingListCreateView, BuildingDetailView,
     EnvironmentListCreateView, EnvironmentDetailView, GenerateEnvironmentView,
     JobDetailView, PrecomputeShadowsView, BuildingCalculView, BuildingRefineView,
     FetchWeatherView, SearchNearbyBuildingsView, GroundAltitudeView,
@@ -21,7 +21,6 @@ urlpatterns = [
     path('batiments/<int:pk>/precalcul-ombrage/', PrecomputeShadowsView.as_view()),
     path('batiments/<int:pk>/calcul-3d/', BuildingCalculView.as_view()),
     path('batiments/<int:pk>/affiner-maillage/', BuildingRefineView.as_view()),
-    path('batiments/<int:pk>/generer-environnement/', GenerateBuildingEnvironmentView.as_view()),
     path('environnements/',   EnvironmentListCreateView.as_view()),
     path('environnements/generer/', GenerateEnvironmentView.as_view()),
     path('environnements/<int:pk>/', EnvironmentDetailView.as_view()),

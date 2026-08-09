@@ -81,16 +81,6 @@ export class ApiService {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/precalcul-ombrage/`, {});
   }
 
-  generateBuildingEnvironment(
-    buildingId: number, radiusM: number, terrainSpacingM: number | null = null,
-    includeVegetation = false,
-  ): Observable<unknown> {
-    return this.http.post(`${this.base}/api/batiments/${buildingId}/generer-environnement/`, {
-      radius_m: radiusM, terrain_spacing_m: terrainSpacingM,
-      include_vegetation: includeVegetation,
-    });
-  }
-
   /** Lot AA — altitude du terrain en un point (IGN RGE ALTI, repli mondial
    * Open-Meteo). Synchrone : un point, un appel. */
   groundAltitude(lat: number, lon: number): Observable<unknown> {
@@ -121,9 +111,13 @@ export class ApiService {
     return this.http.delete(`${this.base}/api/environnements/${id}/`);
   }
 
-  generateEnvironment(
-    payload: { lat: number; lon: number; radius_m: number; include_vegetation?: boolean },
-  ): Observable<unknown> {
+  /** Générateur d'obstacles UNIQUE (Lot AD). `building_id` : bâtiment de
+   * référence optionnel — aligne sur son repère, écarte le bâtiment étudié et
+   * rogne les obstacles qui l'empiètent. */
+  generateEnvironment(payload: {
+    lat: number; lon: number; radius_m: number;
+    include_vegetation?: boolean; terrain_spacing_m?: number | null; building_id?: number | null;
+  }): Observable<unknown> {
     return this.http.post(`${this.base}/api/environnements/generer/`, payload);
   }
 

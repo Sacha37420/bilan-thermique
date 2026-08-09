@@ -1,10 +1,10 @@
-import { Component, OnDestroy, OnInit, ViewChild, inject, signal } from '@angular/core';
+import { Component, OnInit, ViewChild, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
 import { generateBoxEnvelope } from '../../core/box-generator';
-import { Building, BuildingCandidate, Job, ShadingProfileId, TriangleBoundary, WorkingTriangle } from '../../core/building.types';
+import { Building, BuildingCandidate, ShadingProfileId, TriangleBoundary, WorkingTriangle } from '../../core/building.types';
 import { SHADING_PROFILES } from '../../core/shading-profiles';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 import { BuildingSearchComponent } from '../../components/building-search/building-search.component';
@@ -21,17 +21,10 @@ interface BuildingSummary {
   updated_at: string;
 }
 
-interface EnvironmentSummary {
-  id: number;
-  name: string;
-}
-
 const SERIES_COLOR_VARS = [
   '--series-1', '--series-2', '--series-3', '--series-4',
   '--series-5', '--series-6', '--series-7', '--series-8',
 ];
-
-const POLL_INTERVAL_MS = 2000;
 
 @Component({
   selector: 'app-batiment',
@@ -40,7 +33,7 @@ const POLL_INTERVAL_MS = 2000;
   templateUrl: './batiment.component.html',
   styleUrl: './batiment.component.scss',
 })
-export class BatimentComponent implements OnInit, OnDestroy {
+export class BatimentComponent implements OnInit {
   private api = inject(ApiService);
 
   @ViewChild(MeshViewerComponent) viewer?: MeshViewerComponent;
@@ -48,14 +41,11 @@ export class BatimentComponent implements OnInit, OnDestroy {
   // ── Bibliothèques ────────────────────────────────────────────────────
   paroiModels = signal<ParoiModelSummary[]>([]);
   buildings = signal<BuildingSummary[]>([]);
-  environments = signal<EnvironmentSummary[]>([]);
 
   // ── Bâtiment en cours d'édition ──────────────────────────────────────
   currentBuildingId = signal<number | null>(null);
   buildingName = '';
   buildingDescription = '';
-  selectedEnvironmentId: number | null = null;
-  sunVisibilityStale = signal(true);
 
   // ── Géoréférencement (optionnel) ──────────────────────────────────────
   georefLat: number | null = null;
@@ -65,31 +55,6 @@ export class BatimentComponent implements OnInit, OnDestroy {
 
   // ── Surface de référence (m², Lot M — normalisation kWh/m²/an du dashboard) ──
   surfaceRefM2: number | null = null;
-
-  // ── Précalcul d'ombrage (Celery, cf. api/tasks.py) ────────────────────
-  shadowJob = signal<Job | null>(null);
-  private pollHandle?: ReturnType<typeof setInterval>;
-
-  // ── Génération d'environnement pour ce bâtiment ───────────────────────
-  envGenJob = signal<Job | null>(null);
-  envGenerating = signal(false);
-  envGenRadius = 150;
-  // Lot AA — maillage de terrain ajouté aux obstacles (opt-in : c'est le plus
-  // gros contributeur en triangles, 2 par maille). Le relief masque le soleil
-  // rasant, ce qu'aucun bâtiment voisin ne reproduit.
-  envGenTerrain = false;
-  envGenTerrainSpacing = 10;
-  // Lot Z — végétation (zones IGN + arbres isolés OSM). Opt-in : coût en
-  // triangles, et transmittance non saisonnière (un caduc est modélisé en
-  // feuilles toute l'année, ce qui surestime l'ombrage hivernal).
-  envGenVegetation = false;
-  // Avertissements de la dernière génération (job.result.warnings) — jamais
-  // affichés jusqu'au Lot X, alors que c'est le seul canal qui dise ce qui a
-  // été écarté et pourquoi : bâtiment étudié retiré de son propre
-  // environnement, hauteurs estimées faute de donnée, limite de maillage
-  // atteinte. Un filtrage silencieux est un filtrage invérifiable.
-  envGenWarnings = signal<string[]>([]);
-  private envGenPollHandle?: ReturnType<typeof setInterval>;
 
   vertices = signal<number[][]>([]);
   triangles = signal<WorkingTriangle[]>([]);
@@ -120,12 +85,6 @@ export class BatimentComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.refreshParoiModels();
     this.refreshBuildings();
-    this.refreshEnvironments();
-  }
-
-  ngOnDestroy(): void {
-    this.stopPoll();
-    this.stopEnvGenPoll();
   }
 
   private refreshParoiModels(): void {
@@ -138,13 +97,6 @@ export class BatimentComponent implements OnInit, OnDestroy {
   private refreshBuildings(): void {
     this.api.getBuildings().subscribe({
       next: (buildings) => this.buildings.set(buildings as BuildingSummary[]),
-      error: () => {},
-    });
-  }
-
-  private refreshEnvironments(): void {
-    this.api.getEnvironments().subscribe({
-      next: (envs) => this.environments.set(envs as EnvironmentSummary[]),
       error: () => {},
     });
   }
@@ -355,20 +307,9 @@ export class BatimentComponent implements OnInit, OnDestroy {
       {
         label: 'Géoréférencement',
         done: this.georefLat !== null && this.georefLon !== null,
-        hint: 'Optionnel — nécessaire pour aligner automatiquement un environnement et une météo.',
+        hint: 'Nécessaire pour aligner un environnement et récupérer la météo — à renseigner avant '
+          + 'de générer un environnement (page Environnement).',
         anchor: '#section-georef',
-      },
-      {
-        label: 'Environnement lié',
-        done: this.selectedEnvironmentId !== null,
-        hint: "Optionnel — sans lui, seul l'auto-ombrage du bâtiment sur lui-même compte.",
-        anchor: '#section-ombrage',
-      },
-      {
-        label: 'Ombrage à jour',
-        done: !this.sunVisibilityStale(),
-        hint: this.sunVisibilityStale() ? 'Périmé ou jamais calculé — relancez le précalcul.' : 'À jour.',
-        anchor: '#section-ombrage',
       },
     ];
   }
@@ -388,7 +329,6 @@ export class BatimentComponent implements OnInit, OnDestroy {
     const id = this.currentBuildingId();
     const payload: Record<string, unknown> = {
       name, description: this.buildingDescription, triangles,
-      environment_id: this.selectedEnvironmentId,
       georef_lat: this.georefLat, georef_lon: this.georefLon,
       georef_north_offset_deg: this.georefNorthOffset, georef_ground_z: this.georefGroundZ,
       surface_ref_m2: this.surfaceRefM2,
@@ -407,7 +347,6 @@ export class BatimentComponent implements OnInit, OnDestroy {
         this.currentBuildingId.set(b.id);
         this.vertices.set(b.envelope.vertices);
         this.triangles.set(b.envelope.triangles);
-        this.sunVisibilityStale.set(b.sun_visibility_stale);
         this.saving.set(false);
         this.message.set(`Bâtiment « ${b.name} » enregistré.`);
         this.refreshBuildings();
@@ -424,11 +363,6 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     this.error.set('');
     this.message.set('');
-    // Remis à zéro ICI (synchrone, avant la requête) et non dans le callback :
-    // la génération d'environnement rappelle loadBuilding() puis repose ses
-    // avertissements juste après — un reset asynchrone les effacerait, exactement
-    // comme il efface déjà envGenJob (voir startEnvGenPoll).
-    this.envGenWarnings.set([]);
     this.api.getBuilding(summary.id).subscribe({
       next: (res) => {
         const b = res as Building;
@@ -443,17 +377,11 @@ export class BatimentComponent implements OnInit, OnDestroy {
         this.groupShadingAssignments = {};
         this.selectedIndices.set(new Set());
         this.modelColorMap.clear();
-        this.selectedEnvironmentId = b.environment_id;
         this.georefLat = b.georef_lat;
         this.georefLon = b.georef_lon;
         this.georefNorthOffset = b.georef_north_offset_deg;
         this.georefGroundZ = b.georef_ground_z;
         this.surfaceRefM2 = b.surface_ref_m2;
-        this.sunVisibilityStale.set(b.sun_visibility_stale);
-        this.shadowJob.set(null);
-        this.stopPoll();
-        this.envGenJob.set(null);
-        this.stopEnvGenPoll();
         this.loading.set(false);
       },
       error: () => {
@@ -475,18 +403,11 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.groupShadingAssignments = {};
     this.selectedIndices.set(new Set());
     this.modelColorMap.clear();
-    this.selectedEnvironmentId = null;
     this.georefLat = null;
     this.georefLon = null;
     this.georefNorthOffset = 0;
     this.georefGroundZ = null;
     this.surfaceRefM2 = null;
-    this.sunVisibilityStale.set(true);
-    this.shadowJob.set(null);
-    this.stopPoll();
-    this.envGenJob.set(null);
-    this.envGenWarnings.set([]);
-    this.stopEnvGenPoll();
     this.error.set('');
     this.message.set('');
   }
@@ -508,7 +429,6 @@ export class BatimentComponent implements OnInit, OnDestroy {
         // Les indices de triangle changent après raffinement : la sélection
         // manuelle en cours n'a plus de sens.
         this.selectedIndices.set(new Set());
-        this.sunVisibilityStale.set(b.sun_visibility_stale);
         this.refining.set(false);
         this.message.set(`Maillage raffiné : ${b.envelope.triangles.length} triangles.`);
         this.viewer?.repaint();
@@ -546,107 +466,6 @@ export class BatimentComponent implements OnInit, OnDestroy {
         this.error.set(err?.error?.detail ?? "Échec de la récupération de l'altitude.");
       },
     });
-  }
-
-  // ── Précalcul d'ombrage ──────────────────────────────────────────────
-  triggerPrecompute(): void {
-    const id = this.currentBuildingId();
-    if (id === null) return;
-    this.error.set('');
-    this.api.precomputeShadows(id).subscribe({
-      next: (res) => {
-        this.shadowJob.set(res as Job);
-        this.startPoll();
-      },
-      error: (err) => {
-        this.error.set(err?.error?.detail ?? "Échec du lancement du précalcul.");
-      },
-    });
-  }
-
-  private startPoll(): void {
-    this.stopPoll();
-    const job = this.shadowJob();
-    if (!job) return;
-    this.pollHandle = setInterval(() => {
-      this.api.getJob(job.id).subscribe({
-        next: (res) => {
-          const updated = res as Job;
-          this.shadowJob.set(updated);
-          if (updated.status === 'DONE' || updated.status === 'ERROR') {
-            this.stopPoll();
-            if (updated.status === 'DONE') this.sunVisibilityStale.set(false);
-          }
-        },
-      });
-    }, POLL_INTERVAL_MS);
-  }
-
-  private stopPoll(): void {
-    if (this.pollHandle) {
-      clearInterval(this.pollHandle);
-      this.pollHandle = undefined;
-    }
-  }
-
-  // ── Génération d'environnement pour ce bâtiment (aligné via georef_*) ────
-  generateEnvironmentForBuilding(): void {
-    const id = this.currentBuildingId();
-    if (id === null || this.georefLat === null || this.georefLon === null) return;
-    this.error.set('');
-    this.message.set('');
-    this.envGenWarnings.set([]);
-    this.envGenerating.set(true);
-    this.api.generateBuildingEnvironment(
-      id, this.envGenRadius, this.envGenTerrain ? this.envGenTerrainSpacing : null,
-      this.envGenVegetation,
-    ).subscribe({
-      next: (res) => {
-        this.envGenJob.set(res as Job);
-        this.startEnvGenPoll();
-      },
-      error: (err) => {
-        this.envGenerating.set(false);
-        this.error.set(err?.error?.detail ?? err?.error?.radius_m?.[0] ?? "Échec du lancement de la génération.");
-      },
-    });
-  }
-
-  private startEnvGenPoll(): void {
-    this.stopEnvGenPoll();
-    const job = this.envGenJob();
-    const buildingId = this.currentBuildingId();
-    if (!job || buildingId === null) return;
-    this.envGenPollHandle = setInterval(() => {
-      this.api.getJob(job.id).subscribe({
-        next: (res) => {
-          const updated = res as Job;
-          this.envGenJob.set(updated);
-          if (updated.status === 'DONE' || updated.status === 'ERROR') {
-            this.stopEnvGenPoll();
-            this.envGenerating.set(false);
-            if (updated.status === 'DONE') {
-              const warnings = updated.result?.['warnings'];
-              this.refreshEnvironments();
-              // loadBuilding() remet l'état du bâtiment à plat : les
-              // avertissements sont posés APRÈS, sinon ils seraient effacés.
-              this.loadBuilding({ id: buildingId });
-              this.message.set(updated.message);
-              this.envGenWarnings.set(Array.isArray(warnings) ? warnings as string[] : []);
-            } else {
-              this.error.set(updated.message || 'Échec de la génération.');
-            }
-          }
-        },
-      });
-    }, POLL_INTERVAL_MS);
-  }
-
-  private stopEnvGenPoll(): void {
-    if (this.envGenPollHandle) {
-      clearInterval(this.envGenPollHandle);
-      this.envGenPollHandle = undefined;
-    }
   }
 
   removeBuilding(summary: BuildingSummary): void {

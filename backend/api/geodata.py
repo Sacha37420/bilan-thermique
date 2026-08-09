@@ -299,17 +299,33 @@ def fetch_osm_buildings(bbox):
 
 # ── Extrusion et assemblage du maillage ───────────────────────────────────────────
 
-def extrude_footprint(footprint_xy, height_m):
-    """footprint_xy : [(x,y), ...] en mètres, plan local. Retourne (vertices, faces)
-    d'un volume extrudé fermé (parois + toit + sol) via trimesh — évite d'écrire une
-    triangulation ear-clipping maison pour des empreintes potentiellement concaves."""
-    polygon = shapely.geometry.Polygon(footprint_xy)
-    if not polygon.is_valid:
-        polygon = polygon.buffer(0)
+def extrude_polygon_mesh(polygon, height_m):
+    """Extrude un polygone shapely DÉJÀ construit — y compris avec des trous
+    (le rognage d'un obstacle par le bâtiment étudié peut en créer un, quand
+    celui-ci tombe entièrement à l'intérieur). trimesh gère les anneaux
+    intérieurs nativement."""
     if polygon.is_empty or polygon.area < 1e-3:
         raise GeodataError("Empreinte de bâtiment dégénérée.")
     mesh = trimesh.creation.extrude_polygon(polygon, height=max(height_m, 1.0))
     return mesh.vertices.tolist(), mesh.faces.tolist()
+
+
+def extrude_footprint(footprint_xy, height_m):
+    """footprint_xy : [(x,y), ...] en mètres, plan local. Retourne (vertices, faces)
+    d'un volume extrudé fermé (parois + toit + sol) via trimesh — évite d'écrire une
+    triangulation ear-clipping maison pour des empreintes potentiellement concaves."""
+    return extrude_polygon_mesh(_as_polygon(footprint_xy), height_m)
+
+
+def _as_polygon(footprint_xy):
+    polygon = shapely.geometry.Polygon(footprint_xy)
+    if not polygon.is_valid:
+        polygon = polygon.buffer(0)
+        # buffer(0) peut rendre un MultiPolygon : on garde la plus grande part,
+        # les autres étant des artefacts de correction d'auto-intersection.
+        if polygon.geom_type == 'MultiPolygon':
+            polygon = max(polygon.geoms, key=lambda g: g.area) if not polygon.is_empty else polygon
+    return polygon
 
 
 def extrude_footprint_grouped(footprint_xy, height_m):
@@ -457,13 +473,16 @@ def search_nearby_buildings(lat, lon, radius_m, max_results=5, max_walls=None):
 # ── Lot X : écarter le bâtiment étudié de son propre environnement ────────────────
 
 SELF_OVERLAP_RATIO = 0.3
-# Un candidat est considéré comme étant LE BÂTIMENT ÉTUDIÉ lui-même si son
-# empreinte recouvre plus que cette fraction de la plus petite des deux
-# empreintes (la sienne ou celle du bâtiment étudié). Rapporté au MINIMUM des
-# deux aires et non à celle du candidat : « ces deux empreintes désignent le
-# même bâtiment » doit se détecter que la modélisation de l'utilisateur soit
-# plus petite ou plus grande que la donnée IGN/OSM (un OBJ approximatif, une
-# boîte du générateur…).
+# Un candidat est considéré comme étant LE BÂTIMENT ÉTUDIÉ lui-même quand
+# aire(intersection) / aire(union) dépasse ce seuil — un indice de Jaccard, donc
+# une mesure de RESSEMBLANCE entre les deux empreintes.
+#
+# Rapporté à l'union et non au minimum des deux aires (première version, 2026-08-09) :
+# le minimum vaut 1 dès que l'une contient l'autre, ce qui confondait deux
+# situations opposées. Un pâté de maisons digitalisé d'un seul tenant par l'IGN
+# CONTIENT le logement étudié sans être lui — il était alors écarté en entier,
+# alors qu'il faut le conserver rogné : tout le reste du pâté masque réellement
+# le soleil. L'union distingue les deux (doublon exact ≈ 1 ; bloc englobant ≈ 0,1).
 #
 # Un doublon exact donne un rapport de 1 ; un MITOYEN réel, qui partage un mur
 # avec le bâtiment étudié, donne une intersection d'aire NULLE (deux polygones
@@ -514,18 +533,57 @@ def envelope_footprint_polygon(envelope):
     return merged
 
 
-def _is_studied_building(footprint_xy, self_polygon):
-    """footprint_xy : empreinte d'un candidat, DÉJÀ dans le repère local du
-    bâtiment étudié. self_polygon : sortie de envelope_footprint_polygon."""
-    if self_polygon is None:
-        return False
-    candidate = shapely.geometry.Polygon(footprint_xy)
-    if not candidate.is_valid:
-        candidate = candidate.buffer(0)
+MIN_CLIPPED_AREA_M2 = 1.0
+# En dessous, un reste de rognage n'est plus un obstacle mais un copeau : un
+# sliver de quelques décimètres carrés extrudé sur 10 m de haut coûte des
+# triangles sans rien masquer, et peut même être dégénéré.
+
+
+def resolve_against_self(footprint_xy, self_polygon):
+    """Confronte l'empreinte d'un candidat (DÉJÀ dans le repère local du bâtiment
+    étudié) à celle du bâtiment lui-même. Retourne (polygones_à_extruder, statut) :
+
+    - `'kept'`    — aucun recouvrement : le candidat passe tel quel ;
+    - `'self'`    — recouvrement majoritaire : c'est le bâtiment étudié lui-même,
+                    présent dans IGN/OSM comme n'importe quel autre (Lot X) ;
+    - `'clipped'` — recouvrement partiel : le candidat est **rogné** de
+                    l'empreinte du bâtiment étudié plutôt qu'écarté.
+
+    Le rognage (choix de l'utilisateur, 2026-08-09) est ce qui manquait : un
+    voisin qui interpénètre l'enveloppe modélisée — cas courant quand celle-ci
+    est approximative (OBJ, boîte) — était soit conservé en s'enfonçant dans le
+    bâtiment, soit perdu en entier alors qu'il masque réellement le soleil. La
+    différence géométrique garde la partie qui existe vraiment.
+
+    Retourne une LISTE : soustraire le bâtiment peut couper l'obstacle en deux
+    (un voisin en U autour de lui), et peut aussi créer un trou (bâtiment
+    entièrement à l'intérieur de l'obstacle) — géré nativement par trimesh.
+    """
+    candidate = _as_polygon(footprint_xy)
     if candidate.is_empty or candidate.area < 1e-9:
-        return False
+        return [], 'degenerate'
+    if self_polygon is None:
+        return [candidate], 'kept'
+
     intersection = candidate.intersection(self_polygon).area
-    return intersection / min(candidate.area, self_polygon.area) > SELF_OVERLAP_RATIO
+    if intersection <= 1e-9:
+        return [candidate], 'kept'
+    union = candidate.union(self_polygon).area
+    if union > 0 and intersection / union > SELF_OVERLAP_RATIO:
+        return [], 'self'
+
+    remainder = candidate.difference(self_polygon)
+    parts = [
+        g for g in getattr(remainder, 'geoms', [remainder])
+        if not g.is_empty and g.area >= MIN_CLIPPED_AREA_M2
+    ]
+    return (parts, 'clipped') if parts else ([], 'self')
+
+
+def _is_studied_building(footprint_xy, self_polygon):
+    """Conservé pour les tests du Lot X et la végétation : vrai si le candidat
+    EST le bâtiment étudié (recouvrement majoritaire)."""
+    return resolve_against_self(footprint_xy, self_polygon)[1] == 'self'
 
 
 def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
@@ -590,7 +648,7 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
             'vertices': [], 'triangles': [],
             'warnings': warnings + ["Aucun bâtiment trouvé dans ce rayon."],
             'stats': {'buildings_used': 0, 'buildings_ign': n_ign, 'buildings_osm': n_osm,
-                      'buildings_skipped': 0, 'buildings_self': 0},
+                      'buildings_skipped': 0, 'buildings_self': 0, 'buildings_clipped': 0},
         }
 
     for b in buildings:
@@ -614,29 +672,43 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
     triangles = []
     n_approx_height = 0
     n_self = 0
+    n_clipped = 0
     processed = 0
     for b_index, b in enumerate(buildings):
         footprint_xy = [
             _rotate_xy(*local_xy(plat, plon, lat, lon), north_offset_deg)
             for plat, plon in b['footprint_latlon']
         ]
-        # Filtré AVANT l'extrusion et avant le contrôle de limite de maillage :
-        # sinon le doublon consommerait des sommets/triangles sur
-        # MAX_VERTICES/MAX_TRIANGLES et pourrait, via le `break` ci-dessous,
+        # Confronté au bâtiment étudié AVANT l'extrusion et avant le contrôle de
+        # limite de maillage : sinon un doublon consommerait des sommets/triangles
+        # sur MAX_VERTICES/MAX_TRIANGLES et pourrait, via le `break` ci-dessous,
         # évincer un vrai voisin plus éloigné.
-        if _is_studied_building(footprint_xy, self_polygon):
+        parts, status = resolve_against_self(footprint_xy, self_polygon)
+        if status == 'self':
             n_self += 1
             continue
+        if status == 'clipped':
+            n_clipped += 1
+        if not parts:
+            continue
+
+        # Un rognage peut couper l'obstacle en plusieurs morceaux : chacun est
+        # extrudé séparément, à la même hauteur.
+        pieces = []
         try:
-            v, f = extrude_footprint(footprint_xy, b['height_m'])
+            for part in parts:
+                pieces.append(extrude_polygon_mesh(part, b['height_m']))
         except GeodataError:
             continue
-        if len(vertices) + len(v) > geometry.MAX_VERTICES or len(triangles) + len(f) > geometry.MAX_TRIANGLES:
+        added_v = sum(len(v) for v, _f in pieces)
+        added_f = sum(len(f) for _v, f in pieces)
+        if len(vertices) + added_v > geometry.MAX_VERTICES or len(triangles) + added_f > geometry.MAX_TRIANGLES:
             break
         base_z = base_z_by_building[b_index]
-        offset = len(vertices)
-        vertices.extend([vx, vy, vz + base_z] for vx, vy, vz in v)
-        triangles.extend({'v': [i0 + offset, i1 + offset, i2 + offset]} for i0, i1, i2 in f)
+        for v, f in pieces:
+            offset = len(vertices)
+            vertices.extend([vx, vy, vz + base_z] for vx, vy, vz in v)
+            triangles.extend({'v': [i0 + offset, i1 + offset, i2 + offset]} for i0, i1, i2 in f)
         processed += 1
         if b.get('approx_height'):
             n_approx_height += 1
@@ -667,6 +739,13 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
             "IGN/OpenStreetMap à cet endroit. Normal s'il n'y figure pas (construction récente, "
             "zone non couverte) ; sinon, vérifiez son géoréférencement."
         )
+    if n_clipped > 0:
+        warnings.append(
+            f"{n_clipped} obstacle(s) rogné(s) : ils empiétaient sur l'enveloppe du bâtiment étudié "
+            "sans être lui. La partie qui le recouvre a été retirée, le reste est conservé comme "
+            "masque solaire — un empiétement vient en général d'une modélisation approximative du "
+            "bâtiment (import OBJ, boîte)."
+        )
     if n_approx_height > 0:
         warnings.append(
             f"Hauteur non disponible pour {n_approx_height} bâtiment(s) — "
@@ -681,6 +760,7 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
         'stats': {
             'buildings_used': processed, 'buildings_ign': n_ign, 'buildings_osm': n_osm,
             'buildings_skipped': n_skipped, 'buildings_self': n_self,
+            'buildings_clipped': n_clipped,
         },
     }
 
@@ -928,31 +1008,42 @@ def generate_vegetation_mesh(lat, lon, radius_m, north_offset_deg=0.0, ground_z_
             cx, cy = _rotate_xy(*local_xy(item['lat'], item['lon'], lat, lon), north_offset_deg)
             footprint_xy = _regular_polygon_xy(cx, cy, item['radius_m'])
 
-        # Une zone de végétation qui recouvre le bâtiment étudié est écartée
-        # pour la même raison qu'au Lot X : elle l'engloberait dans un volume
-        # opaque. Un arbre planté contre la façade, lui, reste légitime — d'où
-        # le même critère de recouvrement relatif, pas un simple contact.
-        if self_footprint is not None and _is_studied_building(footprint_xy, self_footprint):
+        # Même traitement que les bâtiments : une zone boisée qui EST le
+        # bâtiment étudié est écartée, une qui l'englobe ou l'effleure est
+        # ROGNÉE (un bois cartographié couvre souvent la parcelle entière,
+        # maison comprise — le rogner garde le couvert autour sans enfermer le
+        # bâtiment dans un volume translucide). Un arbre isolé planté contre la
+        # façade reste intact : il ne recouvre presque rien de l'empreinte.
+        parts, status = resolve_against_self(footprint_xy, self_footprint)
+        if status in ('self', 'degenerate'):
             n_skipped += 1
             continue
 
+        pieces = []
         try:
-            v, f = extrude_footprint(footprint_xy, item['height_m'])
+            for part in parts:
+                pieces.append(extrude_polygon_mesh(part, item['height_m']))
         except GeodataError:
             continue
-        if (len(vertices) + len(v) > geometry.MAX_VERTICES
-                or len(triangles) + len(f) > geometry.MAX_TRIANGLES):
+        added_v = sum(len(v) for v, _f in pieces)
+        added_f = sum(len(f) for _v, f in pieces)
+        if (len(vertices) + added_v > geometry.MAX_VERTICES
+                or len(triangles) + added_f > geometry.MAX_TRIANGLES):
             n_skipped += 1
             break
 
         base_z = base_z_by_object[obj_rank]
-        offset = len(vertices)
+        # UN SEUL `obj` pour toutes les parts d'un même élément rogné : c'est
+        # bien un objet unique traversé une fois, quel qu'en soit le découpage
+        # géométrique (voir api.shadow.VegetationScene).
         obj_index = len(transmittances)
-        vertices.extend([vx, vy, vz + base_z] for vx, vy, vz in v)
-        triangles.extend(
-            {'v': [i0 + offset, i1 + offset, i2 + offset], 'k': item['k'], 'obj': obj_index}
-            for i0, i1, i2 in f
-        )
+        for v, f in pieces:
+            offset = len(vertices)
+            vertices.extend([vx, vy, vz + base_z] for vx, vy, vz in v)
+            triangles.extend(
+                {'v': [i0 + offset, i1 + offset, i2 + offset], 'k': item['k'], 'obj': obj_index}
+                for i0, i1, i2 in f
+            )
         transmittances.append(item['k'])
         n_used += 1
 
