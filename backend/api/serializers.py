@@ -296,10 +296,27 @@ class SearchNearbyBuildingsRequestSerializer(serializers.Serializer):
 
 
 
+class GroundAltitudeRequestSerializer(serializers.Serializer):
+    """POST /api/altitude/ (Lot AA) — altitude du terrain en un point, pour
+    préremplir Building.georef_ground_z. Laissé vide, ce champ vaut 0 et TOUS les
+    obstacles issus d'IGN sont placés à leur altitude NGF absolue (100 m et plus)
+    au-dessus d'un bâtiment posé à z = 0 : l'ombrage est alors entièrement faux,
+    sans aucun signe visible."""
+
+    lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
+    lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
+
+
 class GenerateBuildingEnvironmentRequestSerializer(serializers.Serializer):
     """POST /api/batiments/<id>/generer-environnement/ — voir tasks.generate_environment_for_building."""
 
     radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
+    # Lot AA : pas de la grille de terrain (m). null/absent = pas de terrain,
+    # comportement d'origine. Le terrain est le plus gros contributeur en
+    # triangles du maillage d'obstacles (2 par maille), d'où un opt-in explicite
+    # plutôt qu'un défaut.
+    terrain_spacing_m = serializers.FloatField(required=False, allow_null=True, default=None,
+                                                min_value=2.0, max_value=100.0)
 
 
 class WeatherFetchRequestSerializer(serializers.Serializer):

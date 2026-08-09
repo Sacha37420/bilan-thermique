@@ -5,7 +5,9 @@ from .models import Job, Building, Environment, ParoiModel
 from . import shadow
 from . import building_solver
 from . import geodata
+from . import geometry
 from . import weather_source
+from . import elevation
 
 
 @shared_task(bind=True)
@@ -154,7 +156,7 @@ def generate_environment(self, job_id, params):
 
 
 @shared_task(bind=True)
-def generate_environment_for_building(self, job_id, building_id, radius_m):
+def generate_environment_for_building(self, job_id, building_id, radius_m, terrain_spacing_m=None):
     """Comme generate_environment, mais génère directement dans le repère local du
     Building (via ses champs georef_*) et crée/lie l'Environment résultant — pas
     d'étape de relecture manuelle nécessaire, contrairement à la génération autonome :
@@ -187,9 +189,44 @@ def generate_environment_for_building(self, job_id, building_id, radius_m):
             self_envelope=building.envelope,
         )
 
+        vertices = result['vertices']
+        triangles = result['triangles']
+        warnings = list(result['warnings'])
+
+        # Lot AA : maillage de terrain, optionnel (opt-in). Ajouté au MÊME
+        # maillage d'obstacles que les bâtiments — api.shadow ne fait aucune
+        # différence entre les deux, seule compte la géométrie qui bloque les
+        # rayons. Best-effort : un échec d'altimétrie ne doit pas perdre les
+        # bâtiments déjà extrudés.
+        terrain_source = None
+        n_terrain_points = 0
+        if terrain_spacing_m:
+            try:
+                job.set_state(progress=70, message="Altitude du terrain…")
+                terrain_mesh, terrain_source, n_terrain_points = elevation.build_terrain_for_building(
+                    building.georef_lat, building.georef_lon, radius_m, terrain_spacing_m,
+                    north_offset_deg=building.georef_north_offset_deg,
+                    ground_z_ref=building.georef_ground_z,
+                    footprint_polygon=geodata.envelope_footprint_polygon(building.envelope),
+                )
+                offset = len(vertices)
+                if (len(vertices) + len(terrain_mesh['vertices']) > geometry.MAX_VERTICES
+                        or len(triangles) + len(terrain_mesh['triangles']) > geometry.MAX_TRIANGLES):
+                    warnings.append(
+                        "Terrain abandonné : le maillage d'obstacles atteindrait la limite. "
+                        "Augmentez le pas de la grille ou réduisez le rayon."
+                    )
+                    terrain_source = None
+                else:
+                    vertices.extend(terrain_mesh['vertices'])
+                    triangles.extend({'v': [i + offset for i in t['v']]} for t in terrain_mesh['triangles'])
+            except elevation.ElevationError as exc:
+                warnings.append(f"Terrain non chargé ({exc}) — obstacles bâtis conservés.")
+                terrain_source = None
+
         env = Environment.objects.create(
             name=f"Auto — {building.name} — {timezone.now():%Y-%m-%d %H:%M}",
-            envelope={'vertices': result['vertices'], 'triangles': result['triangles']},
+            envelope={'vertices': vertices, 'triangles': triangles},
         )
         building.environment = env
         building.sun_visibility_stale = True
@@ -197,17 +234,21 @@ def generate_environment_for_building(self, job_id, building_id, radius_m):
 
         job.result = {
             'environment_id': env.id, 'environment_name': env.name,
-            'stats': result['stats'], 'warnings': result['warnings'],
+            'stats': {**result['stats'], 'terrain_source': terrain_source,
+                      'terrain_points': n_terrain_points},
+            'warnings': warnings,
         }
         job.save(update_fields=['result'])
         stats = result['stats']
-        n_triangles = len(result['triangles'])
+        n_triangles = len(triangles)
         job.set_state(
             status=Job.DONE, progress=100,
             message=f"« {env.name} » créé et lié — {stats['buildings_used']} bâtiment(s), "
                     f"{n_triangles} triangles (IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']})."
                     + (f" {stats['buildings_self']} écarté(s) : bâtiment étudié lui-même."
-                       if stats.get('buildings_self') else ""),
+                       if stats.get('buildings_self') else "")
+                    + (f" Terrain : {n_terrain_points} points ({terrain_source})."
+                       if terrain_source else ""),
         )
     except geodata.GeodataError as exc:
         job.set_state(status=Job.ERROR, message=str(exc))

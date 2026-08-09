@@ -73,6 +73,11 @@ export class BatimentComponent implements OnInit, OnDestroy {
   envGenJob = signal<Job | null>(null);
   envGenerating = signal(false);
   envGenRadius = 150;
+  // Lot AA — maillage de terrain ajouté aux obstacles (opt-in : c'est le plus
+  // gros contributeur en triangles, 2 par maille). Le relief masque le soleil
+  // rasant, ce qu'aucun bâtiment voisin ne reproduit.
+  envGenTerrain = false;
+  envGenTerrainSpacing = 10;
   // Avertissements de la dernière génération (job.result.warnings) — jamais
   // affichés jusqu'au Lot X, alors que c'est le seul canal qui dise ce qui a
   // été écarté et pourquoi : bâtiment étudié retiré de son propre
@@ -466,6 +471,34 @@ export class BatimentComponent implements OnInit, OnDestroy {
     });
   }
 
+  // ── Altitude du sol (Lot AA) ─────────────────────────────────────────
+  // georef_ground_z était saisi à la main, sans aide. Laissé vide il vaut 0, et
+  // TOUS les obstacles issus d'IGN se retrouvent alors à leur altitude NGF
+  // absolue (100 m et plus) au-dessus d'un bâtiment posé à z = 0 : l'ombrage
+  // est entièrement faux, sans le moindre signe visible.
+  fetchingAltitude = signal(false);
+
+  fetchGroundAltitude(): void {
+    if (this.georefLat === null || this.georefLon === null || this.fetchingAltitude()) return;
+    this.fetchingAltitude.set(true);
+    this.error.set('');
+    this.api.groundAltitude(this.georefLat, this.georefLon).subscribe({
+      next: (res) => {
+        const r = res as { altitude_m: number; source: string };
+        this.georefGroundZ = r.altitude_m;
+        this.fetchingAltitude.set(false);
+        this.message.set(
+          `Altitude du terrain : ${r.altitude_m} m (${r.source === 'ign' ? 'IGN RGE ALTI' : 'Open-Meteo'}). `
+          + `Enregistrez le bâtiment pour la conserver.`,
+        );
+      },
+      error: (err) => {
+        this.fetchingAltitude.set(false);
+        this.error.set(err?.error?.detail ?? "Échec de la récupération de l'altitude.");
+      },
+    });
+  }
+
   // ── Précalcul d'ombrage ──────────────────────────────────────────────
   triggerPrecompute(): void {
     const id = this.currentBuildingId();
@@ -515,7 +548,9 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.message.set('');
     this.envGenWarnings.set([]);
     this.envGenerating.set(true);
-    this.api.generateBuildingEnvironment(id, this.envGenRadius).subscribe({
+    this.api.generateBuildingEnvironment(
+      id, this.envGenRadius, this.envGenTerrain ? this.envGenTerrainSpacing : null,
+    ).subscribe({
       next: (res) => {
         this.envGenJob.set(res as Job);
         this.startEnvGenPoll();

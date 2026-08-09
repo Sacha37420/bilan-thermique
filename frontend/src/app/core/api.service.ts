@@ -79,8 +79,18 @@ export class ApiService {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/precalcul-ombrage/`, {});
   }
 
-  generateBuildingEnvironment(buildingId: number, radiusM: number): Observable<unknown> {
-    return this.http.post(`${this.base}/api/batiments/${buildingId}/generer-environnement/`, { radius_m: radiusM });
+  generateBuildingEnvironment(
+    buildingId: number, radiusM: number, terrainSpacingM: number | null = null,
+  ): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/${buildingId}/generer-environnement/`, {
+      radius_m: radiusM, terrain_spacing_m: terrainSpacingM,
+    });
+  }
+
+  /** Lot AA — altitude du terrain en un point (IGN RGE ALTI, repli mondial
+   * Open-Meteo). Synchrone : un point, un appel. */
+  groundAltitude(lat: number, lon: number): Observable<unknown> {
+    return this.http.post(`${this.base}/api/altitude/`, { lat, lon });
   }
 
   getJob(id: number): Observable<unknown> {

@@ -9,13 +9,14 @@ from .serializers import (
     BuildingSerializer, EnvironmentSerializer, JobSerializer, BuildingCalculRequestSerializer,
     RefineMeshRequestSerializer, GenerateEnvironmentRequestSerializer,
     GenerateBuildingEnvironmentRequestSerializer, WeatherFetchRequestSerializer,
-    SearchNearbyBuildingsRequestSerializer,
+    SearchNearbyBuildingsRequestSerializer, GroundAltitudeRequestSerializer,
 )
 from . import solver
 from . import tasks
 from . import building_solver
 from . import geometry
 from . import geodata
+from . import elevation
 
 
 class MeView(APIView):
@@ -114,6 +115,28 @@ class SearchNearbyBuildingsView(APIView):
         return Response({'candidates': candidates, 'n_skipped_too_complex': n_skipped_too_complex})
 
 
+class GroundAltitudeView(APIView):
+    """
+    POST /api/altitude/  {lat, lon}
+    Lot AA — altitude du terrain en ce point (IGN RGE ALTI en France, repli
+    mondial Open-Meteo Elevation). Synchrone : un point, un appel. Sert à
+    préremplir Building.georef_ground_z, dont l'absence place silencieusement
+    tous les obstacles IGN à leur altitude NGF absolue au-dessus d'un bâtiment
+    posé à z = 0.
+    """
+
+    def post(self, request):
+        serializer = GroundAltitudeRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            altitude_m, source = elevation.ground_altitude(
+                serializer.validated_data['lat'], serializer.validated_data['lon'],
+            )
+        except elevation.ElevationError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'altitude_m': round(altitude_m, 2), 'source': source})
+
+
 class GenerateBuildingEnvironmentView(APIView):
     """
     POST /api/batiments/<id>/generer-environnement/  {radius_m}
@@ -138,7 +161,10 @@ class GenerateBuildingEnvironmentView(APIView):
             kind='generate_environment_for_building',
             params={'building_id': building.pk, **serializer.validated_data},
         )
-        tasks.generate_environment_for_building.delay(job.id, building.pk, serializer.validated_data['radius_m'])
+        tasks.generate_environment_for_building.delay(
+            job.id, building.pk, serializer.validated_data['radius_m'],
+            serializer.validated_data.get('terrain_spacing_m'),
+        )
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 

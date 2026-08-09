@@ -16,7 +16,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
-from . import building_solver, geodata, geometry, serializers, shadow, solver, weather_source
+from . import building_solver, elevation, geodata, geometry, serializers, shadow, solver, weather_source
 from .models import Building
 
 DT_SECONDS = 3600.0
@@ -2774,3 +2774,97 @@ class LocalTimeOffsetTest(SimpleTestCase):
 
         s = serializers.WeatherFetchRequestSerializer(data={**base, 'utc_offset_h': 20})
         self.assertFalse(s.is_valid())
+
+
+class ElevationGridTest(SimpleTestCase):
+    """Lot AA — partie pure du maillage de terrain (grille, triangulation,
+    aplanissement sous le bâtiment). Le réseau est isolé dans fetch_* comme
+    partout ailleurs dans ce module."""
+
+    databases = []
+
+    def test_grid_is_square_and_centred(self):
+        coords, n = elevation.terrain_grid_local(radius_m=20.0, spacing_m=10.0)
+        self.assertEqual(n, 5)                       # -20 .. +20 au pas de 10
+        self.assertEqual(len(coords), 25)
+        self.assertEqual(coords[0], (-20.0, -20.0))
+        self.assertEqual(coords[-1], (20.0, 20.0))
+        # Balayage ligne par ligne : build_terrain_mesh en dépend pour trianguler.
+        self.assertEqual(coords[1], (-10.0, -20.0))
+        self.assertEqual(coords[n], (-20.0, -10.0))
+
+    def test_grid_refuses_to_explode(self):
+        with self.assertRaises(elevation.ElevationError):
+            elevation.terrain_grid_local(radius_m=400.0, spacing_m=2.0)
+        with self.assertRaises(elevation.ElevationError):
+            elevation.terrain_grid_local(radius_m=10.0, spacing_m=0.0)
+
+    def test_mesh_has_two_triangles_per_cell(self):
+        coords, n = elevation.terrain_grid_local(radius_m=20.0, spacing_m=10.0)
+        mesh = elevation.build_terrain_mesh(coords, n, [100.0] * len(coords), ground_z_ref=100.0)
+        self.assertEqual(len(mesh['vertices']), 25)
+        self.assertEqual(len(mesh['triangles']), 2 * (n - 1) * (n - 1))
+        # ground_z_ref soustrait : un terrain plat à l'altitude du bâtiment est à z = 0.
+        self.assertTrue(all(abs(v[2]) < 1e-12 for v in mesh['vertices']))
+
+    def test_mesh_indices_are_all_valid(self):
+        coords, n = elevation.terrain_grid_local(radius_m=30.0, spacing_m=10.0)
+        mesh = elevation.build_terrain_mesh(coords, n, list(range(len(coords))), ground_z_ref=0.0)
+        for tri in mesh['triangles']:
+            for i in tri['v']:
+                self.assertTrue(0 <= i < len(mesh['vertices']))
+
+    def test_relative_altitude_uses_ground_z_ref(self):
+        coords, n = elevation.terrain_grid_local(radius_m=10.0, spacing_m=10.0)
+        mesh = elevation.build_terrain_mesh(coords, n, [112.0] * len(coords), ground_z_ref=106.9)
+        for v in mesh['vertices']:
+            self.assertAlmostEqual(v[2], 5.1, places=6)
+
+    def test_terrain_is_flattened_under_the_building(self):
+        """Sans aplanissement, un terrain en pente traverse les murs et bloque
+        des rayons DEPUIS L'INTÉRIEUR de l'enveloppe — l'ombrage serait faussé
+        au lieu d'être amélioré."""
+        import shapely.geometry
+        coords, n = elevation.terrain_grid_local(radius_m=20.0, spacing_m=10.0)
+        # Pente régulière : altitude croissante avec x.
+        altitudes = [100.0 + x for x, _ in coords]
+        footprint = shapely.geometry.Polygon([(-5, -5), (5, -5), (5, 5), (-5, 5)])
+        mesh = elevation.build_terrain_mesh(coords, n, altitudes, ground_z_ref=100.0,
+                                             footprint_polygon=footprint)
+        inside = [v for v in mesh['vertices'] if -5 < v[0] < 5 and -5 < v[1] < 5]
+        self.assertTrue(inside)
+        self.assertTrue(all(abs(v[2]) < 1e-12 for v in inside), "sommets sous le bâtiment non aplanis")
+        outside = [v for v in mesh['vertices'] if v[0] > 15]
+        self.assertTrue(any(abs(v[2]) > 1.0 for v in outside), "le relief hors emprise doit subsister")
+
+    def test_mismatched_altitudes_are_rejected(self):
+        coords, n = elevation.terrain_grid_local(radius_m=10.0, spacing_m=10.0)
+        with self.assertRaises(elevation.ElevationError):
+            elevation.build_terrain_mesh(coords, n, [100.0], ground_z_ref=0.0)
+
+
+class LocalXyRoundTripTest(SimpleTestCase):
+    """Lot AA — latlon_from_local_xy doit être l'inverse EXACT de la chaîne
+    local_xy + _rotate_xy utilisée pour placer les obstacles. Une erreur de
+    signe ici demanderait l'altitude au mauvais endroit, en silence : le terrain
+    aurait l'air plausible tout en étant celui d'à côté."""
+
+    databases = []
+
+    LAT, LON = 47.90123, 1.68345
+
+    def test_round_trip_at_every_north_offset(self):
+        for offset in (0.0, 37.0, 90.0, 180.0, 270.0):
+            for x, y in ((0.0, 0.0), (150.0, -80.0), (-42.5, 63.25)):
+                with self.subTest(offset=offset, x=x, y=y):
+                    lat, lon = geodata.latlon_from_local_xy(x, y, self.LAT, self.LON, offset)
+                    back = geodata._rotate_xy(
+                        *geodata.local_xy(lat, lon, self.LAT, self.LON), offset,
+                    )
+                    self.assertAlmostEqual(back[0], x, places=6)
+                    self.assertAlmostEqual(back[1], y, places=6)
+
+    def test_origin_maps_to_the_reference_point(self):
+        lat, lon = geodata.latlon_from_local_xy(0.0, 0.0, self.LAT, self.LON, 42.0)
+        self.assertAlmostEqual(lat, self.LAT, places=9)
+        self.assertAlmostEqual(lon, self.LON, places=9)

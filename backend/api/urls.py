@@ -5,7 +5,7 @@ from .views import (
     BuildingListCreateView, BuildingDetailView, GenerateBuildingEnvironmentView,
     EnvironmentListCreateView, EnvironmentDetailView, GenerateEnvironmentView,
     JobDetailView, PrecomputeShadowsView, BuildingCalculView, BuildingRefineView,
-    FetchWeatherView, SearchNearbyBuildingsView,
+    FetchWeatherView, SearchNearbyBuildingsView, GroundAltitudeView,
 )
 
 urlpatterns = [
@@ -26,5 +26,6 @@ urlpatterns = [
     path('environnements/generer/', GenerateEnvironmentView.as_view()),
     path('environnements/<int:pk>/', EnvironmentDetailView.as_view()),
     path('meteo/recuperer/',  FetchWeatherView.as_view()),
+    path('altitude/',         GroundAltitudeView.as_view()),
     path('jobs/<int:pk>/',    JobDetailView.as_view()),
 ]

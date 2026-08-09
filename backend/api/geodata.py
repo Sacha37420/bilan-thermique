@@ -80,6 +80,17 @@ def local_xy(lat, lon, lat0, lon0):
     return x, y
 
 
+def latlon_from_local_xy(x, y, lat0, lon0, north_offset_deg=0.0):
+    """Inverse exact de `_rotate_xy(*local_xy(lat, lon, lat0, lon0), north_offset_deg)` :
+    d'un point du repère LOCAL d'un bâtiment vers (lat, lon). Sert au Lot AA, qui
+    doit demander l'altitude d'une grille définie en coordonnées locales.
+    La rotation s'inverse en la rejouant avec l'angle opposé."""
+    east, north = _rotate_xy(x, y, -north_offset_deg)
+    lat = lat0 + math.degrees(north / EARTH_RADIUS_M)
+    lon = lon0 + math.degrees(east / (EARTH_RADIUS_M * math.cos(math.radians(lat0))))
+    return lat, lon
+
+
 def _rotate_xy(x, y, angle_deg):
     """Rotation standard d'angle angle_deg (°, sens horaire — même convention que
     Building.georef_north_offset_deg / geometry.py azimuth) autour de l'origine.
