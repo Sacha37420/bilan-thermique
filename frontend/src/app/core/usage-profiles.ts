@@ -105,19 +105,25 @@ export function defaultOccupationCalendar(): OccupationCalendar {
 }
 
 /** Une entrée {t_min, t_max} par heure de la série météo (même longueur que
- * `weather`), à fusionner dans chaque point météo avant soumission. */
+ * `absoluteHours`), à fusionner dans chaque point météo avant soumission.
+ *
+ * `absoluteHours` (Lot AB1) : heure absolue de CHAQUE point — `hour_index` du
+ * point météo quand il vient du fetch (dérivé de son horodatage réel), sinon
+ * `heureDebut + position`. Ce paramètre remplace l'ancien couple
+ * (heureDebut, nHours), qui reconstruisait l'heure à partir de la POSITION dans
+ * la liste : le fetch saute les heures à donnée manquante, donc dès le premier
+ * trou la position ne correspondait plus à l'heure réelle et tout le calendrier
+ * (jour/nuit, week-end, vacances) dérivait pour le reste du run — silencieusement,
+ * `n_missing` n'apparaissant que dans le message du job. */
 export function computeThermostatSetpoints(
-  profile: UsageProfile, calendar: OccupationCalendar, heureDebut: number, nHours: number,
+  profile: UsageProfile, calendar: OccupationCalendar, absoluteHours: number[],
 ): { t_min: number; t_max: number }[] {
-  const result: { t_min: number; t_max: number }[] = [];
-  for (let h = 0; h < nHours; h++) {
-    const absoluteHour = heureDebut + h;
-    const hourOfDay = absoluteHour % 24;
+  return absoluteHours.map(absoluteHour => {
+    const hourOfDay = ((absoluteHour % 24) + 24) % 24;
     const dayIdx = Math.floor(absoluteHour / 24);
-    const weekday = (calendar.jourDebut + dayIdx) % 7;
+    const weekday = (((calendar.jourDebut + dayIdx) % 7) + 7) % 7;
     const isWeekend = !calendar.joursOuvres[weekday];
     const isVacation = calendar.vacances.some(r => dayIdx >= r.debut && dayIdx <= r.fin);
-    result.push(setpointsFor(profile, isWeekend, isVacation, hourOfDay));
-  }
-  return result;
+    return setpointsFor(profile, isWeekend, isVacation, hourOfDay);
+  });
 }

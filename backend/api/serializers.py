@@ -387,6 +387,17 @@ class BuildingWeatherPointSerializer(serializers.Serializer):
     # constante du payload).
     wind_m_s = serializers.FloatField(required=False, allow_null=True, default=None,
                                        min_value=0.0, max_value=100.0)
+    # Heure absolue de ce point (Lot AB1) : nombre d'heures depuis minuit du
+    # premier jour de la série, donc `% 24` = heure du jour. Alimentée par le
+    # fetch météo depuis l'horodatage réel de chaque ligne. Remplace, quand elle
+    # est présente, l'indexation par POSITION (`heure_debut + hour_idx`) du
+    # planning horaire (Lot Q) et des volets (Lot J) : le fetch saute les heures
+    # à donnée manquante, donc la position ne correspond plus à l'heure réelle
+    # dès le premier trou — et la dérive était définitive et silencieuse.
+    # Absente (série collée à la main) : repli sur `heure_debut`, comportement
+    # d'origine. Bornée à un an d'heures, comme la série elle-même.
+    hour_index = serializers.IntegerField(required=False, allow_null=True, default=None,
+                                           min_value=0, max_value=8783)
     # Consignes thermostat de CETTE heure (Lot V, calendrier d'occupation) —
     # optionnelles, remplacent interior.t_min/t_max pour cette heure
     # uniquement (mode 'thermostat' seulement, sans effet sinon). Résolues

@@ -2200,3 +2200,200 @@ class SelfBuildingFilterFrameTest(SimpleTestCase):
                     geodata._is_studied_building(candidate, self_polygon),
                     f"voisin écarté à tort à north_offset_deg={offset}",
                 )
+
+
+class WeatherHourIndexTest(SimpleTestCase):
+    """Lot AB1 — `hour_index` porté par chaque point météo.
+
+    weather_source SAUTE les heures dont une donnée manque (décision du Lot L :
+    ne rien inventer). Tout ce qui indexait le temps par la POSITION dans la
+    liste — planning de ventilation/apports/volets (Lots Q et J) côté serveur,
+    calendrier d'occupation (Lot V) côté client — dérivait donc définitivement
+    d'autant d'heures qu'il en manquait, sans aucun signe (`n_missing`
+    n'apparaît que dans le message du Job).
+    """
+
+    databases = []
+
+    @staticmethod
+    def _archive_payload(times, drop_temp_at=()):
+        n = len(times)
+        return {'hourly': {
+            'time': times,
+            'temperature_2m': [None if i in drop_temp_at else 10.0 for i in range(n)],
+            'direct_normal_irradiance': [0.0] * n,
+            'diffuse_radiation': [0.0] * n,
+            'wind_speed_10m': [3.0] * n,
+        }}
+
+    def test_hour_index_matches_position_when_nothing_missing(self):
+        times = [f'2024-03-05T{h:02d}:00' for h in range(24)]
+        series, n_missing = weather_source._assemble_weather_series(48.85, 2.35, self._archive_payload(times))
+        self.assertEqual(n_missing, 0)
+        self.assertEqual([p['hour_index'] for p in series], list(range(24)))
+
+    def test_hour_index_survives_missing_hours(self):
+        """LE cas du bug : 3 heures sautées au milieu. Les points suivants
+        doivent garder leur heure RÉELLE, pas leur rang dans la liste."""
+        times = [f'2024-03-05T{h:02d}:00' for h in range(24)]
+        series, n_missing = weather_source._assemble_weather_series(
+            48.85, 2.35, self._archive_payload(times, drop_temp_at={8, 9, 10}),
+        )
+        self.assertEqual(n_missing, 3)
+        self.assertEqual(len(series), 21)
+        # Position 8 dans la liste = 11 h réelles (8, 9, 10 sautées).
+        self.assertEqual(series[8]['hour_index'], 11)
+        self.assertEqual(series[-1]['hour_index'], 23)
+        # Le bug d'origine : l'ancien calcul (heure_debut=0 + position) aurait
+        # donné 20 pour la dernière heure au lieu de 23 — 3 h de décalage.
+        self.assertNotEqual(series[-1]['hour_index'], len(series) - 1)
+
+    def test_hour_index_spans_days(self):
+        times = [f'2024-03-{d:02d}T{h:02d}:00' for d in (5, 6, 7) for h in range(24)]
+        series, _ = weather_source._assemble_weather_series(48.85, 2.35, self._archive_payload(times))
+        self.assertEqual(series[0]['hour_index'], 0)
+        self.assertEqual(series[24]['hour_index'], 24)     # jour 1, minuit
+        self.assertEqual(series[47]['hour_index'], 47)     # jour 1, 23 h
+        self.assertEqual(series[-1]['hour_index'], 71)     # jour 2, 23 h
+
+    def test_hour_index_survives_a_whole_missing_day(self):
+        """Une JOURNÉE entière absente : le décompte des jours doit rester juste
+        (sinon week-ends et vacances du calendrier d'occupation glissent d'un
+        jour) — c'est pourquoi hour_index est dérivé de la DATE et non d'un
+        compteur incrémenté ligne à ligne."""
+        times = [f'2024-03-{d:02d}T{h:02d}:00' for d in (5, 6, 7) for h in range(24)]
+        series, _ = weather_source._assemble_weather_series(
+            48.85, 2.35, self._archive_payload(times, drop_temp_at=set(range(24, 48))),
+        )
+        self.assertEqual(len(series), 48)
+        self.assertEqual(series[24]['hour_index'], 48)  # 7 mars 00 h, pas 24
+        self.assertEqual(series[24]['hour_index'] // 24, 2)
+
+    def test_tmy_hour_index_ignores_source_years(self):
+        """Une TMY assemble des mois issus d'ANNÉES DIFFÉRENTES : compter par
+        différence de dates sauterait des années entières d'un mois à l'autre.
+        Ici, 31 déc 2011 puis 1er jan 2007 doivent rester deux jours
+        CONSÉCUTIFS de l'année type."""
+        rows = (
+            [{'time(UTC)': f'20111231:{h:02d}00', 'T2m': 5.0, 'Gb(n)': 0.0, 'Gd(h)': 0.0, 'WS10m': 2.0}
+             for h in range(24)]
+            + [{'time(UTC)': f'20070101:{h:02d}00', 'T2m': 4.0, 'Gb(n)': 0.0, 'Gd(h)': 0.0, 'WS10m': 2.0}
+               for h in range(24)]
+        )
+        series, _ = weather_source._assemble_tmy_series(48.85, 2.35, {'outputs': {'tmy_hourly': rows}})
+        self.assertEqual(series[0]['hour_index'], 0)
+        self.assertEqual(series[23]['hour_index'], 23)
+        self.assertEqual(series[24]['hour_index'], 24)
+        self.assertEqual(series[-1]['hour_index'], 47)
+
+
+class PlanningHourIndexTest(SimpleTestCase):
+    """Lot AB1 — le solveur suit `hour_index` plutôt que la position, quand il
+    est fourni, pour le planning (Lot Q) ET les volets (Lot J)."""
+
+    databases = []
+
+    LAYERS = [{'e': 0.2, 'lam': 1.0, 'rho': 2000.0, 'c': 900.0, 'tau': 0.0, 'r': 0.9, 'alpha': 0.1}]
+
+    def _envelope(self):
+        vertices = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 1.0]]
+        triangles = geometry.compute_envelope_geometry(
+            vertices, [{'v': [0, 1, 2], 'paroi_model_id': 1}],
+        )
+        return {'vertices': vertices, 'triangles': triangles}
+
+    @staticmethod
+    def _point(hour_index=None):
+        p = {'t_ext': 0.0, 'sun_azimuth': 0.0, 'sun_elevation': -10.0, 'e_dir': 0.0, 'e_dif': 0.0}
+        if hour_index is not None:
+            p['hour_index'] = hour_index
+        return p
+
+    def _run(self, weather, planning, heure_debut=0):
+        payload = {
+            'dx_max': 0.1, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 5000.0},
+            't_init': 20.0, 'weather': weather, 'planning': planning, 'heure_debut': heure_debut,
+        }
+        return building_solver.run_building_simulation(
+            self._envelope(), {1: self.LAYERS}, None, payload,
+        )
+
+    @staticmethod
+    def _planning_with_gain_at(slot):
+        """Planning neutre sauf un gros apport interne à UNE heure donnée : la
+        température finale trahit alors sans ambiguïté quel créneau a été
+        appliqué."""
+        return [
+            {'debit_vent_m3h': 0.0, 'eta_recup_vent': 0.0,
+             'apports_internes_w': 5000.0 if h == slot else 0.0}
+            for h in range(24)
+        ]
+
+    def test_missing_hours_do_not_shift_the_planning(self):
+        """Série amputée de 3 heures avant le créneau porteur de l'apport.
+        Avec hour_index, l'apport tombe sur la bonne heure ; sans lui (repli sur
+        la position), il tomberait 3 heures trop tôt — c'est le bug."""
+        kept_hours = [h for h in range(24) if h not in (2, 3, 4)]
+        with_index = [self._point(hour_index=h) for h in kept_hours]
+        without_index = [self._point() for _ in kept_hours]
+        planning = self._planning_with_gain_at(20)
+
+        t_correct = self._run(with_index, planning)['t_air_mean']
+        t_shifted = self._run(without_index, planning)['t_air_mean']
+        # Référence : la même série SANS trou, où position et heure coïncident.
+        t_reference = self._run([self._point(hour_index=h) for h in range(24)], planning)['t_air_mean']
+
+        # L'apport est bien appliqué dans les deux cas (même énergie totale),
+        # mais pas à la même heure : les moyennes diffèrent.
+        self.assertNotAlmostEqual(t_correct, t_shifted, places=6)
+        # Et la série trouée correctement indexée reste proche de la référence.
+        self.assertLess(abs(t_correct - t_reference), abs(t_shifted - t_reference))
+
+    def test_hour_index_beats_heure_debut(self):
+        """hour_index fourni ET heure_debut incohérent : hour_index gagne."""
+        weather = [self._point(hour_index=h) for h in range(24)]
+        planning = self._planning_with_gain_at(9)
+        self.assertAlmostEqual(
+            self._run(weather, planning, heure_debut=0)['t_air_mean'],
+            self._run(weather, planning, heure_debut=17)['t_air_mean'],
+            places=9,
+        )
+
+    def test_heure_debut_still_used_without_hour_index(self):
+        """Série collée à la main (aucun hour_index) : heure_debut continue de
+        piloter l'alignement, comportement du Lot Q inchangé."""
+        weather = [self._point() for _ in range(24)]
+        planning = self._planning_with_gain_at(9)
+        self.assertNotAlmostEqual(
+            self._run(weather, planning, heure_debut=0)['t_air_mean'],
+            self._run(weather, planning, heure_debut=17)['t_air_mean'],
+            places=6,
+        )
+
+    def test_shutter_schedule_follows_hour_index_too(self):
+        """Les volets (Lot J) partagent le même créneau que le planning : ils
+        doivent suivre hour_index de la même façon (ils entrent dans K, pas
+        seulement dans F — d'où un test séparé)."""
+        envelope = self._envelope()
+        envelope['triangles'][0]['shading_profile_id'] = 'volet-roulant'
+        planning = [
+            {'debit_vent_m3h': 0.0, 'eta_recup_vent': 0.0, 'apports_internes_w': 0.0,
+             'volets_fermes': h >= 18}
+            for h in range(24)
+        ]
+        payload_base = {
+            'dx_max': 0.1, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 5000.0},
+            't_init': 20.0, 'planning': planning, 'heure_debut': 0,
+        }
+        kept_hours = [h for h in range(24) if h not in (2, 3, 4)]
+
+        def run(weather):
+            return building_solver.run_building_simulation(
+                envelope, {1: self.LAYERS}, None, {**payload_base, 'weather': weather},
+            )['t_air_mean']
+
+        t_correct = run([self._point(hour_index=h) for h in kept_hours])
+        t_shifted = run([self._point() for _ in kept_hours])
+        self.assertNotAlmostEqual(t_correct, t_shifted, places=6)

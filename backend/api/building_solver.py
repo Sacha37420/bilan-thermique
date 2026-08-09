@@ -464,7 +464,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     'free'/'thermostat' uniquement, comme pour les constantes équivalentes.
     Absent (défaut) -> comportement inchangé (valeurs constantes de `interior`).
     heure_debut (payload, 0-23, défaut 0) : heure du premier point de `weather`,
-    utilisée pour indexer le planning (`planning[(heure_debut + hour_idx) % 24]`).
+    utilisée pour indexer le planning (`planning[(heure_debut + hour_idx) % 24]`)
+    UNIQUEMENT pour les points qui ne portent pas `hour_index` (Lot AB1 — série
+    collée à la main). Dès que la météo vient du fetch, chaque point porte son
+    heure absolue réelle et `heure_debut` n'est plus consulté : une heure
+    manquante dans la série (Open-Meteo saute les données absentes) décalait
+    sinon tout le planning et les volets pour le reste du run, définitivement et
+    sans aucun signe.
 
     volets_fermes (planning[slot], optionnel booléen, défaut False — Lot J) :
     UN SEUL planning pour TOUS les triangles ayant un `shading_profile_id`
@@ -694,8 +700,16 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     n_hours_total = len(weather)
     for hour_idx, point in enumerate(weather):
+        # Créneau horaire de CE point (Lot AB1) : `hour_index` porté par le point
+        # lui-même quand la météo vient du fetch (dérivé de son horodatage réel),
+        # sinon repli sur la position dans la liste. `.get(...) is not None` et
+        # non `.get(cle, repli)` : le serializer (default=None) rend la clé
+        # toujours présente avec la valeur None — même piège que t_min/t_max
+        # plus bas, déjà rencontré au Lot V.
+        point_hour_index = point.get('hour_index')
+        slot = ((point_hour_index if point_hour_index is not None else heure_debut + hour_idx) % 24)
+
         if g_vent_by_slot is not None:
-            slot = (heure_debut + hour_idx) % 24
             g_vent = g_vent_by_slot[slot]
             apports_internes_w = apports_by_slot[slot]
         else:
@@ -711,7 +725,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         else:
             h_e = h_e_constant
 
-        volet_closed = volet_by_slot[(heure_debut + hour_idx) % 24] if volet_by_slot is not None else False
+        volet_closed = volet_by_slot[slot] if volet_by_slot is not None else False
 
         key = (g_vent, h_e, volet_closed)
         bundle = bundles.get(key)

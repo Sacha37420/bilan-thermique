@@ -187,7 +187,8 @@ def fetch_open_meteo_archive(lat, lon, start_date, end_date):
     return data
 
 
-def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg, wind_m_s=None):
+def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg, wind_m_s=None,
+                  hour_index=None):
     """Position solaire + clamping vers les bornes de BuildingWeatherPointSerializer
     pour UNE heure — partagé par les deux sources (Open-Meteo Archive, PVGIS TMY,
     Lot S), qui n'ont en commun que cette physique, pas le format brut de leur
@@ -196,7 +197,16 @@ def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg
     wind_m_s (Lot R, optionnel) : contrairement à t_ext/e_dir/e_dif, une valeur
     manquante n'annule PAS l'heure entière (voir les appelants) — h_e_dynamic
     reste simplement inutilisable pour ce point si absent, sans empêcher le
-    reste du calcul de fonctionner en h_e constant."""
+    reste du calcul de fonctionner en h_e constant.
+
+    hour_index (Lot AB1) : nombre d'heures écoulées depuis minuit du PREMIER
+    jour de la série — donc `hour_index % 24` = heure du jour et
+    `hour_index // 24` = numéro du jour. Porté PAR POINT parce que les
+    appelants sautent les heures à donnée manquante (voir _assemble_weather_series) :
+    la position dans la liste ne correspond alors plus à l'heure réelle, et tout
+    ce qui indexait le temps par cette position (planning de ventilation/volets
+    côté serveur, calendrier d'occupation côté client) dérivait définitivement
+    d'autant d'heures qu'il en manquait, en silence."""
     real_azimuth, elevation = solar_position(lat, lon, dt_utc)
     local_azimuth = to_local_azimuth(real_azimuth, north_offset_deg)
     return {
@@ -206,6 +216,7 @@ def _enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg
         'e_dir': max(0.0, min(E_DIR_MAX, e_dir_raw)),
         'e_dif': max(0.0, min(E_DIF_MAX, e_dif_raw)),
         'wind_m_s': max(0.0, wind_m_s) if wind_m_s is not None else None,
+        'hour_index': hour_index,
     }
 
 
@@ -230,6 +241,7 @@ def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
 
     series = []
     n_missing = 0
+    first_date = None
     for i, t in enumerate(times):
         t_ext = temps[i] if i < len(temps) else None
         e_dir_raw = dni[i] if i < len(dni) else None
@@ -247,7 +259,14 @@ def _assemble_weather_series(lat, lon, data, north_offset_deg=0.0):
         # voir _enrich_hour), le reste du bilan n'en dépend pas.
         wind_m_s = wind[i] if i < len(wind) else None
         dt_utc = datetime.fromisoformat(t).replace(tzinfo=timezone.utc)
-        series.append(_enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg, wind_m_s=wind_m_s))
+        # hour_index dérivé de la DATE de la ligne, jamais de sa position :
+        # c'est ce qui le rend insensible aux heures sautées juste au-dessus,
+        # y compris si une journée entière manque (l'écart de dates la compte).
+        if first_date is None:
+            first_date = dt_utc.date()
+        hour_index = (dt_utc.date() - first_date).days * 24 + dt_utc.hour
+        series.append(_enrich_hour(lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg,
+                                    wind_m_s=wind_m_s, hour_index=hour_index))
 
     if not series:
         raise WeatherSourceError("Toutes les heures de cette période ont une donnée manquante côté Open-Meteo.")
@@ -328,6 +347,14 @@ def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
 
     series = []
     n_missing = 0
+    # hour_index (Lot AB1) : compté ici par CHANGEMENT DE (mois, jour) et non
+    # par différence de dates comme pour Open-Meteo Archive — une TMY assemble
+    # des mois issus d'ANNÉES SOURCE DIFFÉRENTES (voir _parse_pvgis_timestamp),
+    # donc une soustraction de dates sauterait d'années entières d'un mois à
+    # l'autre. L'année encodée n'a aucune signification ici, seul l'ordre
+    # chronologique (janvier -> décembre) en a.
+    day_index = -1
+    previous_day = None
     for row in hourly:
         ts = row.get('time(UTC)')
         t_ext = row.get('T2m')
@@ -338,8 +365,13 @@ def _assemble_tmy_series(lat, lon, data, north_offset_deg=0.0):
             continue
 
         dt_utc = _parse_pvgis_timestamp(ts)
+        current_day = (dt_utc.month, dt_utc.day)
+        if current_day != previous_day:
+            day_index += 1
+            previous_day = current_day
         series.append(_enrich_hour(
             lat, lon, dt_utc, t_ext, e_dir_raw, e_dif_raw, north_offset_deg, wind_m_s=row.get('WS10m'),
+            hour_index=day_index * 24 + dt_utc.hour,
         ))
 
     if not series:

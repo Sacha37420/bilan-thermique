@@ -291,8 +291,18 @@
           <div class="field-grid">
             <label>
               <span>Heure de début de la météo (0-23)</span>
-              <input type="number" step="1" min="0" max="23" [(ngModel)]="heureDebut" name="heureDebut" />
-              <small>Heure du premier point de la série météo ci-dessous (0 = minuit) — sert à aligner le planning.</small>
+              <input type="number" step="1" min="0" max="23" [(ngModel)]="heureDebut" name="heureDebut"
+                [disabled]="weatherCarriesHours" />
+              <small>
+                @if (weatherCarriesHours) {
+                  Sans effet : la série météo chargée porte déjà l'heure réelle de chaque ligne
+                  (7e colonne), qui prime sur ce réglage.
+                } @else {
+                  Heure du premier point de la série météo ci-dessous (0 = minuit) — sert à aligner
+                  le planning. Utilisé uniquement pour une série collée à la main : une météo
+                  récupérée automatiquement porte l'heure de chaque ligne.
+                }
+              </small>
             </label>
           </div>
           <p class="hint">
@@ -320,10 +330,14 @@
     <section class="form-card">
       <h2>Météo — série horaire</h2>
       <p class="hint">
-        Une ligne par heure : <code>T_ext, azimuth_soleil, élévation_soleil, E_dir, E_dif[, vent_m_s]</code>
-        (°C, degrés [0..360], degrés, W/m², W/m², m/s). 6e colonne (vent) optionnelle — seulement
-        nécessaire si « h_e dynamique » est coché ci-dessus ; déjà incluse automatiquement par la
-        récupération météo ci-dessous.
+        Une ligne par heure :
+        <code>T_ext, azimuth_soleil, élévation_soleil, E_dir, E_dif[, vent_m_s][, heure_absolue]</code>
+        (°C, degrés [0..360], degrés, W/m², W/m², m/s, h). 6e colonne (vent) optionnelle — seulement
+        nécessaire si « h_e dynamique » est coché ci-dessus. 7e colonne : heures écoulées depuis
+        minuit du premier jour, qui donne l'heure réelle de chaque ligne (modulo 24) au planning
+        horaire et au calendrier d'occupation. Les deux sont remplies automatiquement par la
+        récupération météo ci-dessous — c'est ce qui garde le planning aligné même quand la source
+        n'a pas de donnée pour certaines heures et qu'elles sont donc absentes de la série.
       </p>
 
       <div class="const-weather">

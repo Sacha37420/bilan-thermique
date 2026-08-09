@@ -26,6 +26,15 @@ interface WeatherPoint {
   // fetch météo (Open-Meteo/PVGIS) ; requis heure par heure uniquement si
   // h_e dynamique est activé (voir hEDynamic ci-dessous).
   wind_m_s?: number;
+  // Heure absolue de ce point (Lot AB1) : heures écoulées depuis minuit du
+  // premier jour de la série, donc `% 24` = heure du jour. Alimentée par le
+  // fetch météo depuis l'horodatage réel de chaque ligne, et transportée dans
+  // la 7e colonne du CSV — pas dans un tableau parallèle : le fetch saute les
+  // heures à donnée manquante et l'utilisateur peut supprimer des lignes, or
+  // c'est très exactement ce genre d'opération qui désaligne un tableau
+  // parallèle. Attachée à sa ligne, l'information reste juste quoi qu'il
+  // arrive aux autres.
+  hour_index?: number;
   // Consignes thermostat de cette heure (Lot V, calendrier d'occupation) —
   // fusionnées à la soumission depuis thermostatSetpoints(), jamais éditées
   // directement dans le CSV (voir generateThermostatCalendar()).
@@ -137,11 +146,28 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     this.occupationCalendar.vacances.splice(index, 1);
   }
 
+  /** Heure absolue de chaque point météo (Lot AB1) : `hour_index` porté par le
+   * point quand la météo vient du fetch — dérivé de son horodatage réel, donc
+   * juste même si des heures manquent — sinon repli sur la position dans la
+   * liste, seul choix possible pour une série collée à la main. */
+  private absoluteHours(): number[] {
+    return this.weather().map((p, h) => p.hour_index ?? this.heureDebut + h);
+  }
+
+  /** Vrai si la série météo porte ses propres heures absolues : dans ce cas
+   * `heureDebut` n'a plus d'effet (ni sur le planning côté serveur, ni sur ce
+   * calendrier) et l'interface doit le dire plutôt que d'afficher un réglage
+   * qui ne fait rien. */
+  get weatherCarriesHours(): boolean {
+    const points = this.weather();
+    return points.length > 0 && points.every(p => p.hour_index !== undefined);
+  }
+
   generateThermostatCalendar(): void {
     const profile = this.selectedUsageProfile;
     if (!profile || this.weather().length === 0) return;
     this.thermostatSetpoints.set(
-      computeThermostatSetpoints(profile, this.occupationCalendar, this.heureDebut, this.weather().length),
+      computeThermostatSetpoints(profile, this.occupationCalendar, this.absoluteHours()),
     );
   }
   shadowMode: 'precomputed' | 'realtime' = 'precomputed';
@@ -353,10 +379,17 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
         const wind = Number(cells[5].replace(',', '.'));
         if (!Number.isNaN(wind)) point.wind_m_s = wind;
       }
+      // 7e colonne optionnelle (Lot AB1) : heure absolue depuis minuit du
+      // premier jour. Même garde que pour le vent — `Number('')` vaut 0, ce qui
+      // ferait passer une cellule vide pour « minuit du premier jour ».
+      if (cells.length >= 7 && cells[6] !== '') {
+        const hourIndex = Number(cells[6]);
+        if (Number.isInteger(hourIndex) && hourIndex >= 0) point.hour_index = hourIndex;
+      }
       points.push(point);
     }
     if (points.length === 0) {
-      this.weatherError.set("Aucune ligne valide — format attendu : T_ext, azimuth_soleil, élévation_soleil, E_dir, E_dif[, vent_m_s]");
+      this.weatherError.set("Aucune ligne valide — format attendu : T_ext, azimuth_soleil, élévation_soleil, E_dir, E_dif[, vent_m_s][, heure_absolue]");
     }
     this.weather.set(points);
   }
@@ -427,7 +460,10 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
                 weather: WeatherPoint[]; source: 'pvgis-tmy' | 'open-meteo-archive'; warning: string | null;
               };
               this.weatherRaw = result.weather
-                .map(p => [p.t_ext, p.sun_azimuth, p.sun_elevation, p.e_dir, p.e_dif, p.wind_m_s ?? ''].join(','))
+                .map(p => [
+                  p.t_ext, p.sun_azimuth, p.sun_elevation, p.e_dir, p.e_dif,
+                  p.wind_m_s ?? '', p.hour_index ?? '',
+                ].join(','))
                 .join('\n');
               this.parseWeather();
               const sourceLabel = result.source === 'pvgis-tmy'
