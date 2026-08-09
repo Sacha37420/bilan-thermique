@@ -165,6 +165,7 @@ class GenerateBuildingEnvironmentView(APIView):
         tasks.generate_environment_for_building.delay(
             job.id, building.pk, serializer.validated_data['radius_m'],
             serializer.validated_data.get('terrain_spacing_m'),
+            serializer.validated_data.get('include_vegetation', False),
         )
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 

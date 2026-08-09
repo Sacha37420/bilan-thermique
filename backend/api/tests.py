@@ -2868,3 +2868,141 @@ class LocalXyRoundTripTest(SimpleTestCase):
         lat, lon = geodata.latlon_from_local_xy(0.0, 0.0, self.LAT, self.LON, 42.0)
         self.assertAlmostEqual(lat, self.LAT, places=9)
         self.assertAlmostEqual(lon, self.LON, places=9)
+
+
+def _veg_box(x0, y0, x1, y1, z0, z1, obj, k, base_vertex=0):
+    """Boîte translucide (végétation) — 8 sommets, 12 triangles portant k/obj."""
+    v = [
+        [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+        [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+    ]
+    quads = [(0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4),
+             (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+    t = []
+    for a, b, c, d in quads:
+        for tri in ((a, b, c), (a, c, d)):
+            t.append({'v': [base_vertex + i for i in tri], 'k': k, 'obj': obj})
+    return v, t
+
+
+class VegetationOccluderTest(SimpleTestCase):
+    """Lot Z — la végétation atténue le rayonnement au lieu de le bloquer.
+
+    Le piège central : un rayon qui traverse un volume fermé touche AU MOINS
+    DEUX faces (entrée et sortie). Multiplier la transmittance à chaque face
+    donnerait k² au lieu de k — d'où le regroupement par objet (`obj`) dans
+    api.shadow.VegetationScene, que ces tests vérifient directement.
+    """
+
+    databases = []
+
+    def _ground_triangle(self):
+        """Un triangle horizontal à l'origine, tourné vers le ciel."""
+        vertices = [[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]]
+        triangles = geometry.compute_envelope_geometry(
+            vertices, [{'v': [0, 1, 2], 'paroi_model_id': 1}],
+        )
+        return {'vertices': vertices, 'triangles': triangles}
+
+    @staticmethod
+    def _canopy(k, obj=0):
+        """Couvert translucide au-dessus de l'origine."""
+        v, t = _veg_box(-5.0, -5.0, 5.0, 5.0, 5.0, 7.0, obj=obj, k=k)
+        return {'vertices': v, 'triangles': t}
+
+    def test_transmittance_applied_once_per_object(self):
+        """Le test décisif : le couvert est traversé de part en part (deux faces
+        au moins), la fraction transmise doit valoir k et non k²."""
+        k = 0.3
+        grid = shadow.compute_visibility_grid(
+            self._ground_triangle(), self._canopy(k),
+            azimuth_step_deg=90.0, elevation_step_deg=90.0,
+        )
+        # Soleil au zénith : le rayon part vers +Z, droit à travers le couvert.
+        zenith = grid['per_triangle'][0][0][-1]
+        self.assertAlmostEqual(zenith, k, places=3)
+        self.assertNotAlmostEqual(zenith, k * k, places=3)
+
+    def test_two_stacked_canopies_multiply(self):
+        """Deux objets distincts sur le trajet : les transmittances se
+        multiplient (0,5 x 0,4 = 0,2). C'est le pendant du test précédent —
+        regrouper par objet ne doit pas fusionner des objets différents."""
+        v1, t1 = _veg_box(-5, -5, 5, 5, 5, 6, obj=0, k=0.5)
+        v2, t2 = _veg_box(-5, -5, 5, 5, 8, 9, obj=1, k=0.4, base_vertex=len(v1))
+        env = {'vertices': v1 + v2, 'triangles': t1 + t2}
+        grid = shadow.compute_visibility_grid(
+            self._ground_triangle(), env, azimuth_step_deg=90.0, elevation_step_deg=90.0,
+        )
+        self.assertAlmostEqual(grid['per_triangle'][0][0][-1], 0.2, places=3)
+
+    def test_opaque_environment_is_unchanged(self):
+        """Non-régression : sans triangle translucide, la grille reste
+        strictement binaire — c'est le comportement du Lot C, inchangé."""
+        v, t = _veg_box(-5, -5, 5, 5, 5, 7, obj=0, k=0.0)
+        opaque = {'vertices': v, 'triangles': [{'v': tri['v']} for tri in t]}
+        grid = shadow.compute_visibility_grid(
+            self._ground_triangle(), opaque, azimuth_step_deg=90.0, elevation_step_deg=90.0,
+        )
+        values = {v for row in grid['per_triangle'][0] for v in row}
+        self.assertTrue(values <= {0, 1}, f"valeurs non binaires : {values}")
+        self.assertEqual(grid['per_triangle'][0][0][-1], 0)
+
+    def test_k_zero_behaves_as_opaque(self):
+        v, t = _veg_box(-5, -5, 5, 5, 5, 7, obj=0, k=0.0)
+        grid = shadow.compute_visibility_grid(
+            self._ground_triangle(), {'vertices': v, 'triangles': t},
+            azimuth_step_deg=90.0, elevation_step_deg=90.0,
+        )
+        self.assertEqual(grid['per_triangle'][0][0][-1], 0)
+
+    def test_sky_view_factor_is_attenuated_not_cancelled(self):
+        """Le facteur de vue du ciel doit se situer STRICTEMENT entre le cas
+        dégagé et le cas opaque : la végétation laisse passer du diffus."""
+        building = self._ground_triangle()
+        free = shadow.compute_sky_view_factors(building, None)[0]
+        veg = shadow.compute_sky_view_factors(building, self._canopy(0.3))[0]
+        v, t = _veg_box(-5, -5, 5, 5, 5, 7, obj=0, k=0.0)
+        opaque = shadow.compute_sky_view_factors(
+            building, {'vertices': v, 'triangles': [{'v': tri['v']} for tri in t]},
+        )[0]
+        self.assertLess(veg, free)
+        self.assertGreater(veg, opaque)
+
+    def test_lookup_returns_a_fraction(self):
+        grid = shadow.compute_visibility_grid(
+            self._ground_triangle(), self._canopy(0.25),
+            azimuth_step_deg=90.0, elevation_step_deg=90.0,
+        )
+        value = shadow.lookup_visibility(grid, 0, 0.0, 90.0)
+        self.assertIsInstance(value, float)
+        self.assertAlmostEqual(value, 0.25, places=3)
+
+    def test_solver_receives_attenuated_direct_radiation(self):
+        """Bout en bout : le même bâtiment sous un couvert à k = 0,25 doit
+        recevoir exactement le quart du rayonnement direct — l'atténuation doit
+        traverser tout le chemin jusqu'au flux calculé."""
+        layers = [{'e': 0.2, 'lam': 1.0, 'rho': 2000.0, 'c': 900.0,
+                   'tau': 0.0, 'r': 0.4, 'alpha': 0.6}]
+        building = self._ground_triangle()
+        weather = [{'t_ext': 20.0, 'sun_azimuth': 0.0, 'sun_elevation': 90.0,
+                    'e_dir': 800.0, 'e_dif': 0.0}]
+
+        def run(environment):
+            grid = shadow.compute_visibility_grid(
+                building, environment, azimuth_step_deg=90.0, elevation_step_deg=90.0,
+            )
+            payload = {'dx_max': 0.05, 'h_e': 25.0,
+                       'interior': {'mode': 'imposed', 'h_i': 8.0, 't_int': 20.0},
+                       't_init': 20.0, 'weather': weather}
+            return building_solver.run_building_simulation(
+                building, {1: layers}, grid, payload,
+                environment_envelope=environment,
+            )['final_exterior_surface_temp'][0]
+
+        t_free = run(None)
+        t_veg = run(self._canopy(0.25))
+        # L'échauffement de surface est proportionnel au rayonnement absorbé.
+        rise_free = t_free - 20.0
+        rise_veg = t_veg - 20.0
+        self.assertGreater(rise_free, 0.0)
+        self.assertAlmostEqual(rise_veg / rise_free, 0.25, places=2)

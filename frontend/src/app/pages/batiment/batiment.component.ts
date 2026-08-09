@@ -79,6 +79,10 @@ export class BatimentComponent implements OnInit, OnDestroy {
   // rasant, ce qu'aucun bâtiment voisin ne reproduit.
   envGenTerrain = false;
   envGenTerrainSpacing = 10;
+  // Lot Z — végétation (zones IGN + arbres isolés OSM). Opt-in : coût en
+  // triangles, et transmittance non saisonnière (un caduc est modélisé en
+  // feuilles toute l'année, ce qui surestime l'ombrage hivernal).
+  envGenVegetation = false;
   // Avertissements de la dernière génération (job.result.warnings) — jamais
   // affichés jusqu'au Lot X, alors que c'est le seul canal qui dise ce qui a
   // été écarté et pourquoi : bâtiment étudié retiré de son propre
@@ -595,6 +599,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.envGenerating.set(true);
     this.api.generateBuildingEnvironment(
       id, this.envGenRadius, this.envGenTerrain ? this.envGenTerrainSpacing : null,
+      this.envGenVegetation,
     ).subscribe({
       next: (res) => {
         this.envGenJob.set(res as Job);

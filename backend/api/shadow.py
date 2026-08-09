@@ -37,7 +37,12 @@ class ShadowError(ValueError):
 
 def build_occluder_mesh(*envelopes):
     """Fusionne un ou plusieurs {'vertices':[[x,y,z],...], 'triangles':[{'v':[i,j,k]},...]}
-    en un unique trimesh.Trimesh, pour servir de scène d'occlusion."""
+    en un unique trimesh.Trimesh, pour servir de scène d'occlusion.
+
+    N'inclut QUE les triangles opaques : depuis le Lot Z, un triangle
+    d'environnement peut porter `k` (transmittance) et `obj` (identifiant de
+    l'objet auquel il appartient), auquel cas il relève de
+    build_vegetation_scene ci-dessous et non de ce maillage-ci."""
     vertices = []
     faces = []
     for env in envelopes:
@@ -46,6 +51,8 @@ def build_occluder_mesh(*envelopes):
         base = len(vertices)
         vertices.extend(env['vertices'])
         for tri in env['triangles']:
+            if _is_translucent(tri):
+                continue
             i, j, k = tri['v']
             faces.append([base + i, base + j, base + k])
 
@@ -57,6 +64,92 @@ def build_occluder_mesh(*envelopes):
         faces=np.asarray(faces, dtype=np.int64),
         process=False,
     )
+
+
+def _is_translucent(tri):
+    k = tri.get('k')
+    return k is not None and k > 0.0
+
+
+class VegetationScene:
+    """Occulteurs NON opaques (Lot Z) : végétation, traitée comme un écran qui
+    laisse passer une fraction `k` du rayonnement.
+
+    Pourquoi une classe à part et non un simple champ de plus sur le maillage
+    principal : un rayon qui traverse un arbre touche DEUX faces (entrée et
+    sortie), et parfois plus sur une forme concave. Multiplier la transmittance
+    à chaque face donnerait k² ou k³ au lieu de k. Il faut donc regrouper les
+    faces touchées PAR OBJET (`obj`) et n'appliquer `k` qu'une fois par objet
+    réellement traversé — ce que `intersects_id(multiple_hits=True)` permet,
+    contrairement au `intersects_any` utilisé pour les opaques.
+
+    Le chemin opaque reste inchangé et rapide : la végétation n'est interrogée
+    que pour les rayons qui ont DÉJÀ passé le test opaque, et seulement s'il y a
+    de la végétation.
+    """
+
+    def __init__(self, mesh, face_obj, obj_k):
+        self.intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+        self.face_obj = face_obj      # indice d'objet par face
+        self.obj_k = obj_k            # transmittance par objet
+
+    def transmittance(self, origins, directions):
+        """Fraction transmise pour chaque rayon (1.0 = rien sur le trajet)."""
+        n = len(origins)
+        out = np.ones(n)
+        if n == 0:
+            return out
+        tri_idx, ray_idx = self.intersector.intersects_id(
+            origins, directions, multiple_hits=True,
+        )
+        if len(tri_idx) == 0:
+            return out
+        seen = set()
+        for t, r in zip(tri_idx, ray_idx):
+            key = (int(r), int(self.face_obj[t]))
+            if key in seen:
+                continue
+            seen.add(key)
+            out[r] *= self.obj_k[self.face_obj[t]]
+        return out
+
+
+def build_vegetation_scene(*envelopes):
+    """Retourne une VegetationScene, ou None si aucun triangle translucide."""
+    vertices = []
+    faces = []
+    face_obj = []
+    obj_key_to_index = {}
+    obj_k = []
+
+    for env_index, env in enumerate(envelopes):
+        if not env:
+            continue
+        base = len(vertices)
+        vertices.extend(env['vertices'])
+        for tri in env['triangles']:
+            if not _is_translucent(tri):
+                continue
+            i, j, k = tri['v']
+            faces.append([base + i, base + j, base + k])
+            # `obj` est propre à chaque enveloppe : on le préfixe par l'indice
+            # de l'enveloppe pour que deux environnements fusionnés ne
+            # confondent pas leurs objets.
+            key = (env_index, tri.get('obj'))
+            if key not in obj_key_to_index:
+                obj_key_to_index[key] = len(obj_k)
+                obj_k.append(float(tri['k']))
+            face_obj.append(obj_key_to_index[key])
+
+    if not faces:
+        return None
+
+    mesh = trimesh.Trimesh(
+        vertices=np.asarray(vertices, dtype=float),
+        faces=np.asarray(faces, dtype=np.int64),
+        process=False,
+    )
+    return VegetationScene(mesh, np.asarray(face_obj, dtype=np.int64), np.asarray(obj_k, dtype=float))
 
 
 def build_occluder_intersector(building_envelope, environment_envelope=None):
@@ -103,6 +196,7 @@ def compute_visibility_grid(
 
     occluder = build_occluder_mesh(building_envelope, environment_envelope)
     intersector = trimesh.ray.ray_triangle.RayMeshIntersector(occluder)
+    vegetation = build_vegetation_scene(building_envelope, environment_envelope)
 
     azimuths = [float(a) for a in np.arange(0.0, 360.0, azimuth_step_deg)]
     elevations = [float(e) for e in np.arange(0.0, 90.0 + 1e-9, elevation_step_deg)]
@@ -116,8 +210,11 @@ def compute_visibility_grid(
         centroids[i] = p.mean(axis=0) + n * RAY_ORIGIN_EPSILON
         normals[i] = n
 
-    # per_triangle[i][a][e]
-    per_triangle = np.zeros((n_tri, len(azimuths), len(elevations)), dtype=np.int8)
+    # per_triangle[i][a][e] — fraction de rayonnement direct atteignant le
+    # triangle : 0 ou 1 sans végétation (le cas historique, stocké en int8 pour
+    # ne pas gonfler le JSON de Building.sun_visibility), une fraction sinon.
+    dtype = np.float32 if vegetation is not None else np.int8
+    per_triangle = np.zeros((n_tri, len(azimuths), len(elevations)), dtype=dtype)
 
     total_cells = len(azimuths) * len(elevations)
     done_cells = 0
@@ -130,7 +227,16 @@ def compute_visibility_grid(
                 origins = centroids[idx]
                 directions = np.tile(direction, (len(idx), 1))
                 blocked = intersector.intersects_any(origins, directions)
-                per_triangle[idx[~blocked], ai, ei] = 1
+                visible = idx[~blocked]
+                if vegetation is None:
+                    per_triangle[visible, ai, ei] = 1
+                elif len(visible):
+                    # Seuls les rayons ayant passé le test opaque sont soumis au
+                    # test (plus coûteux) de la végétation.
+                    k = vegetation.transmittance(
+                        centroids[visible], np.tile(direction, (len(visible), 1)),
+                    )
+                    per_triangle[visible, ai, ei] = np.round(k, 3)
             done_cells += 1
             if progress_cb:
                 progress_cb(done_cells, total_cells)
@@ -190,6 +296,7 @@ def compute_sky_view_factors(building_envelope, environment_envelope=None, n_sam
 
     occluder = build_occluder_mesh(building_envelope, environment_envelope)
     intersector = trimesh.ray.ray_triangle.RayMeshIntersector(occluder)
+    vegetation = build_vegetation_scene(building_envelope, environment_envelope)
 
     sphere_dirs = _fibonacci_sphere(n_samples)
     is_sky = sphere_dirs[:, 2] > 0.0  # "vrai ciel" : au-dessus de l'horizon réel (Z-up)
@@ -213,7 +320,19 @@ def compute_sky_view_factors(building_envelope, environment_envelope=None, n_sam
         origins = np.tile(centroid + normal * RAY_ORIGIN_EPSILON, (dirs_valid.shape[0], 1))
         blocked = intersector.intersects_any(origins, dirs_valid)
 
-        visible_ratio = float(weight[~blocked].sum() / weight.sum())
+        # Lot Z : la végétation ne bloque pas, elle atténue — le poids de chaque
+        # direction est multiplié par sa transmittance plutôt que mis à zéro.
+        # Sans végétation, `open_fraction` vaut exactement 1 ou 0 et l'on
+        # retrouve le calcul d'origine au bit près.
+        open_fraction = np.where(blocked, 0.0, 1.0)
+        if vegetation is not None:
+            unblocked = ~blocked
+            if unblocked.any():
+                open_fraction[unblocked] = vegetation.transmittance(
+                    origins[unblocked], dirs_valid[unblocked],
+                )
+
+        visible_ratio = float((weight * open_fraction).sum() / weight.sum())
         factors.append(visible_ratio * f_ciel_flat)
 
     return factors
@@ -221,7 +340,11 @@ def compute_sky_view_factors(building_envelope, environment_envelope=None, n_sam
 
 def lookup_visibility(sun_visibility, triangle_index, azimuth_deg, elevation_deg):
     """Consultation rapide (Lot D) : la case de grille la plus proche de
-    (azimuth_deg, elevation_deg) pour un triangle donné. Retourne True/False.
+    (azimuth_deg, elevation_deg) pour un triangle donné.
+
+    Retourne une FRACTION de rayonnement direct reçue (Lot Z) : 0.0 ou 1.0 sans
+    végétation — le comportement binaire d'origine, simple cas particulier —
+    une valeur intermédiaire derrière un couvert végétal.
     """
     azimuths = sun_visibility['azimuths_deg']
     elevations = sun_visibility['elevations_deg']
@@ -232,4 +355,4 @@ def lookup_visibility(sun_visibility, triangle_index, azimuth_deg, elevation_deg
     el_clamped = min(max(elevation_deg, elevations[0]), elevations[-1])
     ei = min(range(len(elevations)), key=lambda k: abs(elevations[k] - el_clamped))
 
-    return bool(sun_visibility['per_triangle'][triangle_index][ai][ei])
+    return float(sun_visibility['per_triangle'][triangle_index][ai][ei])

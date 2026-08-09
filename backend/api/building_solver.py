@@ -239,7 +239,7 @@ def _h_e_diagonal(h_e_vec, systems, offsets, n_dof, areas):
 
 def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, point,
                       sky_view_factor=None, sun_visibility_grid=None,
-                      occluder_intersector=None, centroids=None,
+                      occluder_intersector=None, centroids=None, vegetation_scene=None,
                       air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None,
                       frame_g=None, shading_fs_dir=None, shading_fs_dif=None, volet_closed=False,
                       diagnostics=None):
@@ -282,16 +282,25 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
     # triangles faisant face au soleil à cette heure (même principe que
     # shadow.compute_visibility_grid, mais rejoué à chaque heure réelle
     # plutôt que sur une grille (azimuth, élévation) précalculée).
-    realtime_blocked = None
+    realtime_transmittance = None
     if sun_up and occluder_intersector is not None:
         normals = np.array([g['normal'] for g in triangles_geom])
         facing = normals @ direction > 1e-6
-        realtime_blocked = np.zeros(len(triangles_geom), dtype=bool)
+        realtime_transmittance = np.zeros(len(triangles_geom))
         if facing.any():
             idx = np.nonzero(facing)[0]
             origins = centroids[idx]
             directions = np.tile(direction, (len(idx), 1))
-            realtime_blocked[idx] = occluder_intersector.intersects_any(origins, directions)
+            blocked = occluder_intersector.intersects_any(origins, directions)
+            realtime_transmittance[idx[~blocked]] = 1.0
+            # Lot Z : la végétation atténue au lieu de bloquer — appliquée aux
+            # seuls rayons ayant passé le test opaque, comme dans le précalcul.
+            if vegetation_scene is not None:
+                visible = idx[~blocked]
+                if len(visible):
+                    realtime_transmittance[visible] = vegetation_scene.transmittance(
+                        centroids[visible], np.tile(direction, (len(visible), 1)),
+                    )
 
     for i, (mesh, K, C, layers) in enumerate(systems):
         off = offsets[i]
@@ -311,12 +320,12 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
         if sun_up:
             cos_ti = max(float(np.dot(geom['normal'], direction)), 0.0)
             if cos_ti > 0.0:
-                if realtime_blocked is not None:
-                    if realtime_blocked[i]:
-                        cos_ti = 0.0
+                # Lot Z : la visibilité solaire n'est plus binaire mais une
+                # FRACTION transmise (0 ou 1 sans végétation, comme avant).
+                if realtime_transmittance is not None:
+                    cos_ti *= realtime_transmittance[i]
                 elif sun_visibility_grid is not None:
-                    if not shadow.lookup_visibility(sun_visibility_grid, i, sun_az, sun_el):
-                        cos_ti = 0.0
+                    cos_ti *= shadow.lookup_visibility(sun_visibility_grid, i, sun_az, sun_el)
 
         # Lot J : un volet/store fermé réduit e_dir/e_dif AVANT combinaison —
         # les deux composantes ont des facteurs de réduction différents (un
@@ -641,8 +650,10 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     sky_view_factor = None
     sun_visibility_grid = None
 
+    vegetation_scene = None
     if shadow_mode == 'realtime':
         occluder_intersector = shadow.build_occluder_intersector(building_envelope, environment_envelope)
+        vegetation_scene = shadow.build_vegetation_scene(building_envelope, environment_envelope)
         vertices = building_envelope['vertices']
         centroids = np.array([
             np.mean([vertices[j] for j in tri['v']], axis=0) + np.array(tri['normal']) * shadow.RAY_ORIGIN_EPSILON
@@ -840,6 +851,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             systems, areas, offsets, n_dof, triangles, bundle['h_e_vec'], point,
             sky_view_factor=sky_view_factor, sun_visibility_grid=sun_visibility_grid,
             occluder_intersector=occluder_intersector, centroids=centroids,
+            vegetation_scene=vegetation_scene,
             air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w, t_ground=t_ground,
             frame_g=frame_g, shading_fs_dir=shading_fs_dir, shading_fs_dif=shading_fs_dif,
             volet_closed=volet_closed, diagnostics=hour_diagnostics,

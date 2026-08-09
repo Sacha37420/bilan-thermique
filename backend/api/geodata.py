@@ -29,6 +29,7 @@ from . import geometry
 
 IGN_WFS_URL = 'https://data.geopf.fr/wfs/ows'
 IGN_TYPENAME = 'BDTOPO_V3:batiment'
+IGN_VEGETATION_TYPENAME = 'BDTOPO_V3:zone_de_vegetation'
 OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
 USER_AGENT = 'bilan-thermique-lab/1.0 (usage interne, contact: sacha.mailler@gmail.com)'
 
@@ -629,4 +630,276 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
             'buildings_used': processed, 'buildings_ign': n_ign, 'buildings_osm': n_osm,
             'buildings_skipped': n_skipped, 'buildings_self': n_self,
         },
+    }
+
+
+# ── Lot Z : végétation ────────────────────────────────────────────────────────
+
+# Hauteur par défaut (m) et transmittance solaire par type. AUCUNE des deux
+# sources ne donne de hauteur fiable — vérifié le 2026-08-09 : la couche IGN
+# `zone_de_vegetation` n'a tout simplement PAS d'attribut de hauteur, et OSM
+# n'en porte que sur ~40 % des arbres au mieux (134 sur 337 dans une bbox du
+# 10e arrondissement de Paris). Une table par type est donc inévitable :
+# valeurs indicatives usuelles, même statut assumé que le catalogue de parois,
+# pas une référence.
+#
+# `k` = fraction du rayonnement encore transmise à travers le couvert. Deux
+# valeurs sont conservées, feuilles présentes et absentes : SEULE la première
+# est utilisée aujourd'hui (voir Lot Z3, non fait — la saisonnalité supposerait
+# une notion de date calendaire côté serveur, que l'application refuse
+# délibérément depuis le Lot V). Un caduc est donc traité comme un persistant,
+# ce qui SURESTIME l'ombrage hivernal — limite à écrire noir sur blanc plutôt
+# qu'à masquer, la valeur « sans feuilles » étant déjà là pour le jour où Z3
+# sera tranché.
+VEGETATION_PROFILES = {
+    # nature IGN (valeurs réellement observées dans la couche)
+    'Bois':                       {'height_m': 15.0, 'k_leaf': 0.15, 'k_bare': 0.45},
+    'Forêt fermée de feuillus':   {'height_m': 20.0, 'k_leaf': 0.10, 'k_bare': 0.40},
+    'Forêt fermée de conifères':  {'height_m': 20.0, 'k_leaf': 0.08, 'k_bare': 0.10},
+    'Forêt fermée mixte':         {'height_m': 20.0, 'k_leaf': 0.10, 'k_bare': 0.25},
+    'Forêt ouverte':              {'height_m': 15.0, 'k_leaf': 0.30, 'k_bare': 0.55},
+    'Haie':                       {'height_m': 3.0,  'k_leaf': 0.20, 'k_bare': 0.45},
+    'Lande ligneuse':             {'height_m': 2.0,  'k_leaf': 0.35, 'k_bare': 0.55},
+    'Verger':                     {'height_m': 5.0,  'k_leaf': 0.25, 'k_bare': 0.55},
+    'Vigne':                      {'height_m': 2.0,  'k_leaf': 0.40, 'k_bare': 0.70},
+    'Peupleraie':                 {'height_m': 20.0, 'k_leaf': 0.15, 'k_bare': 0.45},
+    # arbres isolés OSM, par type de feuillage
+    'arbre-feuillu':              {'height_m': 12.0, 'k_leaf': 0.20, 'k_bare': 0.55},
+    'arbre-conifere':             {'height_m': 14.0, 'k_leaf': 0.12, 'k_bare': 0.15},
+}
+DEFAULT_VEGETATION = {'height_m': 10.0, 'k_leaf': 0.20, 'k_bare': 0.50}
+
+TREE_CROWN_RADIUS_M = 3.0
+TREE_CROWN_SIDES = 8
+MAX_VEGETATION_OBJECTS = 400
+# Vérifié en réel : 337 arbres OSM dans une seule bbox urbaine de ~800 x 700 m.
+# À 8 côtés et 3 faces par côté, la végétation saturerait à elle seule
+# geometry.MAX_TRIANGLES et évincerait les bâtiments voisins, qui comptent
+# nettement plus pour l'ombrage. Tri par distance puis plafond, comme pour les
+# bâtiments.
+
+
+def _vegetation_profile(key):
+    return VEGETATION_PROFILES.get(key, DEFAULT_VEGETATION)
+
+
+def fetch_ign_vegetation(bbox):
+    """Zones de végétation IGN (BD TOPO `zone_de_vegetation`) — mêmes conventions
+    que fetch_ign_buildings : (lat_min, lon_min, lat_max, lon_max), GeodataError
+    en cas d'échec. La géométrie est un (Multi)Polygon, exactement comme la
+    couche bâtiments : elle passe donc dans extrude_footprint sans adaptation."""
+    lat_min, lon_min, lat_max, lon_max = bbox
+    params = {
+        'SERVICE': 'WFS', 'VERSION': '2.0.0', 'REQUEST': 'GetFeature',
+        'TYPENAMES': IGN_VEGETATION_TYPENAME, 'OUTPUTFORMAT': 'application/json',
+        'SRSNAME': 'EPSG:4326',
+        'BBOX': f'{lon_min},{lat_min},{lon_max},{lat_max},EPSG:4326',
+        'COUNT': str(MAX_BUILDINGS_PER_REQUEST),
+    }
+    try:
+        resp = _request_with_retry(requests.get, IGN_WFS_URL, params=params,
+                                    headers={'User-Agent': USER_AGENT}, timeout=HTTP_TIMEOUT_S)
+        data = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise GeodataError(f"IGN (végétation) injoignable ou en erreur ({exc}).") from exc
+
+    zones = []
+    for feature in data.get('features', []):
+        ring = _first_exterior_ring(feature.get('geometry'))
+        if ring is None or len(ring) < 3:
+            continue
+        nature = (feature.get('properties') or {}).get('nature') or ''
+        profile = _vegetation_profile(nature)
+        zones.append({
+            'footprint_latlon': [[lat, lon] for lon, lat, *_rest in ring],
+            'height_m': profile['height_m'], 'k': profile['k_leaf'],
+            'kind': nature or 'végétation', 'source': 'ign',
+        })
+    return zones
+
+
+def _osm_tree_profile(tags):
+    """Un arbre OSM ne dit pas toujours son type. `leaf_type` est le tag le
+    mieux renseigné (294 sur 337 relevés), `leaf_cycle` bien moins (76) — on
+    part donc du premier, avec repli sur le profil générique."""
+    leaf_type = (tags.get('leaf_type') or '').lower()
+    if leaf_type == 'needleleaved':
+        return _vegetation_profile('arbre-conifere'), 'arbre-conifere'
+    if leaf_type == 'broadleaved':
+        return _vegetation_profile('arbre-feuillu'), 'arbre-feuillu'
+    return _vegetation_profile('arbre-feuillu'), 'arbre-feuillu'
+
+
+def _osm_crown_radius(tags):
+    diameter = _parse_meters(tags.get('diameter_crown'))
+    if diameter and diameter > 0:
+        return diameter / 2.0
+    # Repli allométrique très grossier depuis la circonférence du TRONC — une
+    # approximation sur une approximation, assumée : mieux vaut une couronne
+    # plausible qu'un rayon par défaut pour tous.
+    circumference = _parse_meters(tags.get('circumference'))
+    if circumference and circumference > 0:
+        return max(1.5, min(8.0, circumference * 2.5))
+    return TREE_CROWN_RADIUS_M
+
+
+def fetch_osm_vegetation(bbox):
+    """Arbres isolés (`natural=tree`), alignements (`natural=tree_row`) et zones
+    boisées (`natural=wood`, `landuse=forest`) d'OpenStreetMap.
+
+    SEULE source à connaître l'arbre INDIVIDUEL — l'IGN ne fournit que des
+    zones. Les deux sont donc complémentaires et non alternatives, contrairement
+    à la règle habituelle « IGN d'abord, OSM en repli » de ce module."""
+    lat_min, lon_min, lat_max, lon_max = bbox
+    box = f'({lat_min},{lon_min},{lat_max},{lon_max})'
+    query = (
+        f'[out:json][timeout:{HTTP_TIMEOUT_S}];('
+        f'node["natural"="tree"]{box};'
+        f'way["natural"="wood"]{box};'
+        f'way["landuse"="forest"]{box};'
+        ');out geom;'
+    )
+    try:
+        resp = _request_with_retry(requests.post, OVERPASS_URL, data={'data': query},
+                                    headers={'User-Agent': USER_AGENT}, timeout=HTTP_TIMEOUT_S + 5)
+        data = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise GeodataError(f"OpenStreetMap (végétation) injoignable ou en erreur ({exc}).") from exc
+
+    trees, zones = [], []
+    for element in data.get('elements', []):
+        tags = element.get('tags') or {}
+        if element.get('type') == 'node' and tags.get('natural') == 'tree':
+            profile, kind = _osm_tree_profile(tags)
+            height = _parse_meters(tags.get('height')) or profile['height_m']
+            trees.append({
+                'lat': element['lat'], 'lon': element['lon'], 'height_m': height,
+                'radius_m': _osm_crown_radius(tags), 'k': profile['k_leaf'],
+                'kind': kind, 'source': 'osm',
+            })
+        elif element.get('geometry') and len(element['geometry']) >= 3:
+            profile = _vegetation_profile('Bois')
+            zones.append({
+                'footprint_latlon': [[pt['lat'], pt['lon']] for pt in element['geometry']],
+                'height_m': profile['height_m'], 'k': profile['k_leaf'],
+                'kind': 'bois', 'source': 'osm',
+            })
+    return trees, zones
+
+
+def _regular_polygon_xy(cx, cy, radius_m, sides=TREE_CROWN_SIDES):
+    return [
+        (cx + radius_m * math.cos(2.0 * math.pi * i / sides),
+         cy + radius_m * math.sin(2.0 * math.pi * i / sides))
+        for i in range(sides)
+    ]
+
+
+def generate_vegetation_mesh(lat, lon, radius_m, north_offset_deg=0.0, ground_z_ref=None,
+                              self_footprint=None):
+    """Maillage de végétation dans le repère local d'un bâtiment géoréférencé.
+
+    Retourne {'vertices', 'triangles', 'warnings', 'stats'} — chaque triangle
+    porte `k` (transmittance) et `obj` (indice de l'objet auquel il appartient).
+    `obj` est indispensable : un rayon traversant un arbre touche DEUX faces
+    (entrée et sortie), et sans regroupement par objet la transmittance serait
+    appliquée deux fois (k² au lieu de k). Voir api.shadow.
+
+    Les deux sources sont interrogées et CUMULÉES (contrairement aux bâtiments,
+    où OSM n'est qu'un repli) : seule OSM connaît l'arbre isolé, seule l'IGN
+    couvre proprement les masses boisées françaises."""
+    bbox = bbox_from_radius(lat, lon, radius_m)
+    warnings = []
+    zones, trees = [], []
+    n_ign = n_osm = 0
+
+    if is_in_france(lat, lon):
+        try:
+            ign_zones = fetch_ign_vegetation(bbox)
+            zones.extend(ign_zones)
+            n_ign = len(ign_zones)
+        except GeodataError as exc:
+            warnings.append(f"Végétation IGN indisponible ({exc}).")
+
+    try:
+        osm_trees, osm_zones = fetch_osm_vegetation(bbox)
+        trees.extend(osm_trees)
+        n_osm = len(osm_trees) + len(osm_zones)
+        # Les zones boisées OSM ne sont reprises que hors de France : sur le
+        # territoire, la BD TOPO les couvre mieux et les deux se recouvriraient.
+        if not is_in_france(lat, lon):
+            zones.extend(osm_zones)
+    except GeodataError as exc:
+        warnings.append(f"Végétation OpenStreetMap indisponible ({exc}).")
+
+    objects = []
+    for zone in zones:
+        clat, clon = _footprint_center(zone['footprint_latlon'])
+        x, y = local_xy(clat, clon, lat, lon)
+        objects.append((math.hypot(x, y), 'zone', zone))
+    for tree in trees:
+        x, y = local_xy(tree['lat'], tree['lon'], lat, lon)
+        objects.append((math.hypot(x, y), 'tree', tree))
+    objects.sort(key=lambda o: o[0])
+
+    vertices, triangles = [], []
+    transmittances = []
+    n_used = 0
+    n_skipped = 0
+    for _dist, kind, item in objects:
+        if n_used >= MAX_VEGETATION_OBJECTS:
+            n_skipped += 1
+            continue
+        if kind == 'zone':
+            footprint_xy = [
+                _rotate_xy(*local_xy(plat, plon, lat, lon), north_offset_deg)
+                for plat, plon in item['footprint_latlon']
+            ]
+        else:
+            cx, cy = _rotate_xy(*local_xy(item['lat'], item['lon'], lat, lon), north_offset_deg)
+            footprint_xy = _regular_polygon_xy(cx, cy, item['radius_m'])
+
+        # Une zone de végétation qui recouvre le bâtiment étudié est écartée
+        # pour la même raison qu'au Lot X : elle l'engloberait dans un volume
+        # opaque. Un arbre planté contre la façade, lui, reste légitime — d'où
+        # le même critère de recouvrement relatif, pas un simple contact.
+        if self_footprint is not None and _is_studied_building(footprint_xy, self_footprint):
+            n_skipped += 1
+            continue
+
+        try:
+            v, f = extrude_footprint(footprint_xy, item['height_m'])
+        except GeodataError:
+            continue
+        if (len(vertices) + len(v) > geometry.MAX_VERTICES
+                or len(triangles) + len(f) > geometry.MAX_TRIANGLES):
+            n_skipped += 1
+            break
+
+        base_z = -(ground_z_ref or 0.0) * 0.0  # végétation posée sur le sol local (z = 0)
+        offset = len(vertices)
+        obj_index = len(transmittances)
+        vertices.extend([vx, vy, vz + base_z] for vx, vy, vz in v)
+        triangles.extend(
+            {'v': [i0 + offset, i1 + offset, i2 + offset], 'k': item['k'], 'obj': obj_index}
+            for i0, i1, i2 in f
+        )
+        transmittances.append(item['k'])
+        n_used += 1
+
+    if n_skipped:
+        warnings.append(
+            f"{n_skipped} élément(s) de végétation ignoré(s) (limite de maillage ou recouvrement "
+            "avec le bâtiment étudié) — réduire le rayon pour en inclure davantage."
+        )
+    if n_used:
+        warnings.append(
+            "Végétation traitée comme un écran à transmittance CONSTANTE : les arbres à feuilles "
+            "caduques sont modélisés en feuilles toute l'année, ce qui surestime l'ombrage hivernal."
+        )
+
+    return {
+        'vertices': vertices, 'triangles': triangles, 'warnings': warnings,
+        'stats': {'vegetation_used': n_used, 'vegetation_ign': n_ign,
+                  'vegetation_osm': n_osm, 'vegetation_skipped': n_skipped},
     }

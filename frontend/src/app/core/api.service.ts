@@ -83,9 +83,11 @@ export class ApiService {
 
   generateBuildingEnvironment(
     buildingId: number, radiusM: number, terrainSpacingM: number | null = null,
+    includeVegetation = false,
   ): Observable<unknown> {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/generer-environnement/`, {
       radius_m: radiusM, terrain_spacing_m: terrainSpacingM,
+      include_vegetation: includeVegetation,
     });
   }
 

@@ -249,6 +249,21 @@
             <input type="checkbox" [(ngModel)]="envGenTerrain" name="envGenTerrain" />
             <span>Inclure le relief du terrain</span>
           </label>
+          <label class="inline-check">
+            <input type="checkbox" [(ngModel)]="envGenVegetation" name="envGenVegetation" />
+            <span>Inclure la végétation (arbres, haies, bois)</span>
+          </label>
+          @if (envGenVegetation) {
+            <p class="hint">
+              Zones boisées et haies depuis l'IGN, arbres isolés depuis OpenStreetMap — seule source
+              à les connaître individuellement. Contrairement aux bâtiments, la végétation
+              <strong>n'arrête pas le soleil, elle l'atténue</strong> : chaque couvert laisse passer
+              une fraction du rayonnement selon son type. Deux réserves à connaître : aucune des deux
+              sources ne donne de hauteur fiable (elle est déduite du type), et la transmittance ne
+              varie pas dans l'année — un arbre à feuilles caduques est modélisé en feuilles même en
+              hiver, ce qui <strong>surestime l'ombrage hivernal</strong>.
+            </p>
+          }
           @if (envGenTerrain) {
             <div class="shadow-row">
               <label class="inline-label">

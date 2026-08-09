@@ -156,7 +156,8 @@ def generate_environment(self, job_id, params):
 
 
 @shared_task(bind=True)
-def generate_environment_for_building(self, job_id, building_id, radius_m, terrain_spacing_m=None):
+def generate_environment_for_building(self, job_id, building_id, radius_m, terrain_spacing_m=None,
+                                       include_vegetation=False):
     """Comme generate_environment, mais génère directement dans le repère local du
     Building (via ses champs georef_*) et crée/lie l'Environment résultant — pas
     d'étape de relecture manuelle nécessaire, contrairement à la génération autonome :
@@ -198,6 +199,36 @@ def generate_environment_for_building(self, job_id, building_id, radius_m, terra
         # différence entre les deux, seule compte la géométrie qui bloque les
         # rayons. Best-effort : un échec d'altimétrie ne doit pas perdre les
         # bâtiments déjà extrudés.
+        self_footprint = geodata.envelope_footprint_polygon(building.envelope)
+
+        # Lot Z : végétation, opt-in elle aussi. Ajoutée au même maillage, mais
+        # ses triangles portent `k`/`obj` — api.shadow les sépare et les traite
+        # comme des écrans atténuants plutôt que des obstacles opaques.
+        veg_stats = None
+        if include_vegetation:
+            try:
+                job.set_state(progress=62, message="Végétation (IGN / OpenStreetMap)…")
+                veg = geodata.generate_vegetation_mesh(
+                    building.georef_lat, building.georef_lon, radius_m,
+                    north_offset_deg=building.georef_north_offset_deg,
+                    ground_z_ref=building.georef_ground_z,
+                    self_footprint=self_footprint,
+                )
+                warnings.extend(veg['warnings'])
+                veg_stats = veg['stats']
+                if (len(vertices) + len(veg['vertices']) > geometry.MAX_VERTICES
+                        or len(triangles) + len(veg['triangles']) > geometry.MAX_TRIANGLES):
+                    warnings.append("Végétation abandonnée : limite de maillage atteinte.")
+                else:
+                    offset = len(vertices)
+                    vertices.extend(veg['vertices'])
+                    triangles.extend(
+                        {'v': [i + offset for i in t['v']], 'k': t['k'], 'obj': t['obj']}
+                        for t in veg['triangles']
+                    )
+            except geodata.GeodataError as exc:
+                warnings.append(f"Végétation non chargée ({exc}) — obstacles bâtis conservés.")
+
         terrain_source = None
         n_terrain_points = 0
         if terrain_spacing_m:
@@ -207,7 +238,7 @@ def generate_environment_for_building(self, job_id, building_id, radius_m, terra
                     building.georef_lat, building.georef_lon, radius_m, terrain_spacing_m,
                     north_offset_deg=building.georef_north_offset_deg,
                     ground_z_ref=building.georef_ground_z,
-                    footprint_polygon=geodata.envelope_footprint_polygon(building.envelope),
+                    footprint_polygon=self_footprint,
                 )
                 offset = len(vertices)
                 if (len(vertices) + len(terrain_mesh['vertices']) > geometry.MAX_VERTICES
@@ -235,7 +266,7 @@ def generate_environment_for_building(self, job_id, building_id, radius_m, terra
         job.result = {
             'environment_id': env.id, 'environment_name': env.name,
             'stats': {**result['stats'], 'terrain_source': terrain_source,
-                      'terrain_points': n_terrain_points},
+                      'terrain_points': n_terrain_points, **(veg_stats or {})},
             'warnings': warnings,
         }
         job.save(update_fields=['result'])
@@ -248,7 +279,9 @@ def generate_environment_for_building(self, job_id, building_id, radius_m, terra
                     + (f" {stats['buildings_self']} écarté(s) : bâtiment étudié lui-même."
                        if stats.get('buildings_self') else "")
                     + (f" Terrain : {n_terrain_points} points ({terrain_source})."
-                       if terrain_source else ""),
+                       if terrain_source else "")
+                    + (f" Végétation : {veg_stats['vegetation_used']} élément(s)."
+                       if veg_stats and veg_stats.get('vegetation_used') else ""),
         )
     except geodata.GeodataError as exc:
         job.set_state(status=Job.ERROR, message=str(exc))

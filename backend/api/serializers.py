@@ -88,6 +88,15 @@ class TriangleInputSerializer(serializers.Serializer):
 
 class EnvironmentTriangleInputSerializer(serializers.Serializer):
     v = serializers.ListField(child=serializers.IntegerField(min_value=0), min_length=3, max_length=3)
+    # Lot Z : occulteur NON opaque (végétation). `k` = fraction du rayonnement
+    # encore transmise ; `obj` = identifiant de l'objet auquel appartient ce
+    # triangle, indispensable pour n'appliquer `k` qu'UNE fois par objet
+    # traversé (un rayon touche au moins deux faces d'un volume fermé — voir
+    # api.shadow.VegetationScene). Absents = triangle opaque, comportement
+    # historique de tout maillage d'environnement existant.
+    k = serializers.FloatField(required=False, allow_null=True, default=None,
+                                min_value=0.0, max_value=1.0)
+    obj = serializers.IntegerField(required=False, allow_null=True, default=None, min_value=0)
 
 
 class EnvironmentSerializer(serializers.Serializer):
@@ -127,7 +136,10 @@ class EnvironmentSerializer(serializers.Serializer):
             vertices = existing.get('vertices', [])
         triangles = validated_data.pop('triangles', None)
         if triangles is None:
-            triangles = [{'v': t['v']} for t in existing.get('triangles', [])]
+            # Comme pour Building (piège du Lot K) : toute clé absente d'ici est
+            # silencieusement perdue au prochain PATCH « triangles seul ».
+            triangles = [{'v': t['v'], 'k': t.get('k'), 'obj': t.get('obj')}
+                         for t in existing.get('triangles', [])]
         else:
             triangles = [dict(t) for t in triangles]
         try:
@@ -322,6 +334,10 @@ class GenerateBuildingEnvironmentRequestSerializer(serializers.Serializer):
     # plutôt qu'un défaut.
     terrain_spacing_m = serializers.FloatField(required=False, allow_null=True, default=None,
                                                 min_value=2.0, max_value=100.0)
+    # Lot Z : végétation (zones IGN + arbres isolés OSM) ajoutée comme
+    # occulteurs NON opaques. Opt-in : coût en triangles, et surtout
+    # transmittance non saisonnière (voir geodata.VEGETATION_PROFILES).
+    include_vegetation = serializers.BooleanField(required=False, default=False)
 
 
 class WeatherFetchRequestSerializer(serializers.Serializer):
