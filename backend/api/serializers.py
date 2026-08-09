@@ -293,6 +293,11 @@ class SearchNearbyBuildingsRequestSerializer(serializers.Serializer):
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
     lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
     radius_m = serializers.FloatField(required=False, min_value=5.0, max_value=150.0, default=50.0)
+    # Lot Y : plafond de parois, null/absent = MAX_WALLS_SIMPLIFIED_MODE (30).
+    # La page Bâtiment le relève, n'ayant pas la contrainte « un menu déroulant
+    # par paroi » du mode simplifié.
+    max_walls = serializers.IntegerField(required=False, allow_null=True, default=None,
+                                          min_value=3, max_value=2000)
 
 
 

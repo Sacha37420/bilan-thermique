@@ -33,6 +33,22 @@ export interface WorkingTriangle {
   azimuth_deg?: number;
 }
 
+/** Candidat renvoyé par POST /api/batiments/rechercher/ : un bâtiment réel
+ * (IGN BD TOPO / OpenStreetMap) DÉJÀ extrudé en enveloppe groupée. Partagé
+ * (Lot Y) entre le mode simplifié et la page Bâtiment via
+ * components/building-search. */
+export interface BuildingCandidate {
+  lat: number;
+  lon: number;
+  distance_m: number;
+  height_m: number;
+  approx_height: boolean;
+  source: 'ign' | 'osm';
+  n_walls: number;
+  vertices: number[][];
+  triangles: { v: [number, number, number]; group: string; boundary: TriangleBoundary }[];
+}
+
 export interface Envelope {
   vertices: number[][];
   triangles: Triangle[];

@@ -123,6 +123,20 @@
     </label>
 
     <div class="shadow-block">
+      <h3>Rechercher un bâtiment réel</h3>
+      <p class="hint">
+        Récupère l'empreinte réelle d'un bâtiment existant depuis IGN BD TOPO (France) ou
+        OpenStreetMap (ailleurs), déjà extrudée avec un groupe par paroi et le plancher marqué
+        « Sol ». Le géoréférencement est rempli au passage — y compris la rotation nord, nulle par
+        construction. Réserves de la source : toiture toujours plate, hauteur parfois estimée depuis
+        le nombre d'étages, cours intérieures comblées. Pour un parcours entièrement guidé (taux de
+        vitrage par paroi), voir le <a routerLink="/mode-simplifie">mode simplifié</a>.
+      </p>
+      <app-building-search [maxWalls]="searchMaxWalls" [initialLat]="georefLat"
+        [initialLon]="georefLon" (candidateChosen)="onCandidateChosen($event)" />
+    </div>
+
+    <div class="shadow-block">
       <h3>Générer une boîte</h3>
       <p class="hint">
         Point d'entrée pédagogique/de test — pas besoin de modélisateur 3D externe : génère

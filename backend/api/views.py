@@ -109,6 +109,7 @@ class SearchNearbyBuildingsView(APIView):
             candidates, n_skipped_too_complex = geodata.search_nearby_buildings(
                 serializer.validated_data['lat'], serializer.validated_data['lon'],
                 serializer.validated_data['radius_m'],
+                max_walls=serializer.validated_data.get('max_walls'),
             )
         except geodata.GeodataError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)

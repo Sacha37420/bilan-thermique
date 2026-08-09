@@ -326,7 +326,7 @@ MAX_WALLS_SIMPLIFIED_MODE = 30
 # de produire une UI à des centaines de menus déroulants.
 
 
-def search_nearby_buildings(lat, lon, radius_m, max_results=5):
+def search_nearby_buildings(lat, lon, radius_m, max_results=5, max_walls=None):
     """Lot T (mode simplifié) — cherche les bâtiments réels les plus proches de
     (lat, lon) dans un rayon donné (IGN BD TOPO en France, repli OpenStreetMap
     sinon — même bascule que generate_environment_mesh) et retourne jusqu'à
@@ -337,8 +337,15 @@ def search_nearby_buildings(lat, lon, radius_m, max_results=5):
     bâtiments d'un rayon, utilisés comme obstacles bruts non assignables),
     chaque candidat ici est individuellement assignable ensuite.
 
+    max_walls (Lot Y) : plafond de parois d'un candidat, défaut
+    MAX_WALLS_SIMPLIFIED_MODE. Ce plafond existe parce que le mode simplifié
+    génère UN MENU DÉROULANT PAR PAROI — la page Bâtiment, elle, assigne par
+    groupe avec sélection multiple et dispose du sélecteur manuel au clic, donc
+    elle peut le relever. Paramétrable plutôt que supprimé : le mode simplifié
+    en a toujours besoin.
+
     Retourne (candidates, n_skipped_too_complex) : candidates avec au plus
-    MAX_WALLS_SIMPLIFIED_MODE parois (les autres sont ignorés, comptés dans
+    max_walls parois (les autres sont ignorés, comptés dans
     n_skipped_too_complex — à afficher pour que l'utilisateur comprenne
     pourquoi un bâtiment proche n'apparaît pas). candidates=[] si la zone a
     été interrogée avec succès mais ne contient aucun bâtiment exploitable
@@ -385,7 +392,7 @@ def search_nearby_buildings(lat, lon, radius_m, max_results=5):
         # de sommets de l'empreinte) : robuste aux conventions de fermeture
         # d'anneau qui diffèrent entre IGN (GeoJSON) et OSM (way Overpass).
         n_walls = len({t['group'] for t in triangles if t['group'].startswith('mur_')})
-        if n_walls > MAX_WALLS_SIMPLIFIED_MODE:
+        if n_walls > (max_walls if max_walls is not None else MAX_WALLS_SIMPLIFIED_MODE):
             n_skipped_too_complex += 1
             continue
         clat, clon = _footprint_center(b['footprint_latlon'])

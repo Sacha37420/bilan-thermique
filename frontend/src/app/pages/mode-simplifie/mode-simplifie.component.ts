@@ -3,26 +3,15 @@ import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { Building, WorkingTriangle } from '../../core/building.types';
+import { Building, BuildingCandidate, WorkingTriangle } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
+import { BuildingSearchComponent } from '../../components/building-search/building-search.component';
 import { VENTILATION_PROFILES, VentilationProfile } from '../../core/ventilation-profiles';
 
 interface ParoiModelSummary {
   id: number;
   name: string;
   is_glazing: boolean;
-}
-
-interface Candidate {
-  lat: number;
-  lon: number;
-  distance_m: number;
-  height_m: number;
-  approx_height: boolean;
-  source: 'ign' | 'osm';
-  n_walls: number;
-  vertices: number[][];
-  triangles: { v: [number, number, number]; group: string; boundary: 'ground' | 'exterior_air' }[];
 }
 
 interface GroupConfig {
@@ -48,7 +37,7 @@ const UNASSIGNED_COLOR = '--warning';
 @Component({
   selector: 'app-mode-simplifie',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, RouterLink, MeshViewerComponent],
+  imports: [FormsModule, DecimalPipe, RouterLink, MeshViewerComponent, BuildingSearchComponent],
   templateUrl: './mode-simplifie.component.html',
   styleUrl: './mode-simplifie.component.scss',
 })
@@ -60,70 +49,35 @@ export class ModeSimplifieComponent implements OnInit {
   step = signal<'recherche' | 'creation' | 'configuration' | 'termine'>('recherche');
 
   // ── Étape 1 : recherche ────────────────────────────────────────────────
-  searchLat: number | null = null;
-  searchLon: number | null = null;
-  searchRadius = 50;
-  searching = signal(false);
-  searchError = signal('');
-  candidates = signal<Candidate[]>([]);
-  nSkippedTooComplex = signal(0);
-  selectedCandidateIndex = signal<number | null>(null);
+  // Formulaire et appel réseau délégués au composant partagé (Lot Y,
+  // components/building-search) — utilisé aussi par la page Bâtiment. Ce
+  // composant n'écrit rien : il émet le candidat choisi, cette page décide.
+  chosen = signal<BuildingCandidate | null>(null);
 
-  get selectedCandidate(): Candidate | null {
-    const i = this.selectedCandidateIndex();
-    return i === null ? null : this.candidates()[i] ?? null;
-  }
-
-  search(): void {
-    if (this.searchLat === null || this.searchLon === null) return;
-    this.searching.set(true);
-    this.searchError.set('');
-    this.candidates.set([]);
-    this.selectedCandidateIndex.set(null);
-    this.api.searchNearbyBuildings({ lat: this.searchLat, lon: this.searchLon, radius_m: this.searchRadius }).subscribe({
-      next: (res) => {
-        const r = res as { candidates: Candidate[]; n_skipped_too_complex: number };
-        this.candidates.set(r.candidates);
-        this.nSkippedTooComplex.set(r.n_skipped_too_complex);
-        this.searching.set(false);
-        if (r.candidates.length === 0) {
-          this.searchError.set(
-            r.n_skipped_too_complex > 0
-              ? "Bâtiment(s) trouvé(s) mais trop complexe(s) pour ce mode — essayez l'import manuel (page Bâtiment)."
-              : "Aucun bâtiment trouvé à cet endroit — élargissez le rayon ou vérifiez les coordonnées.",
-          );
-        }
-      },
-      error: (err) => {
-        this.searching.set(false);
-        this.searchError.set(err?.error?.detail ?? 'Échec de la recherche.');
-      },
-    });
+  get selectedCandidate(): BuildingCandidate | null {
+    return this.chosen();
   }
 
   /** Nom proposé par défaut à l'étape 2. Les coordonnées plutôt que la distance
    * ou la source : `Building.name` est UNIQUE côté serveur (BuildingSerializer.
    * validate_name), et deux bâtiments cherchés depuis deux points différents
    * doivent pouvoir coexister sans que l'utilisateur ait à renommer. */
-  private defaultNameFor(c: Candidate): string {
+  private defaultNameFor(c: BuildingCandidate): string {
     return `Bâtiment ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`;
   }
 
-  selectCandidate(i: number): void {
-    const candidate = this.candidates()[i];
-    if (!candidate) return;
-
+  onCandidateChosen(candidate: BuildingCandidate): void {
     // Le nom proposé ne doit jamais écraser une saisie de l'utilisateur : on ne
     // le (re)pose que si le champ est vide, ou s'il contient encore le nom
     // proposé pour le candidat précédent (cas « Changer de bâtiment » sans
     // avoir renommé).
-    const previous = this.selectedCandidate;
+    const previous = this.chosen();
     const current = this.buildingName.trim();
     if (!current || (previous && current === this.defaultNameFor(previous))) {
       this.buildingName = this.defaultNameFor(candidate);
     }
 
-    this.selectedCandidateIndex.set(i);
+    this.chosen.set(candidate);
     this.createError.set('');
     // Sans ce passage à 'creation', l'étape 2 reste masquée
     // (`@if (selectedCandidate && step() !== 'recherche')`) et cliquer
@@ -134,9 +88,9 @@ export class ModeSimplifieComponent implements OnInit {
   }
 
   /** Revenir au choix du bâtiment sans relancer la recherche réseau (les
-   * candidats déjà extrudés sont conservés). Volontairement limité à l'étape
-   * 'creation' : au-delà, le bâtiment existe côté serveur et changer de
-   * candidat laisserait un `Building` orphelin. */
+   * candidats déjà extrudés sont conservés par le composant de recherche).
+   * Volontairement limité à l'étape 'creation' : au-delà, le bâtiment existe
+   * côté serveur et changer de candidat le laisserait orphelin. */
   backToSearch(): void {
     if (this.step() !== 'creation') return;
     this.createError.set('');
@@ -171,7 +125,7 @@ export class ModeSimplifieComponent implements OnInit {
     return this.ventilationProfiles.find(p => p.id === this.selectedVentProfileId) ?? null;
   }
 
-  private footprintAreaM2(c: Candidate): number {
+  private footprintAreaM2(c: BuildingCandidate): number {
     let area = 0;
     for (const t of c.triangles) {
       if (t.group !== 'sol') continue;

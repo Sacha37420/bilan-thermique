@@ -4,9 +4,10 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
 import { generateBoxEnvelope } from '../../core/box-generator';
-import { Building, Job, ShadingProfileId, TriangleBoundary, WorkingTriangle } from '../../core/building.types';
+import { Building, BuildingCandidate, Job, ShadingProfileId, TriangleBoundary, WorkingTriangle } from '../../core/building.types';
 import { SHADING_PROFILES } from '../../core/shading-profiles';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
+import { BuildingSearchComponent } from '../../components/building-search/building-search.component';
 
 interface ParoiModelSummary {
   id: number;
@@ -35,7 +36,7 @@ const POLL_INTERVAL_MS = 2000;
 @Component({
   selector: 'app-batiment',
   standalone: true,
-  imports: [FormsModule, RouterLink, MeshViewerComponent],
+  imports: [FormsModule, RouterLink, MeshViewerComponent, BuildingSearchComponent],
   templateUrl: './batiment.component.html',
   styleUrl: './batiment.component.scss',
 })
@@ -204,6 +205,50 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.modelColorMap.clear();
     this.message.set(
       `Boîte générée : ${mesh.vertices.length} sommets, ${mesh.triangles.length} triangles, ${mesh.groups.length} groupe(s).`,
+    );
+  }
+
+  // ── Recherche d'un bâtiment réel (Lot Y) ─────────────────────────────
+  // Troisième source de maillage, à côté de l'import OBJ/STL et du générateur
+  // de boîte. L'endpoint existait déjà (Lot T) mais n'était appelé que par le
+  // mode simplifié : c'était un chaînon manquant d'interface, pas une
+  // fonctionnalité à écrire. Contrairement au mode simplifié, aucun parcours
+  // imposé ensuite — tout l'outillage habituel s'applique tel quel.
+  //
+  // Plafond de parois volontairement relevé : la limite basse du mode simplifié
+  // existe parce qu'il génère un menu déroulant PAR PAROI, ce qui n'est pas le
+  // cas ici (assignation par groupe + sélection manuelle au clic).
+  readonly searchMaxWalls = 400;
+
+  onCandidateChosen(c: BuildingCandidate): void {
+    this.error.set('');
+    this.currentBuildingId.set(null);
+    this.buildingName = `Bâtiment ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`;
+    this.buildingDescription = '';
+    this.vertices.set(c.vertices);
+    this.triangles.set(c.triangles.map(t => ({ ...t, paroi_model_id: null, shading_profile_id: null })));
+    this.groups.set([...new Set(c.triangles.map(t => t.group))]);
+    this.groupAssignments = {};
+    this.groupBoundaryAssignments = {};
+    this.groupShadingAssignments = {};
+    this.selectedIndices.set(new Set());
+    this.modelColorMap.clear();
+
+    // Le vrai gain par rapport à un import OBJ : le géoréférencement est connu
+    // par construction. L'empreinte est produite dans le repère est/nord réel,
+    // donc la rotation nord est NULLE — ce qui supprime d'un coup la principale
+    // source d'erreur silencieuse du géoréférencement.
+    this.georefLat = c.lat;
+    this.georefLon = c.lon;
+    this.georefNorthOffset = 0;
+    this.georefGroundZ = null;
+    this.fetchGroundAltitude();
+
+    this.message.set(
+      `Bâtiment trouvé à ${c.distance_m} m (${c.source === 'ign' ? 'IGN BD TOPO' : 'OpenStreetMap'}) : `
+      + `${c.n_walls} paroi(s), ${c.triangles.length} triangles, hauteur `
+      + `${c.height_m.toFixed(1)} m${c.approx_height ? ' (estimée)' : ''}. `
+      + `Géoréférencement prérempli — assignez les parois ci-dessous, puis enregistrez.`,
     );
   }
 

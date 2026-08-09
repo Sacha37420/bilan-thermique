@@ -30,38 +30,7 @@
       OpenStreetMap (ailleurs) — mêmes sources que la génération d'environnement.
     </p>
     @if (step() === 'recherche') {
-      <div class="field-grid">
-        <label><span>Latitude</span><input type="number" step="0.0001" min="-90" max="90" [(ngModel)]="searchLat" name="searchLat" /></label>
-        <label><span>Longitude</span><input type="number" step="0.0001" min="-180" max="180" [(ngModel)]="searchLon" name="searchLon" /></label>
-        <label><span>Rayon de recherche (m)</span><input type="number" step="5" min="5" max="150" [(ngModel)]="searchRadius" name="searchRadius" /></label>
-      </div>
-      <button type="button" class="btn-primary" [disabled]="searching() || searchLat === null || searchLon === null" (click)="search()">
-        {{ searching() ? 'Recherche…' : 'Rechercher' }}
-      </button>
-      @if (searchError()) {
-        <p class="field-error">{{ searchError() }}</p>
-      }
-      @if (nSkippedTooComplex() > 0) {
-        <p class="hint">
-          {{ nSkippedTooComplex() }} bâtiment(s) proche(s) ignoré(s) — empreinte trop complexe
-          (trop de parois) pour ce mode simplifié.
-        </p>
-      }
-      @if (candidates().length > 0) {
-        <div class="candidate-list">
-          @for (c of candidates(); track $index) {
-            <div class="candidate-row" [class.active]="selectedCandidateIndex() === $index">
-              <div class="candidate-info">
-                <span>{{ c.distance_m }} m</span>
-                <span>hauteur {{ c.height_m | number:'1.0-1' }} m{{ c.approx_height ? ' (estimée)' : '' }}</span>
-                <span>{{ c.n_walls }} paroi(s)</span>
-                <span class="hint">source : {{ c.source === 'ign' ? 'IGN BD TOPO' : 'OpenStreetMap' }}</span>
-              </div>
-              <button type="button" class="btn-secondary" (click)="selectCandidate($index)">Choisir</button>
-            </div>
-          }
-        </div>
-      }
+      <app-building-search (candidateChosen)="onCandidateChosen($event)" />
     } @else if (selectedCandidate) {
       <p class="hint">
         Bâtiment choisi à {{ selectedCandidate.distance_m }} m, {{ selectedCandidate.n_walls }} paroi(s),
