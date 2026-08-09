@@ -294,6 +294,11 @@ class GenerateEnvironmentRequestSerializer(serializers.Serializer):
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
     lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
     radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
+    # Lot Z : même option que sur la génération attachée à un bâtiment. Elle
+    # manquait ici à la livraison du lot — la page Environnement ne pouvait donc
+    # produire QUE des bâtiments, ce qui rendait la végétation introuvable pour
+    # qui passait par cette page.
+    include_vegetation = serializers.BooleanField(required=False, default=False)
 
 
 class SearchNearbyBuildingsRequestSerializer(serializers.Serializer):

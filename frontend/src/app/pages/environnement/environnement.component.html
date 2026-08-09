@@ -76,6 +76,19 @@
           <input type="number" step="10" min="10" max="400" [(ngModel)]="genRadius" name="genRadius" />
         </label>
       </div>
+      <label class="inline-check">
+        <input type="checkbox" [(ngModel)]="genVegetation" name="genVegetation" />
+        <span>Inclure la végétation (arbres, haies, bois)</span>
+      </label>
+      @if (genVegetation) {
+        <p class="hint">
+          Zones boisées et haies depuis l'IGN, arbres isolés depuis OpenStreetMap — seule source à
+          les connaître individuellement. La végétation <strong>n'arrête pas le soleil, elle
+          l'atténue</strong> : elle apparaît en vert dans l'aperçu ci-dessous, les bâtiments restant
+          en gris. Deux réserves : la hauteur est déduite du type (aucune source n'en donne de
+          fiable) et la transmittance ne varie pas dans l'année, ce qui surestime l'ombrage hivernal.
+        </p>
+      }
       <button type="button" class="btn-secondary" (click)="generateFromCoordinates()" [disabled]="generating()">
         {{ generating() ? 'Génération…' : 'Générer' }}
       </button>
@@ -93,7 +106,14 @@
     @if (error()) { <p class="feedback error">{{ error() }}</p> }
 
     @if (triangles().length > 0) {
-      <p class="summary"><strong>{{ vertices().length }}</strong> sommets, <strong>{{ triangles().length }}</strong> triangles.</p>
+      <p class="summary">
+        <strong>{{ vertices().length }}</strong> sommets, <strong>{{ triangles().length }}</strong> triangles.
+        @if (vegetationTriangleCount > 0) {
+          — dont <strong>{{ vegetationTriangleCount }}</strong> de végétation
+          <span class="legend-veg">vert</span>, le reste en bâti
+          <span class="legend-built">gris</span>.
+        }
+      </p>
 
       <div class="viewer-wrap">
         <app-mesh-viewer

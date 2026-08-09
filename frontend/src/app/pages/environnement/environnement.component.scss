@@ -166,3 +166,25 @@ input[type="text"], input[type="number"] {
   margin-bottom: var(--space-4);
   background: var(--bg);
 }
+
+// Lot Z — distinguer visuellement végétation et bâti dans l'aperçu : les
+// afficher de la même couleur les rendait indiscernables.
+.inline-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.legend-veg, .legend-built {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.legend-veg { color: var(--success); background: var(--success-tint); }
+.legend-built { color: var(--text-mute); background: var(--border); }

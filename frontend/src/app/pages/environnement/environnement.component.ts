@@ -15,7 +15,7 @@ interface EnvironmentSummary {
 
 interface GenerateEnvironmentResult {
   vertices: number[][];
-  triangles: { v: [number, number, number] }[];
+  triangles: { v: [number, number, number]; k?: number | null }[];
   warnings: string[];
   stats: { buildings_used: number; buildings_ign: number; buildings_osm: number; buildings_skipped: number };
 }
@@ -38,7 +38,9 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
   description = '';
 
   vertices = signal<number[][]>([]);
-  triangles = signal<{ v: [number, number, number] }[]>([]);
+  // `k` (transmittance, Lot Z) est conservé sur chaque triangle : c'est ce qui
+  // distingue un obstacle végétal d'un bâtiment, à l'affichage comme au calcul.
+  triangles = signal<{ v: [number, number, number]; k?: number | null }[]>([]);
 
   loading = signal(false);
   saving = signal(false);
@@ -48,11 +50,24 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
   genLat = 48.8566;
   genLon = 2.3522;
   genRadius = 150;
+  // Lot Z : manquait sur cette page à la livraison du lot — la génération
+  // autonome ne produisait que des bâtiments.
+  genVegetation = false;
   generating = signal(false);
   generateJob = signal<Job | null>(null);
   private pollHandle?: ReturnType<typeof setInterval>;
 
-  colorForTriangle = (): string => '--text-mute';
+  // Un maillage d'environnement peut mélanger bâtiments (opaques) et végétation
+  // (atténuante). Les afficher de la même couleur les rendait indiscernables —
+  // signalé à l'usage : « je ne repère pas de végétation ».
+  colorForTriangle = (index: number): string => {
+    const k = this.triangles()[index]?.k;
+    return k !== null && k !== undefined && k > 0 ? '--success' : '--text-mute';
+  };
+
+  get vegetationTriangleCount(): number {
+    return this.triangles().filter(t => t.k !== null && t.k !== undefined && t.k > 0).length;
+  }
 
   ngOnInit(): void {
     this.refresh();
@@ -170,7 +185,10 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
     this.generating.set(true);
     this.generateJob.set(null);
 
-    this.api.generateEnvironment({ lat: this.genLat, lon: this.genLon, radius_m: this.genRadius }).subscribe({
+    this.api.generateEnvironment({
+      lat: this.genLat, lon: this.genLon, radius_m: this.genRadius,
+      include_vegetation: this.genVegetation,
+    }).subscribe({
       next: (res) => {
         this.generateJob.set(res as Job);
         this.startGeneratePoll();

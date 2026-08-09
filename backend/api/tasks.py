@@ -140,6 +140,35 @@ def generate_environment(self, job_id, params):
         result = geodata.generate_environment_mesh(
             params['lat'], params['lon'], params['radius_m'], progress_cb=progress_cb,
         )
+
+        # Lot Z : même option que sur la génération attachée à un bâtiment.
+        # Sans self_footprint ni north_offset ici — cette génération autonome
+        # n'a aucun bâtiment de référence, exactement comme pour les obstacles
+        # bâtis (voir generate_environment_mesh).
+        n_vegetation = 0
+        if params.get('include_vegetation'):
+            try:
+                job.set_state(progress=75, message="Végétation (IGN / OpenStreetMap)…")
+                veg = geodata.generate_vegetation_mesh(
+                    params['lat'], params['lon'], params['radius_m'],
+                )
+                result['warnings'].extend(veg['warnings'])
+                result['stats'].update(veg['stats'])
+                n_vegetation = veg['stats']['vegetation_used']
+                if (len(result['vertices']) + len(veg['vertices']) > geometry.MAX_VERTICES
+                        or len(result['triangles']) + len(veg['triangles']) > geometry.MAX_TRIANGLES):
+                    result['warnings'].append("Végétation abandonnée : limite de maillage atteinte.")
+                    n_vegetation = 0
+                else:
+                    offset = len(result['vertices'])
+                    result['vertices'].extend(veg['vertices'])
+                    result['triangles'].extend(
+                        {'v': [i + offset for i in t['v']], 'k': t['k'], 'obj': t['obj']}
+                        for t in veg['triangles']
+                    )
+            except geodata.GeodataError as exc:
+                result['warnings'].append(f"Végétation non chargée ({exc}).")
+
         job.result = result
         job.save(update_fields=['result'])
         n_triangles = len(result['triangles'])
@@ -147,7 +176,8 @@ def generate_environment(self, job_id, params):
         job.set_state(
             status=Job.DONE, progress=100,
             message=f"{stats['buildings_used']} bâtiment(s), {n_triangles} triangles "
-                    f"(IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']}).",
+                    f"(IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']})."
+                    + (f" Végétation : {n_vegetation} élément(s)." if n_vegetation else ""),
         )
     except geodata.GeodataError as exc:
         job.set_state(status=Job.ERROR, message=str(exc))

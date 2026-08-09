@@ -121,7 +121,9 @@ export class ApiService {
     return this.http.delete(`${this.base}/api/environnements/${id}/`);
   }
 
-  generateEnvironment(payload: { lat: number; lon: number; radius_m: number }): Observable<unknown> {
+  generateEnvironment(
+    payload: { lat: number; lon: number; radius_m: number; include_vegetation?: boolean },
+  ): Observable<unknown> {
     return this.http.post(`${this.base}/api/environnements/generer/`, payload);
   }
 
