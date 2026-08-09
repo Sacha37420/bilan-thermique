@@ -2397,3 +2397,125 @@ class PlanningHourIndexTest(SimpleTestCase):
         t_correct = run([self._point(hour_index=h) for h in kept_hours])
         t_shifted = run([self._point() for _ in kept_hours])
         self.assertNotAlmostEqual(t_correct, t_shifted, places=6)
+
+
+class EnergyBalanceBreakdownTest(SimpleTestCase):
+    """Lot AB2 — bilan par poste au nœud d'air.
+
+    Le dashboard n'affichait que le canal « surfaces d'enveloppe » sous les
+    libellés « gains »/« pertes », alors que le solaire transmis par les
+    vitrages (Lot U), les apports internes (Lots H/Q), le renouvellement d'air
+    (Lots G/Q) et les cadres de fenêtre (Lot I) alimentent le MÊME nœud d'air.
+
+    Ces tests vérifient l'identité discrète exacte du nœud d'air : la somme des
+    postes vaut la variation de stockage, au bit près. Ce n'est PAS tautologique
+    (piège du Lot R) : les postes sont reconstruits depuis les températures
+    résolues et les paramètres physiques, jamais relus depuis le vecteur F.
+    """
+
+    databases = []
+
+    LAYERS = [{'e': 0.2, 'lam': 1.0, 'rho': 2000.0, 'c': 900.0, 'tau': 0.0, 'r': 0.9, 'alpha': 0.1}]
+    GLAZING = [{'e': 0.004, 'lam': 1.0, 'rho': 2500.0, 'c': 750.0, 'tau': 0.87, 'r': 0.07, 'alpha': 0.06}]
+
+    def _envelope(self, glazing=False, frame=False):
+        vertices = [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 0.0, 3.0], [0.0, 0.0, 3.0]]
+        triangles = [
+            {'v': [0, 1, 2], 'paroi_model_id': 2 if glazing else 1},
+            {'v': [0, 2, 3], 'paroi_model_id': 1},
+        ]
+        return {'vertices': vertices,
+                'triangles': geometry.compute_envelope_geometry(vertices, triangles)}
+
+    def _run(self, *, mode='free', glazing=False, frame=False, sun=False,
+             debit=0.0, apports=0.0, t_ext=0.0, hours=12, **interior_extra):
+        interior = {'mode': mode, 'h_i': 8.0, 'c_air_int': 50_000.0,
+                    'debit_vent_m3h': debit, 'eta_recup_vent': 0.0,
+                    'apports_internes_w': apports, **interior_extra}
+        weather = [{
+            't_ext': t_ext, 'sun_azimuth': 180.0,
+            'sun_elevation': 40.0 if sun else -10.0,
+            'e_dir': 800.0 if sun else 0.0, 'e_dif': 120.0 if sun else 0.0,
+        } for _ in range(hours)]
+        payload = {'dx_max': 0.05, 'h_e': 25.0, 'interior': interior,
+                   't_init': 20.0, 'weather': weather}
+        layers = {1: self.LAYERS, 2: self.GLAZING}
+        frames = {2: (2.0, 0.25)} if frame else None
+        return building_solver.run_building_simulation(
+            self._envelope(glazing=glazing), layers, None, payload,
+            paroi_frame_by_id=frames,
+        )
+
+    def _assert_closes(self, result, tol_kwh=1e-9):
+        b = result['balance']
+        self.assertIsNotNone(b)
+        total = sum(b[k] for k in ('envelope_kwh', 'solar_transmitted_kwh', 'internal_gains_kwh',
+                                    'ventilation_kwh', 'frames_kwh', 'hvac_kwh'))
+        self.assertAlmostEqual(total, b['storage_kwh'], delta=tol_kwh)
+        self.assertAlmostEqual(b['closure_error_kwh'], 0.0, delta=tol_kwh)
+        return b
+
+    def test_closes_with_envelope_only(self):
+        b = self._assert_closes(self._run(t_ext=-5.0))
+        self.assertLess(b['envelope_kwh'], 0.0)  # il fait froid dehors : pertes
+        for k in ('solar_transmitted_kwh', 'internal_gains_kwh', 'ventilation_kwh', 'frames_kwh'):
+            self.assertEqual(b[k], 0.0)
+
+    def test_closes_with_every_channel_active(self):
+        b = self._assert_closes(self._run(
+            glazing=True, frame=True, sun=True, debit=60.0, apports=300.0, t_ext=-5.0,
+        ))
+        for k in ('solar_transmitted_kwh', 'internal_gains_kwh', 'frames_kwh'):
+            self.assertNotEqual(b[k], 0.0, f"{k} devrait être non nul")
+        self.assertLess(b['ventilation_kwh'], 0.0)  # air neuf plus froid que l'intérieur
+
+    def test_closes_in_thermostat_mode_heating(self):
+        """Nuit d'hiver, sans soleil : le thermostat chauffe (hvac > 0)."""
+        b = self._assert_closes(self._run(
+            mode='thermostat', debit=60.0, t_ext=-5.0, t_min=19.0, t_max=26.0,
+        ))
+        self.assertGreater(b['hvac_kwh'], 0.0)
+        self.assertLess(b['envelope_kwh'], 0.0)
+
+    def test_closes_in_thermostat_mode_cooling(self):
+        """Même bâtiment en plein soleil derrière un vitrage : le solaire
+        transmis dépasse largement les déperditions malgré -5 °C dehors, et le
+        thermostat doit REFROIDIR (hvac < 0). Le bilan doit boucler dans ce sens
+        aussi — c'est le cas où le poste solaire, invisible avant ce lot,
+        explique à lui seul le signe du résultat."""
+        b = self._assert_closes(self._run(
+            mode='thermostat', glazing=True, sun=True, debit=60.0, apports=300.0,
+            t_ext=-5.0, t_min=19.0, t_max=26.0,
+        ))
+        self.assertLess(b['hvac_kwh'], 0.0)
+        self.assertGreater(b['solar_transmitted_kwh'], abs(b['hvac_kwh']))
+
+    def test_solar_transmitted_is_the_dominant_gain_through_glazing(self):
+        """Le poste que le dashboard laissait invisible : sur une paroi vitrée
+        ensoleillée, il doit dépasser le canal « surfaces d'enveloppe » — c'est
+        bien pour ça que l'afficher change la lecture du bilan."""
+        b = self._assert_closes(self._run(glazing=True, sun=True, t_ext=0.0))
+        self.assertGreater(b['solar_transmitted_kwh'], abs(b['envelope_kwh']))
+
+    def test_internal_gains_exactly_match_their_power(self):
+        """Oracle indépendant du solveur : des apports constants de 300 W
+        pendant 12 h valent exactement 3,6 kWh."""
+        b = self._assert_closes(self._run(apports=300.0, hours=12))
+        self.assertAlmostEqual(b['internal_gains_kwh'], 300.0 * 12 / 1000.0, places=9)
+
+    def test_envelope_channel_matches_legacy_flux_series(self):
+        """Non-régression : le poste « enveloppe » est exactement l'intégrale de
+        envelope_flux_w, la grandeur historiquement affichée."""
+        result = self._run(t_ext=-5.0, hours=8)
+        legacy = sum(result['envelope_flux_w']) * 3600.0 / 3.6e6
+        self.assertAlmostEqual(result['balance']['envelope_kwh'], legacy, places=12)
+        self.assertAlmostEqual(
+            result['flux_positive_kwh'] + result['flux_negative_kwh'], legacy, places=12,
+        )
+
+    def test_no_balance_in_imposed_mode(self):
+        """Mode 'imposed' : la ligne du nœud d'air est écrasée par Dirichlet,
+        aucun de ces postes n'agit — mieux vaut ne rien annoncer que d'annoncer
+        des valeurs sans effet sur la solution."""
+        result = self._run(mode='imposed', t_int=20.0, glazing=True, sun=True, apports=300.0)
+        self.assertIsNone(result['balance'])

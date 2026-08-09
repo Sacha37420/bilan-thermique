@@ -201,6 +201,44 @@ textarea { width: 100%; font-family: var(--font-mono); min-height: 120px; resize
   &.negative { color: var(--text-mute); }
 }
 
+// Bilan par poste (Lot AB2). Le tableau peut être plus large que l'écran sur
+// mobile : il défile dans son propre conteneur, jamais la page.
+.table-wrap { overflow-x: auto; margin: var(--space-3) 0 var(--space-2); }
+
+.balance-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+
+  th, td {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
+  th { font-size: var(--text-xs); color: var(--text-mute); font-weight: 600; }
+
+  .num {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  td.positive { color: var(--accent); }
+  td.negative { color: var(--text-mute); }
+
+  td small { display: block; color: var(--text-mute); font-size: var(--text-xs); margin-top: 2px; }
+
+  tfoot td {
+    font-weight: 700;
+    border-top: 2px solid var(--border);
+    border-bottom: none;
+  }
+}
+
+.balance-ok { color: var(--success); }
+
 .chart-wrap {
   border: 1px solid var(--border);
   background: var(--card);

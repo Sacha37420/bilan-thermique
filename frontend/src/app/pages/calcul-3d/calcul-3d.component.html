@@ -493,14 +493,74 @@
             </div>
           }
           <div class="tile">
-            <span class="tile-label">Flux entrant total (gains)</span>
+            <span class="tile-label">Enveloppe — flux entrant</span>
             <span class="tile-value positive">+{{ r.flux_positive_kwh | number:'1.1-1' }} kWh</span>
           </div>
           <div class="tile">
-            <span class="tile-label">Flux sortant total (pertes)</span>
+            <span class="tile-label">Enveloppe — flux sortant</span>
             <span class="tile-value negative">{{ r.flux_negative_kwh | number:'1.1-1' }} kWh</span>
           </div>
         </div>
+
+        @if (r.balance; as b) {
+          <h3>Bilan par poste</h3>
+          <p class="hint">
+            Tout ce qui entre ou sort de l'air intérieur, sur toute la période. Les deux tuiles
+            ci-dessus ne comptent que le premier poste : elles ne suffisent pas à lire le bilan d'un
+            bâtiment vitré, où le solaire transmis peut être le gain dominant.
+          </p>
+          <div class="table-wrap">
+            <table class="balance-table">
+              <thead>
+                <tr>
+                  <th>Poste</th>
+                  <th class="num">kWh</th>
+                  @if (surfaceRefM2) { <th class="num">kWh/m²</th> }
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of balanceRows; track row.label) {
+                  <tr>
+                    <td>{{ row.label }}<small>{{ row.hint }}</small></td>
+                    <td class="num" [class.positive]="row.value > 0" [class.negative]="row.value < 0">
+                      {{ row.value > 0 ? '+' : '' }}{{ row.value | number:'1.1-1' }}
+                    </td>
+                    @if (surfaceRefM2) {
+                      <td class="num">{{ row.value / surfaceRefM2 | number:'1.1-1' }}</td>
+                    }
+                  </tr>
+                }
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>
+                    Variation d'énergie stockée (air + mobilier)
+                    <small>Somme des postes ci-dessus — c'est l'identité que le solveur doit vérifier.</small>
+                  </td>
+                  <td class="num">{{ b.storage_kwh > 0 ? '+' : '' }}{{ b.storage_kwh | number:'1.1-1' }}</td>
+                  @if (surfaceRefM2) {
+                    <td class="num">{{ b.storage_kwh / surfaceRefM2 | number:'1.1-1' }}</td>
+                  }
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p class="hint" [class.balance-ok]="balanceCloses" [class.field-error]="!balanceCloses">
+            @if (balanceCloses) {
+              Bilan bouclé : la somme des postes égale la variation de stockage à la précision
+              numérique près. Conservation de l'énergie vérifiée sur ce calcul.
+            } @else {
+              Bilan NON bouclé — écart de {{ b.closure_error_kwh | number:'1.1-3' }} kWh. C'est le
+              signe d'un défaut du solveur, pas d'un réglage : à signaler.
+            }
+          </p>
+        } @else {
+          <p class="hint">
+            Bilan par poste indisponible en mode « Imposée » : la température d'air y est forcée, donc
+            renouvellement d'air, apports internes, solaire transmis et cadres n'ont aucun effet sur
+            le résultat. Passez en « Libre » ou « Thermostat » pour l'obtenir.
+          </p>
+        }
         @if (surfaceRefM2) {
           <p class="hint">
             Repère indicatif (pas une certification) : la consommation conventionnelle visée par la

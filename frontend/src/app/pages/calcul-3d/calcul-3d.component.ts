@@ -52,6 +52,20 @@ interface PlanningEntry {
   volets_fermes: boolean;
 }
 
+/** Bilan par poste au nœud d'air (Lot AB2) — `null` en mode « Imposée », où la
+ * ligne du nœud d'air est écrasée par Dirichlet et où aucun de ces postes
+ * n'agit sur la solution. */
+interface EnergyBalance {
+  envelope_kwh: number;
+  solar_transmitted_kwh: number;
+  internal_gains_kwh: number;
+  ventilation_kwh: number;
+  frames_kwh: number;
+  hvac_kwh: number;
+  storage_kwh: number;
+  closure_error_kwh: number;
+}
+
 interface BuildingCalculResult {
   hours: number;
   t_air_mean: number;
@@ -59,6 +73,7 @@ interface BuildingCalculResult {
   cooling_kwh: number;
   flux_positive_kwh: number;
   flux_negative_kwh: number;
+  balance: EnergyBalance | null;
   t_air: number[];
   envelope_flux_w: number[];
   final_exterior_surface_temp: number[];
@@ -594,6 +609,50 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     const r = this.result;
     const s = this.surfaceRefM2;
     return r && s ? r.cooling_kwh / s : null;
+  }
+
+  // ── Bilan par poste (Lot AB2) ────────────────────────────────────────
+  // Les deux tuiles d'origine (« Flux entrant/sortant total ») ne portaient que
+  // le canal « surfaces d'enveloppe » tout en s'appelant « gains »/« pertes »,
+  // alors que quatre autres postes alimentent le même nœud d'air — dont le
+  // solaire transmis par les vitrages, souvent le premier gain d'un bâtiment
+  // vitré. Ordonné du plus au moins structurant, HVAC en dernier (c'est la
+  // conséquence, pas une cause).
+  get balanceRows(): { label: string; value: number; hint: string }[] {
+    const b = this.result?.balance;
+    if (!b) return [];
+    return [
+      { label: 'Surfaces d’enveloppe', value: b.envelope_kwh,
+        hint: 'Conduction + convection à travers murs, toiture, plancher et vitrages.' },
+      { label: 'Solaire transmis (vitrages)', value: b.solar_transmitted_kwh,
+        hint: 'Rayonnement ayant traversé une paroi sans couche opaque — chauffe l’air directement.' },
+      { label: 'Apports internes', value: b.internal_gains_kwh,
+        hint: 'Occupants, éclairage, électroménager.' },
+      { label: 'Renouvellement d’air', value: b.ventilation_kwh,
+        hint: 'Infiltrations et VMC, récupération de chaleur déduite.' },
+      { label: 'Cadres de fenêtre', value: b.frames_kwh,
+        hint: 'Conductance directe du cadre, hors vitrage.' },
+      { label: 'Chauffage / climatisation', value: b.hvac_kwh,
+        hint: 'Ce qu’il a fallu fournir (positif) ou retirer (négatif) pour tenir les consignes.' },
+    ];
+  }
+
+  /** Variation d'énergie stockée dans l'air et le mobilier (c_air_int) sur la
+   * période : c'est ce que la somme des postes doit valoir exactement. */
+  get balanceStorage(): number | null {
+    return this.result?.balance?.storage_kwh ?? null;
+  }
+
+  /** Écart de bouclage. Nul à la précision numérique près par construction —
+   * affiché quand même : c'est un contrôle de conservation d'énergie visible,
+   * et une valeur non nulle signalerait une régression du solveur. */
+  get balanceClosureError(): number | null {
+    return this.result?.balance?.closure_error_kwh ?? null;
+  }
+
+  get balanceCloses(): boolean {
+    const e = this.balanceClosureError;
+    return e !== null && Math.abs(e) < 1e-6;
   }
 
   // ── Graphique T_air ──────────────────────────────────────────────────

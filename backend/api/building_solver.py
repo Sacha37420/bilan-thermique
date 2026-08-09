@@ -214,7 +214,8 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
                       sky_view_factor=None, sun_visibility_grid=None,
                       occluder_intersector=None, centroids=None,
                       air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None,
-                      frame_g=None, shading_fs_dir=None, shading_fs_dif=None, volet_closed=False):
+                      frame_g=None, shading_fs_dir=None, shading_fs_dif=None, volet_closed=False,
+                      diagnostics=None):
     """h_e_vec : la valeur DE CETTE HEURE, PAR TRIANGLE (Lot R — constante du
     run ou dérivée du vent, uniforme par défaut ; Lot J — réduite pour les
     triangles dont le volet/store est fermé, voir SHADING_PROFILES/
@@ -230,8 +231,17 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
       - occluder_intersector + centroids : lancer de rayon réel, à l'azimuth/
         élévation EXACTS de l'heure (mode 'realtime', pas de discrétisation).
     Aucune des deux : pas de test d'occlusion (cos(theta_i) géométrique seul).
+
+    diagnostics (Lot AB2, optionnel) : dict rempli au passage avec les deux
+    termes du nœud d'air qui ne sont connus QU'ICI, pour le bilan par poste —
+    'solar_interior_w' (rayonnement transmis intégralement, Lot U) et
+    'frame_source_w' (somme des frame_g[i]*t_boundary[i], Lot I). Le reste du
+    bilan se reconstitue dans la boucle horaire à partir de grandeurs qu'elle
+    connaît déjà. Absent : aucun coût.
     """
     F = np.zeros(n_dof)
+    solar_interior_w = 0.0
+    frame_source_w = 0.0
     t_ext = point['t_ext']
     sun_el = point['sun_elevation']
     sun_az = point['sun_azimuth']
@@ -314,6 +324,7 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
                 # à l'échelle de CE triangle (value est par m², d'où *area).
                 if air_idx is not None:
                     F[air_idx] += value * area
+                    solar_interior_w += value * area
             else:
                 layer_idx = ref
                 s0, s1 = mesh['layer_start_node'][layer_idx], mesh['layer_end_node'][layer_idx]
@@ -334,6 +345,7 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
         # non réaliste pour une fenêtre mais géré sans crash).
         if frame_g is not None and frame_g[i] and air_idx is not None:
             F[air_idx] += frame_g[i] * t_boundary
+            frame_source_w += frame_g[i] * t_boundary
 
     # Renouvellement d'air + apports internes : deux sources directes sur le
     # nœud d'air global, hors de la boucle par triangle — ni la ventilation ni
@@ -347,6 +359,10 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
             F[air_idx] += g_vent * t_ext
         if apports_internes_w:
             F[air_idx] += apports_internes_w
+
+    if diagnostics is not None:
+        diagnostics['solar_interior_w'] = solar_interior_w
+        diagnostics['frame_source_w'] = frame_source_w
 
     return F
 
@@ -698,6 +714,37 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     cooling_j = 0.0
     flux_series = []  # flux net (W) de l'enveloppe vers l'intérieur, par heure
 
+    # Bilan par poste au nœud d'air (Lot AB2). Le dashboard n'affichait que le
+    # canal « surfaces d'enveloppe » sous le libellé « gains »/« pertes », alors
+    # que trois autres postes alimentent le MÊME nœud d'air — dont le solaire
+    # transmis par les vitrages, qui peut être le premier gain d'un bâtiment
+    # vitré (et que le Lot U avait justement rétabli pour qu'il cesse de
+    # disparaître du bilan… sans pour autant le rendre visible).
+    #
+    # Identité discrète EXACTE vérifiée par ces postes, à chaque pas :
+    #   C_air/Δt · (T_air,n+1 − T_air,n)
+    #     = Σ hᵢ·Aᵢ·(T_surf,i − T_air)      surfaces d'enveloppe
+    #     + Σ frame_g[i]·(t_bound,i − T_air) cadres de fenêtre (Lot I)
+    #     + g_vent·(t_ext − T_air)           renouvellement d'air (Lots G/Q)
+    #     + apports_internes_w               apports internes (Lots H/Q)
+    #     + Σ solaire transmis·aire          rayonnement traversant (Lot U)
+    #     + hvac                             chauffage/climatisation
+    # C'est le résidu de la ligne du nœud d'air ; le contrôle de bouclage
+    # ci-dessous est donc un vrai test de conservation d'énergie, et non une
+    # tautologie (les postes sont reconstruits à partir des températures
+    # résolues, pas relus depuis F).
+    #
+    # Sans objet en mode 'imposed' : la ligne du nœud d'air y est écrasée par
+    # Dirichlet, donc AUCUN de ces postes n'agit sur la solution (même
+    # raisonnement que g_vent/apports_internes_w, déjà ignorés dans ce mode).
+    track_balance = mode in ('free', 'thermostat')
+    frame_g_total = sum(frame_g)
+    balance_j = {
+        'envelope': 0.0, 'solar_transmitted': 0.0, 'internal_gains': 0.0,
+        'ventilation': 0.0, 'frames': 0.0, 'hvac': 0.0,
+    }
+    hour_diagnostics = {} if track_balance else None
+
     n_hours_total = len(weather)
     for hour_idx, point in enumerate(weather):
         # Créneau horaire de CE point (Lot AB1) : `hour_index` porté par le point
@@ -753,7 +800,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             occluder_intersector=occluder_intersector, centroids=centroids,
             air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w, t_ground=t_ground,
             frame_g=frame_g, shading_fs_dir=shading_fs_dir, shading_fs_dif=shading_fs_dif,
-            volet_closed=volet_closed,
+            volet_closed=volet_closed, diagnostics=hour_diagnostics,
         )
         b_free = (C_global / DT_SECONDS) @ T + F
 
@@ -821,6 +868,18 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             flux += h_i_list[i] * areas[i] * (t_surf - t_air_next)
         flux_series.append(flux)
 
+        if track_balance:
+            # Chaque poste est une PUISSANCE NETTE vers l'air, évaluée à la fin
+            # du pas (schéma implicite) — cohérent avec `flux` juste au-dessus.
+            balance_j['envelope'] += flux * DT_SECONDS
+            balance_j['solar_transmitted'] += hour_diagnostics['solar_interior_w'] * DT_SECONDS
+            balance_j['internal_gains'] += apports_internes_w * DT_SECONDS
+            balance_j['ventilation'] += g_vent * (point['t_ext'] - t_air_next) * DT_SECONDS
+            balance_j['frames'] += (
+                hour_diagnostics['frame_source_w'] - frame_g_total * t_air_next
+            ) * DT_SECONDS
+            balance_j['hvac'] += hvac * DT_SECONDS
+
         T = T_next
         t_air_series.append(float(t_air_next))
 
@@ -843,8 +902,18 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         final_exterior_surface_temp.append(float(T[off]))
         final_interior_surface_temp.append(float(T[off + n - 1]))
 
+    balance = None
+    if track_balance:
+        # Le stockage télescope : seuls les deux bouts comptent.
+        storage_j = interior['c_air_int'] * (t_air_series[-1] - t_air_series[0])
+        total_j = sum(balance_j.values())
+        balance = {f'{k}_kwh': v / 3.6e6 for k, v in balance_j.items()}
+        balance['storage_kwh'] = storage_j / 3.6e6
+        balance['closure_error_kwh'] = (total_j - storage_j) / 3.6e6
+
     return {
         'hours': len(weather),
+        'balance': balance,
         't_air': t_air_series,
         't_air_mean': float(t_air_arr.mean()),
         'heating_kwh': heating_j / 3.6e6,

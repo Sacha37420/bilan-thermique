@@ -96,6 +96,9 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
             'cooling_kwh': result['cooling_kwh'],
             'flux_positive_kwh': result['flux_positive_kwh'],
             'flux_negative_kwh': result['flux_negative_kwh'],
+            # Bilan par poste au nœud d'air (Lot AB2) — None en mode 'imposed',
+            # où la ligne du nœud d'air est écrasée par Dirichlet.
+            'balance': result['balance'],
             't_air': result['t_air'],
             'envelope_flux_w': result['envelope_flux_w'],
             'final_exterior_surface_temp': result['final_exterior_surface_temp'],
