@@ -1,10 +1,17 @@
 export type TriangleBoundary = 'exterior_air' | 'ground';
 
+// Lot J : dispositif d'occultation mobile éventuellement installé sur ce
+// triangle, toujours considéré ENTIÈREMENT fermé quand actif (voir
+// core/shading-profiles.ts pour le catalogue affiché ; les valeurs physiques
+// elles-mêmes vivent uniquement côté backend, building_solver.SHADING_PROFILES).
+export type ShadingProfileId = 'volet-roulant' | 'store-exterieur';
+
 export interface Triangle {
   v: [number, number, number];
   group: string | null;
   paroi_model_id: number | null;
   boundary: TriangleBoundary;
+  shading_profile_id: ShadingProfileId | null;
   area: number;
   normal: [number, number, number];
   tilt_deg: number;
@@ -19,6 +26,7 @@ export interface WorkingTriangle {
   group: string | null;
   paroi_model_id: number | null;
   boundary?: TriangleBoundary;
+  shading_profile_id?: ShadingProfileId | null;
   area?: number;
   normal?: [number, number, number];
   tilt_deg?: number;

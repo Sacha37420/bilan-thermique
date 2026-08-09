@@ -17,6 +17,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from . import building_solver, geodata, geometry, serializers, shadow, solver, weather_source
+from .models import Building
 
 DT_SECONDS = 3600.0
 
@@ -1582,6 +1583,280 @@ class BuildingCalculRequestSerializerWindTest(SimpleTestCase):
         payload = self._base_payload(interior={'mode': 'free', 'h_i_auto': True, 'c_air_int': 300_000.0})
         s = serializers.BuildingCalculRequestSerializer(data=payload)
         self.assertTrue(s.is_valid(), s.errors)
+
+
+class MovableShadingTest(SimpleTestCase):
+    """Lot J — occultations mobiles (volets, stores), toujours ENTIÈREMENT
+    fermées quand actives (pas de position intermédiaire). Généralise le
+    mécanisme du Lot R (h_e par combinaison distincte factorisée
+    paresseusement) à un h_e PAR TRIANGLE quand un dispositif est fermé
+    (_h_e_diagonal) — même famille de piège que le Lot R si la clé de cache
+    omettait volets_fermes."""
+
+    databases = []
+
+    def _envelope_and_weather(self, hours, area=2.5):
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = _single_triangle_envelope(area=area)
+        t_ext_series = [2.0 + 10.0 * math.sin(h / 6.0) for h in range(hours)]
+        return envelope, {1: layers}, _no_sun_weather_3d(t_ext_series)
+
+    def _sun_weather_3d(self, hours, e_dir=500.0, e_dif=80.0, t_ext=None):
+        return [
+            {'t_ext': t_ext if t_ext is not None else 5.0 + 3.0 * math.sin(h / 5.0),
+             'sun_azimuth': 180.0, 'sun_elevation': 30.0, 'e_dir': e_dir, 'e_dif': e_dif}
+            for h in range(hours)
+        ]
+
+    def _shaded_envelope(self, profile_id, area=2.5):
+        # Normale +Z (tilt=0°) : voit le soleil dès elevation>0, quel que
+        # soit l'azimuth — même triangle que _single_triangle_envelope, mais
+        # avec un shading_profile_id sur son unique triangle.
+        side = math.sqrt(2.0 * area)
+        vertices = [[0.0, 0.0, 0.0], [side, 0.0, 0.0], [0.0, side, 0.0]]
+        triangles = geometry.compute_envelope_geometry(
+            vertices, [{'v': [0, 1, 2], 'paroi_model_id': 1, 'shading_profile_id': profile_id}],
+        )
+        return {'vertices': vertices, 'triangles': triangles}
+
+    # ── Catalogue + formule (oracle direct, aucun appel au solveur) ───────
+    def test_shading_profiles_catalogue_sane(self):
+        for pid, profile in building_solver.SHADING_PROFILES.items():
+            with self.subTest(profile=pid):
+                self.assertGreater(profile['delta_r'], 0.0)
+                self.assertTrue(0.0 <= profile['fs_dir'] <= 1.0)
+                self.assertTrue(0.0 <= profile['fs_dif'] <= 1.0)
+
+    def test_h_e_diagonal_matches_series_resistance_formula(self):
+        h_e_vec = [1.0 / (1.0 / 25.0 + 0.20), 25.0]  # triangle 0 fermé, triangle 1 sans dispositif
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        systems = building_solver._build_triangle_systems(
+            [{'paroi_model_id': 1}, {'paroi_model_id': 1}], {1: layers}, dx_max=0.05,
+        )
+        offsets = [0, systems[0][0]['n_wall_nodes']]
+        n_dof = offsets[1] + systems[1][0]['n_wall_nodes'] + 1
+        areas = [2.0, 3.0]
+        addition = building_solver._h_e_diagonal(h_e_vec, systems, offsets, n_dof, areas)
+        # Oracle indépendant : h_e_vec[i] * area_i sur la diagonale du premier
+        # nœud de chaque triangle — formule à la main, rien de recalculé via
+        # _propagate_solar/_assemble_F_hour.
+        self.assertAlmostEqual(addition[0, 0], h_e_vec[0] * areas[0], places=8)
+        self.assertAlmostEqual(addition[offsets[1], offsets[1]], h_e_vec[1] * areas[1], places=8)
+
+    # ── Volet roulant fermé ≡ h_e réduit (série) + rayonnement nul ────────
+    def test_volet_roulant_closed_matches_equivalent_manual_h_e_and_zero_sun(self):
+        area = 2.5
+        envelope_shaded = self._shaded_envelope('volet-roulant', area=area)
+        envelope_plain = _single_triangle_envelope(area=area)
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        weather_sun = self._sun_weather_3d(hours=30)
+        planning_always_closed = [{'volets_fermes': True}] * 24
+
+        payload_shaded = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather_sun, 'planning': planning_always_closed,
+        }
+        result_shaded = building_solver.run_building_simulation(envelope_shaded, {1: layers}, None, payload_shaded)
+
+        delta_r = building_solver.SHADING_PROFILES['volet-roulant']['delta_r']
+        h_e_equiv = 1.0 / (1.0 / 25.0 + delta_r)
+        weather_equiv = self._sun_weather_3d(hours=30, e_dir=0.0, e_dif=0.0)  # volet opaque : E=0
+        payload_manual = {
+            'dx_max': 0.02, 'h_e': h_e_equiv,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather_equiv,
+        }
+        result_manual = building_solver.run_building_simulation(envelope_plain, {1: layers}, None, payload_manual)
+
+        self.assertEqual(result_shaded['t_air'], result_manual['t_air'])
+
+    # ── Store extérieur : transmission réduite mais non nulle ────────────
+    def test_store_exterieur_energy_conservation_with_reduced_transmission(self):
+        # Même méthode que TransmittedSolarGainTest (Lot U) : identité de
+        # conservation étendue à un terme calculé À LA MAIN (indépendant de
+        # _propagate_solar/_assemble_F_hour), ici avec les fs_dir/fs_dif du
+        # store — vérifie que la réduction appliquée est la BONNE, pas juste
+        # qu'une réduction quelconque a lieu.
+        tau, alpha = 0.87, 0.06
+        window = {'e': 0.004, 'lam': 1.0, 'rho': 2500, 'c': 750, 'tau': tau, 'r': 1 - tau - alpha, 'alpha': alpha}
+        area = 2.5
+        envelope = self._shaded_envelope('store-exterieur', area=area)
+        hours = 20
+        weather = self._sun_weather_3d(hours=hours)
+        planning_closed = [{'volets_fermes': True}] * 24
+        c_air_int = 500.0
+        payload = {
+            'dx_max': 0.01, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': c_air_int},
+            't_init': 15.0, 'weather': weather, 'planning': planning_closed,
+        }
+        result = building_solver.run_building_simulation(envelope, {1: [window]}, None, payload)
+
+        t_air = result['t_air']
+        flux = result['envelope_flux_w']
+
+        direction = shadow.sun_direction(180.0, 30.0)
+        cos_ti = max(float(direction[2]), 0.0)
+        f_ciel = 1.0
+        profile = building_solver.SHADING_PROFILES['store-exterieur']
+        e_glo_closed = 500.0 * profile['fs_dir'] * cos_ti + 80.0 * profile['fs_dif'] * f_ciel
+        e_interior_expected = tau * e_glo_closed * area
+
+        energy_stored = c_air_int * (t_air[-1] - t_air[0])
+        energy_from_walls_and_solar = sum((f + e_interior_expected) * DT_SECONDS for f in flux)
+
+        self.assertAlmostEqual(
+            energy_stored, energy_from_walls_and_solar,
+            delta=abs(energy_from_walls_and_solar) * 1e-6 + 1e-3,
+        )
+
+    def test_volet_transition_within_run_updates_h_e_not_just_optics(self):
+        # Piège identifié EMPIRIQUEMENT (avant tout bug réel), même famille que
+        # le Lot R : un premier essai avec du soleil montrait une différence
+        # entre "ouvert->fermé" et "toujours ouvert" MÊME sous une mutation qui
+        # retire volets_fermes de la clé de cache (key = (g_vent, h_e)) — parce
+        # que la réduction optique (F, fs_dir/fs_dif) reste correcte heure par
+        # heure indépendamment du cache, et suffit à elle seule à créer un
+        # écart. Sans soleil, cette confusion disparaît : le SEUL effet
+        # possible d'un volet fermé est la résistance ajoutée à h_e (K) — un
+        # bundle réutilisé à tort pour la mauvaise heure ferait alors
+        # RIGOUREUSEMENT disparaître tout écart avec "toujours ouvert" (vérifié
+        # par mutation : les deux scénarios deviennent bit-à-bit identiques).
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope = self._shaded_envelope('volet-roulant', area=2.5)
+        weather = _no_sun_weather_3d([5.0, 5.0])
+        # Heure 0 (slot 0) ouvert, heure 1 (slot 1) fermé.
+        planning_mixed = [{'volets_fermes': False}, {'volets_fermes': True}] + [{'volets_fermes': False}] * 22
+
+        def run(planning):
+            payload = {
+                'dx_max': 0.02, 'h_e': 25.0,
+                'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+                't_init': 15.0, 'weather': weather,
+            }
+            if planning is not None:
+                payload['planning'] = planning
+            return building_solver.run_building_simulation(envelope, {1: layers}, None, payload)
+
+        result_mixed = run(planning_mixed)
+        result_always_open = run(None)
+        self.assertNotEqual(
+            result_mixed['final_exterior_surface_temp'], result_always_open['final_exterior_surface_temp'],
+        )
+
+    # ── Deux triangles, deux dispositifs différents, même heure ───────────
+    def test_two_triangles_different_profiles_behave_independently(self):
+        area1, area2 = 2.5, 2.5
+        side1 = math.sqrt(2.0 * area1)
+        side2 = math.sqrt(2.0 * area2)
+        vertices = [
+            [0.0, 0.0, 0.0], [side1, 0.0, 0.0], [0.0, side1, 0.0],
+            [10.0, 0.0, 0.0], [10.0 + side2, 0.0, 0.0], [10.0, side2, 0.0],
+        ]
+        triangles = geometry.compute_envelope_geometry(vertices, [
+            {'v': [0, 1, 2], 'paroi_model_id': 1, 'shading_profile_id': 'volet-roulant'},
+            {'v': [3, 4, 5], 'paroi_model_id': 1, 'shading_profile_id': 'store-exterieur'},
+        ])
+        envelope = {'vertices': vertices, 'triangles': triangles}
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        weather = self._sun_weather_3d(hours=20)
+        planning_closed = [{'volets_fermes': True}] * 24
+        payload = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather, 'planning': planning_closed,
+        }
+        result = building_solver.run_building_simulation(envelope, {1: layers}, None, payload)
+        # Le volet (opaque, deltaR plus grand) doit finir plus proche de
+        # l'extérieur froid que le store (transmission partielle, deltaR plus
+        # petit) : sa surface extérieure encaisse moins de gain solaire ET
+        # est mieux isolée -- deux effets qui vont dans le même sens.
+        t_ext_volet = result['final_exterior_surface_temp'][0]
+        t_ext_store = result['final_exterior_surface_temp'][1]
+        self.assertNotEqual(t_ext_volet, t_ext_store)
+
+    # ── h_e réduit s'applique aussi en mode 'imposed' (contrairement à g_vent) ──
+    def test_volet_affects_imposed_mode_too(self):
+        layers = [_flat_wall_layer(e=0.1, lam=1.0)]
+        envelope_shaded = self._shaded_envelope('volet-roulant', area=1.0)
+        weather = _no_sun_weather_3d([5.0] * 10)
+        planning_closed = [{'volets_fermes': True}] * 24
+
+        def run(planning):
+            payload = {
+                'dx_max': 0.02, 'h_e': 25.0,
+                'interior': {'mode': 'imposed', 'h_i': 8.0, 't_int': 19.0},
+                't_init': 19.0, 'weather': weather,
+            }
+            if planning is not None:
+                payload['planning'] = planning
+            return building_solver.run_building_simulation(envelope_shaded, {1: layers}, None, payload)
+
+        result_open = run(None)
+        result_closed = run(planning_closed)
+        self.assertNotEqual(
+            result_open['final_exterior_surface_temp'], result_closed['final_exterior_surface_temp'],
+        )
+
+    # ── Non-régression : triangle sans dispositif jamais affecté ──────────
+    def test_triangle_without_shading_profile_unaffected_by_planning(self):
+        envelope, paroi_layers, weather = self._envelope_and_weather(hours=20)
+        planning_closed = [{'volets_fermes': True}] * 24
+        payload_base = {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 300_000.0},
+            't_init': 15.0, 'weather': weather,
+        }
+        result_no_planning = building_solver.run_building_simulation(envelope, paroi_layers, None, payload_base)
+        result_with_planning = building_solver.run_building_simulation(
+            envelope, paroi_layers, None, {**payload_base, 'planning': planning_closed},
+        )
+        self.assertEqual(result_no_planning['t_air'], result_with_planning['t_air'])
+
+    # ── Whitelist de reconstruction (piège du Lot K, généralisé) ─────────
+    def test_build_envelope_preserves_shading_profile_id_on_partial_patch(self):
+        # Building() ici n'est JAMAIS sauvegardé (pas de .save()) — construire
+        # une instance en mémoire ne touche pas la DB, seul .update() (non
+        # appelé ici) le ferait. _build_envelope reste donc testable dans ce
+        # fichier SimpleTestCase (voir son docstring en tête de module).
+        existing_envelope = {
+            'vertices': [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            'triangles': [{'v': [0, 1, 2], 'group': 'g1', 'paroi_model_id': 1,
+                            'boundary': 'exterior_air', 'shading_profile_id': 'volet-roulant'}],
+        }
+        instance = Building(envelope=existing_envelope)
+        s = serializers.BuildingSerializer(instance=instance)
+        # 'triangles' ABSENT de validated_data (PATCH vertices seul) :
+        # déclenche la reconstruction depuis l'enveloppe existante.
+        validated_data = {'vertices': existing_envelope['vertices']}
+        envelope = s._build_envelope(validated_data)
+        self.assertEqual(envelope['triangles'][0]['shading_profile_id'], 'volet-roulant')
+
+
+class TriangleShadingSerializerTest(SimpleTestCase):
+    """Lot J — validation de TriangleInputSerializer.shading_profile_id et
+    PlanningEntrySerializer.volets_fermes."""
+
+    databases = []
+
+    def test_valid_shading_profile_id_accepted(self):
+        s = serializers.TriangleInputSerializer(data={'v': [0, 1, 2], 'shading_profile_id': 'volet-roulant'})
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_unknown_shading_profile_id_rejected(self):
+        s = serializers.TriangleInputSerializer(data={'v': [0, 1, 2], 'shading_profile_id': 'inexistant'})
+        self.assertFalse(s.is_valid())
+
+    def test_shading_profile_id_omitted_defaults_to_none(self):
+        s = serializers.TriangleInputSerializer(data={'v': [0, 1, 2]})
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertIsNone(s.validated_data['shading_profile_id'])
+
+    def test_volets_fermes_omitted_defaults_false(self):
+        s = serializers.PlanningEntrySerializer(data={})
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertFalse(s.validated_data['volets_fermes'])
 
 
 class ExtrudeFootprintGroupedTest(SimpleTestCase):

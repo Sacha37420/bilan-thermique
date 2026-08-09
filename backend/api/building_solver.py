@@ -94,6 +94,26 @@ def h_i_from_tilt(tilt_deg):
     return H_I_WALL
 
 
+# ── Lot J : occultations mobiles (volets, stores) ────────────────────────────
+
+# Catalogue de dispositifs d'occultation, toujours considérés ENTIÈREMENT
+# FERMÉS quand actifs (pas de position intermédiaire modélisée) — valeurs
+# indicatives usuelles de la physique du bâtiment française, à ajuster projet
+# par projet, pas une table réglementaire officielle (même esprit que les U
+# indicatifs du catalogue de parois, seed_paroi_catalogue.py).
+# - delta_r (m²·K/W) : résistance thermique ADDITIONNELLE en série avec h_e,
+#   pour ce triangle uniquement, le temps que le dispositif est fermé.
+# - fs_dir/fs_dif (0..1) : fraction de E_dir/E_dif encore transmise fermé —
+#   appliquée à e_dir/e_dif avant propagation dans _propagate_solar.
+# Un volet roulant est quasi étanche à l'air (ΔR élevé) et totalement opaque ;
+# un store extérieur (toile/brise-soleil) isole peu (écran, jeu d'air) mais
+# laisse filtrer le diffus même fermé (pas une paroi solide).
+SHADING_PROFILES = {
+    'volet-roulant': {'delta_r': 0.20, 'fs_dir': 0.0, 'fs_dif': 0.0},
+    'store-exterieur': {'delta_r': 0.08, 'fs_dir': 0.15, 'fs_dif': 0.40},
+}
+
+
 def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max):
     """Une entrée par triangle : (mesh, K, C, layers), K/C « nues » — par unité
     de surface, SANS h_e ni h_i (posés par _assemble_global_kc/run_building_simulation,
@@ -139,12 +159,10 @@ def _assemble_global_kc(systems, areas, h_i_list, frame_g=None):
     comportement optique, capacité négligeable — voir ParoiModel.frame_u/
     frame_fraction).
 
-    Retourne aussi K_e_pattern (Lot R) : motif de sensibilité à h_e, +area_i sur
-    la diagonale du PREMIER nœud (extérieur) de chaque triangle. h_e varie par
-    HEURE (vent), pas par triangle : plutôt que reconstruire tout K_global à
-    chaque valeur distincte de h_e rencontrée, K_global_final = K_global + h_e *
-    K_e_pattern (relation linéaire, addition creuse peu coûteuse) — voir
-    _factorize_for."""
+    h_e n'entre PLUS ici (contrairement à h_i) : il varie par HEURE (vent, Lot
+    R) ET, depuis le Lot J, PAR TRIANGLE (résistance ajoutée d'un volet/store
+    fermé) — posé séparément à chaque combinaison distincte rencontrée, voir
+    _h_e_diagonal/_factorize_for."""
     offsets = []
     total = 0
     for mesh, K, C, layers in systems:
@@ -155,7 +173,6 @@ def _assemble_global_kc(systems, areas, h_i_list, frame_g=None):
 
     K_global = sp.lil_matrix((n_dof, n_dof))
     C_global = sp.lil_matrix((n_dof, n_dof))
-    K_e_pattern = sp.lil_matrix((n_dof, n_dof))
 
     for i, (mesh, K, C, layers) in enumerate(systems):
         off = offsets[i]
@@ -166,7 +183,6 @@ def _assemble_global_kc(systems, areas, h_i_list, frame_g=None):
 
         K_global[off:off + n, off:off + n] += K * area
         C_global[off:off + n, off:off + n] += C * area
-        K_e_pattern[off, off] += area
 
         K_global[last, last] += h_i * area
         K_global[last, air_idx] -= h_i * area
@@ -176,17 +192,37 @@ def _assemble_global_kc(systems, areas, h_i_list, frame_g=None):
         if frame_g is not None and frame_g[i]:
             K_global[air_idx, air_idx] += frame_g[i]
 
-    return K_global.tocsc(), C_global.tocsc(), K_e_pattern.tocsc(), offsets, air_idx, n_dof
+    return K_global.tocsc(), C_global.tocsc(), offsets, air_idx, n_dof
 
 
-def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
+def _h_e_diagonal(h_e_vec, systems, offsets, n_dof, areas):
+    """Construit la contribution de h_e à K_global : +h_e_vec[i]*area_i sur la
+    diagonale du nœud extérieur (le premier) de chaque triangle i. h_e_vec :
+    une valeur PAR TRIANGLE — uniforme (= h_e de l'heure) pour tout triangle
+    sans volet/store fermé à cette heure, réduite par la résistance ajoutée
+    (SHADING_PROFILES) pour les triangles concernés (Lot J). Reconstruite pour
+    chaque combinaison DISTINCTE rencontrée (voir _factorize_for) — coût O(nb
+    triangles), négligeable devant la factorisation LU elle-même."""
+    addition = sp.lil_matrix((n_dof, n_dof))
+    for i, (mesh, K, C, layers) in enumerate(systems):
+        off = offsets[i]
+        addition[off, off] += h_e_vec[i] * areas[i]
+    return addition.tocsc()
+
+
+def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, point,
                       sky_view_factor=None, sun_visibility_grid=None,
                       occluder_intersector=None, centroids=None,
                       air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None,
-                      frame_g=None):
-    """h_e : la valeur DE CETTE HEURE (Lot R — constante du run, ou dérivée du
-    vent via h_e_from_wind par l'appelant), une seule pour tout le bâtiment
-    (pas par triangle, voir h_e_from_wind).
+                      frame_g=None, shading_fs_dir=None, shading_fs_dif=None, volet_closed=False):
+    """h_e_vec : la valeur DE CETTE HEURE, PAR TRIANGLE (Lot R — constante du
+    run ou dérivée du vent, uniforme par défaut ; Lot J — réduite pour les
+    triangles dont le volet/store est fermé, voir SHADING_PROFILES/
+    _h_e_diagonal). shading_fs_dir/shading_fs_dif : listes par triangle
+    (défaut 1.0 = sans effet) — fraction de E_dir/E_dif encore transmise
+    quand le dispositif de CE triangle est fermé ; volet_closed : bool, vrai
+    pour l'heure courante si le planning l'indique (Lot Q généralisé), sans
+    quoi shading_fs_dir/dif restent inutilisés (aucun triangle n'est "fermé").
     sky_view_factor : liste par triangle (précalculée OU recalculée en
     temps réel par l'appelant) ou None -> repli analytique par triangle.
     Occlusion du rayon direct — deux sources mutuellement exclusives :
@@ -244,7 +280,18 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
                 elif sun_visibility_grid is not None:
                     if not shadow.lookup_visibility(sun_visibility_grid, i, sun_az, sun_el):
                         cos_ti = 0.0
-        e_glo = e_dir * cos_ti + e_dif * f_ciel
+
+        # Lot J : un volet/store fermé réduit e_dir/e_dif AVANT combinaison —
+        # les deux composantes ont des facteurs de réduction différents (un
+        # store laisse filtrer plus de diffus que de direct, un volet bloque
+        # les deux intégralement). Triangle sans dispositif (défaut 1.0) ou
+        # volet ouvert cette heure : sans effet, e_dir/e_dif inchangés.
+        if volet_closed and shading_fs_dir is not None:
+            e_dir_i = e_dir * shading_fs_dir[i]
+            e_dif_i = e_dif * shading_fs_dif[i]
+        else:
+            e_dir_i, e_dif_i = e_dir, e_dif
+        e_glo = e_dir_i * cos_ti + e_dif_i * f_ciel
 
         # Lot K : un triangle 'ground' échange avec la température de sol
         # constante plutôt qu'avec l'air extérieur — même conductance h_e
@@ -253,7 +300,7 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e, point,
         t_boundary = t_ground if (geom.get('boundary') == 'ground' and t_ground is not None) else t_ext
 
         f_local = np.zeros(n)
-        f_local[0] += h_e * t_boundary
+        f_local[0] += h_e_vec[i] * t_boundary
         for kind, ref, value in wall_solver._propagate_solar(layers, e_glo, mesh):
             if kind == 'surface':
                 f_local[ref] += value
@@ -311,19 +358,22 @@ def _g_vent_from(source):
     return 0.34 * source.get('debit_vent_m3h', 0.0) * (1.0 - source.get('eta_recup_vent', 0.0))
 
 
-def _factorize_for(K_global_base, K_e_pattern, C_global, air_idx, mode, g_vent, h_e):
-    """Construit K_global = K_global_base + h_e*K_e_pattern (Lot R — relation
-    linéaire, voir _assemble_global_kc) puis K_global[air_idx,air_idx] += g_vent
-    (Lot Q), puis factorise (spla.splu, l'opération coûteuse) le(s) système(s)
-    linéaire(s) nécessaires au mode donné — à appeler une fois PAR COMBINAISON
-    DISTINCTE (g_vent, h_e) rencontrée dans le run (jamais une fois par heure
-    simulée : K_global_base/C_global ne sont pas mutées, `.tolil()`/l'addition
-    creuse en créent toujours une copie). g_vent : Lot Q (jusqu'à 24 valeurs
-    distinctes via `planning`, sinon une seule constante). h_e : Lot R (jusqu'à
-    quelques dizaines de valeurs distinctes via le vent réel arrondi au m/s
-    près, sinon une seule constante) — vérifié en réel (to_do.md, Lot R) que le
-    produit des deux reste largement absorbable sur un an de données réelles
-    (quelques centaines de combinaisons au pire, ~30 s de calcul).
+def _factorize_for(K_global_base, C_global, air_idx, mode, g_vent, h_e_addition):
+    """Construit K_global = K_global_base + h_e_addition (Lot R, généralisé Lot
+    J — voir _h_e_diagonal ; h_e_addition remplace l'ancien scalaire h_e *
+    K_e_pattern du Lot R, pour tolérer un h_e PAR TRIANGLE quand un volet/store
+    est fermé) puis K_global[air_idx,air_idx] += g_vent (Lot Q), puis factorise
+    (spla.splu, l'opération coûteuse) le(s) système(s) linéaire(s) nécessaires
+    au mode donné — à appeler une fois PAR COMBINAISON DISTINCTE (g_vent,
+    h_e_addition) rencontrée dans le run (jamais une fois par heure simulée :
+    K_global_base/C_global ne sont pas mutées, `.tolil()`/l'addition creuse en
+    créent toujours une copie). g_vent : Lot Q (jusqu'à 24 valeurs distinctes
+    via `planning`, sinon une seule constante). h_e_addition : Lot R (vent,
+    jusqu'à quelques dizaines de valeurs distinctes) x Lot J (volets/stores,
+    au plus 2 : ouvert/fermé, un planning cyclique sur 24h comme la ventilation
+    — voir to_do.md) — vérifié en réel (Lot R) que le produit reste largement
+    absorbable sur un an de données réelles (quelques centaines de combinaisons
+    au pire, ~30 s de calcul ; le facteur x2 du Lot J reste dans cette marge).
 
     Retourne un dict :
       'imposed'    : {'solver', 'col_saved', 'dirichlet_row'}
@@ -331,7 +381,7 @@ def _factorize_for(K_global_base, K_e_pattern, C_global, air_idx, mode, g_vent, 
       'thermostat' : {'solver', 'pinned_solver', 'A_free', 'col_saved_pinned'}
                       (A_free conservée pour le résidu HVAC, voir la boucle horaire)
     """
-    K_global = (K_global_base + h_e * K_e_pattern).tolil()
+    K_global = (K_global_base + h_e_addition).tolil()
     K_global[air_idx, air_idx] += g_vent
     K_global = K_global.tocsc()
     A_free = (C_global / DT_SECONDS + K_global).tocsc()
@@ -395,12 +445,26 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     Sans effet sur les triangles 'exterior_air' (comportement historique, défaut).
 
     planning (payload, optionnel — Lot Q) : liste de 24 dicts {debit_vent_m3h?,
-    eta_recup_vent?, apports_internes_w?}, un par heure de la journée (index 0 =
-    minuit), qui REMPLACENT les constantes de `interior` heure par heure — modes
-    'free'/'thermostat' uniquement, comme pour les constantes équivalentes. Absent
-    (défaut) -> comportement inchangé (valeurs constantes de `interior`).
+    eta_recup_vent?, apports_internes_w?, volets_fermes?}, un par heure de la
+    journée (index 0 = minuit), qui REMPLACENT les constantes de `interior`
+    heure par heure — debit_vent_m3h/eta_recup_vent/apports_internes_w modes
+    'free'/'thermostat' uniquement, comme pour les constantes équivalentes.
+    Absent (défaut) -> comportement inchangé (valeurs constantes de `interior`).
     heure_debut (payload, 0-23, défaut 0) : heure du premier point de `weather`,
     utilisée pour indexer le planning (`planning[(heure_debut + hour_idx) % 24]`).
+
+    volets_fermes (planning[slot], optionnel booléen, défaut False — Lot J) :
+    UN SEUL planning pour TOUS les triangles ayant un `shading_profile_id`
+    (envelope.triangles[i], voir SHADING_PROFILES) — pas un planning par
+    fenêtre, cas d'usage visé : « tout ferme le soir ». Contrairement à
+    debit_vent_m3h/apports_internes_w, s'applique dans TOUS les modes
+    intérieurs (y compris 'imposed') : h_e touche l'équation de CHAQUE
+    triangle, pas seulement le nœud d'air libre. Quand actif pour un triangle
+    à une heure donnée : la résistance `delta_r` du profil s'ajoute en série à
+    h_e pour CE triangle seulement (`1/(1/h_e + delta_r)`, voir
+    _h_e_diagonal), et `e_dir`/`e_dif` sont réduits par `fs_dir`/`fs_dif` avant
+    propagation solaire (voir _assemble_F_hour). Toujours ENTIÈREMENT fermé
+    quand actif — aucune position intermédiaire modélisée.
 
     h_e_dynamic (payload, optionnel booléen, défaut False — Lot R) : si True,
     h_e de chaque heure est dérivé de weather[h]['wind_m_s'] (requis pour
@@ -419,11 +483,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     à h_e, h_i_auto ne varie jamais dans le temps (seulement d'un triangle à
     l'autre) : aucun impact sur le nombre de factorisations.
 
-    Point dur traité : g_vent (Lot Q) ET h_e (Lot R) entrent dans K_global (pas
-    seulement F), donc la factorisation LU (spla.splu, l'étape coûteuse) est
-    refaite une fois PAR COMBINAISON DISTINCTE (g_vent, h_e) rencontrée — au
-    plus 24 valeurs de g_vent (planning) x quelques dizaines de valeurs de h_e
-    (vent réel arrondi), jamais une par heure simulée — voir _factorize_for
+    Point dur traité : g_vent (Lot Q), h_e (Lot R) ET volets_fermes (Lot J)
+    entrent dans K_global (pas seulement F), donc la factorisation LU
+    (spla.splu, l'étape coûteuse) est refaite une fois PAR COMBINAISON
+    DISTINCTE (g_vent, h_e_addition) rencontrée — h_e_addition dépendant lui-
+    même de (h_e, volets_fermes) — au plus 24 valeurs de g_vent (planning) x
+    quelques dizaines de valeurs de h_e (vent réel arrondi) x 2 (volets
+    ouverts/fermés), jamais une par heure simulée — voir _factorize_for
     (bundles construits PARESSEUSEMENT, seulement les combinaisons réellement
     rencontrées, pas le produit cartésien complet) et MAX_DISTINCT_BOUNDARY_COMBOS
     pour le garde-fou. apports_internes_w, lui, n'affecte que F (déjà recalculé
@@ -527,8 +593,27 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     else:
         h_i_list = [interior['h_i']] * len(triangles)
 
+    # Occultations mobiles (Lot J) : propriété STATIQUE de chaque triangle
+    # (quel dispositif, s'il y en a un) — ce qui varie par heure est seulement
+    # SI le dispositif est fermé (volets_fermes, planning). Défauts (1.0/1.0)
+    # neutres : un triangle sans shading_profile_id n'est jamais affecté, même
+    # si volets_fermes est actif à cette heure (delta_r=0.0 -> h_e inchangé).
+    shading_delta_r = []
+    shading_fs_dir = []
+    shading_fs_dif = []
+    for tri in triangles:
+        profile = SHADING_PROFILES.get(tri.get('shading_profile_id'))
+        if profile is None:
+            shading_delta_r.append(0.0)
+            shading_fs_dir.append(1.0)
+            shading_fs_dif.append(1.0)
+        else:
+            shading_delta_r.append(profile['delta_r'])
+            shading_fs_dir.append(profile['fs_dir'])
+            shading_fs_dif.append(profile['fs_dif'])
+
     systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max)
-    K_global, C_global, K_e_pattern, offsets, air_idx, n_dof = _assemble_global_kc(
+    K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(
         systems, areas, h_i_list, frame_g=frame_g,
     )
 
@@ -556,6 +641,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             g_vent_constant = _g_vent_from(interior)
             apports_constant = interior.get('apports_internes_w', 0.0)
 
+    # volet_by_slot (Lot J) : contrairement à g_vent/apports_internes_w
+    # ci-dessus, PAS conditionné au mode — h_e touche l'équation de CHAQUE
+    # triangle, pas seulement le nœud d'air libre, donc un volet fermé a un
+    # effet même en mode 'imposed'. Absent de `planning` (ou `planning`
+    # absent) -> jamais fermé, comportement inchangé.
+    volet_by_slot = [bool(p.get('volets_fermes', False)) for p in planning] if planning else None
+
     if mode in ('free', 'thermostat'):
         C_global = C_global.tolil()
         C_global[air_idx, air_idx] += interior['c_air_int']
@@ -570,11 +662,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # mode 'imposed' de solver.py).
 
     # Factorisation LU (spla.splu, l'étape coûteuse) : une fois PAR COMBINAISON
-    # DISTINCTE (g_vent, h_e) rencontrée — construite PARESSEUSEMENT (au premier
-    # usage, mise en cache) plutôt que le produit cartésien complet à l'avance :
-    # sur un an de données réelles, les combinaisons RÉELLEMENT rencontrées sont
-    # nettement moins nombreuses que g_vent_classes x h_e_classes (vérifié en
-    # réel, to_do.md Lot R) — voir _factorize_for.
+    # DISTINCTE (g_vent, h_e, volets_fermes) rencontrée — construite
+    # PARESSEUSEMENT (au premier usage, mise en cache) plutôt que le produit
+    # cartésien complet à l'avance : sur un an de données réelles, les
+    # combinaisons RÉELLEMENT rencontrées sont nettement moins nombreuses que
+    # g_vent_classes x h_e_classes x 2 (vérifié en réel, to_do.md Lot R ; le
+    # facteur x2 du Lot J reste dans la marge déjà mesurée) — voir
+    # _factorize_for/_h_e_diagonal.
     bundles = {}
 
     T = np.full(n_dof, float(t_init))
@@ -602,23 +696,35 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         else:
             h_e = h_e_constant
 
-        key = (g_vent, h_e)
+        volet_closed = volet_by_slot[(heure_debut + hour_idx) % 24] if volet_by_slot is not None else False
+
+        key = (g_vent, h_e, volet_closed)
         bundle = bundles.get(key)
         if bundle is None:
             if len(bundles) >= MAX_DISTINCT_BOUNDARY_COMBOS:
                 raise BuildingSimulationError(
                     f"Plus de {MAX_DISTINCT_BOUNDARY_COMBOS} combinaisons distinctes "
-                    "(ventilation x vent) rencontrées — série météo anormalement bruitée."
+                    "(ventilation x vent x volets) rencontrées — série météo anormalement bruitée."
                 )
-            bundle = _factorize_for(K_global, K_e_pattern, C_global, air_idx, mode, g_vent, h_e)
+            # h_e_vec : uniforme (= h_e) si les volets sont ouverts cette heure,
+            # sinon réduit PAR TRIANGLE selon shading_delta_r (0.0 pour un
+            # triangle sans dispositif -> h_e inchangé pour lui, voir Lot J).
+            if volet_closed:
+                h_e_vec = [1.0 / (1.0 / h_e + shading_delta_r[i]) for i in range(len(triangles))]
+            else:
+                h_e_vec = [h_e] * len(triangles)
+            h_e_addition = _h_e_diagonal(h_e_vec, systems, offsets, n_dof, areas)
+            bundle = _factorize_for(K_global, C_global, air_idx, mode, g_vent, h_e_addition)
+            bundle['h_e_vec'] = h_e_vec
             bundles[key] = bundle
 
         F = _assemble_F_hour(
-            systems, areas, offsets, n_dof, triangles, h_e, point,
+            systems, areas, offsets, n_dof, triangles, bundle['h_e_vec'], point,
             sky_view_factor=sky_view_factor, sun_visibility_grid=sun_visibility_grid,
             occluder_intersector=occluder_intersector, centroids=centroids,
             air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w, t_ground=t_ground,
-            frame_g=frame_g,
+            frame_g=frame_g, shading_fs_dir=shading_fs_dir, shading_fs_dif=shading_fs_dif,
+            volet_closed=volet_closed,
         )
         b_free = (C_global / DT_SECONDS) @ T + F
 

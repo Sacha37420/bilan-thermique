@@ -28,6 +28,10 @@ interface PlanningEntry {
   debit_vent_m3h: number;
   eta_recup_vent: number;
   apports_internes_w: number;
+  // Lot J : UN SEUL planning volets pour tous les triangles ayant un
+  // dispositif d'occultation (page Bâtiment) — s'applique dans TOUS les
+  // modes intérieurs, contrairement aux trois champs ci-dessus.
+  volets_fermes: boolean;
 }
 
 interface BuildingCalculResult {
@@ -136,7 +140,11 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
       const nums = cells.slice(0, 3).map(c => Number(c.replace(',', '.')));
       if (nums.some(n => Number.isNaN(n))) continue;
       const [debit_vent_m3h, eta_recup_vent, apports_internes_w] = nums;
-      entries.push({ debit_vent_m3h, eta_recup_vent, apports_internes_w });
+      // 4e colonne optionnelle (Lot J) : "1"/"true" -> fermé, tout le reste
+      // (absent inclus) -> ouvert.
+      const voletsCell = cells[3]?.toLowerCase();
+      const volets_fermes = voletsCell === '1' || voletsCell === 'true';
+      entries.push({ debit_vent_m3h, eta_recup_vent, apports_internes_w, volets_fermes });
     }
     if (entries.length !== 24) {
       this.planningError.set(
@@ -148,13 +156,15 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
 
   loadPlanningExample(): void {
     // Profil "jour type" résidentiel plausible : creux nocturne, pointes
-    // matin/soir — un point de départ à ajuster, pas une vérité universelle.
+    // matin/soir, volets fermés la nuit — un point de départ à ajuster, pas
+    // une vérité universelle.
     const rows: string[] = [];
     for (let h = 0; h < 24; h++) {
       const occupied = h < 7 || h >= 19; // présent tôt le matin et le soir
       const debit = this.debitVentM3h > 0 ? this.debitVentM3h * (occupied ? 1.0 : 0.5) : (occupied ? 60 : 30);
       const apports = occupied ? 400 : (h >= 7 && h < 19 ? 80 : 40);
-      rows.push([debit.toFixed(1), this.etaRecupVent.toFixed(2), apports.toFixed(0)].join(','));
+      const voletsFermes = h < 7 || h >= 22; // fermés la nuit (avant 7h, après 22h)
+      rows.push([debit.toFixed(1), this.etaRecupVent.toFixed(2), apports.toFixed(0), voletsFermes ? '1' : '0'].join(','));
     }
     this.planningRaw = rows.join('\n');
     this.parsePlanning();
@@ -427,8 +437,10 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     };
     // Planning horaire (Lot Q) : n'est envoyé QUE s'il est actif et complet —
     // sinon comportement inchangé (constantes de `interior` ci-dessus).
-    if ((this.interiorMode === 'free' || this.interiorMode === 'thermostat') &&
-        this.usePlanning && this.planning().length === 24) {
+    // Contrairement à debit_vent_m3h/apports_internes_w (ignorés hors
+    // free/thermostat, voir building_solver.py), volets_fermes (Lot J)
+    // s'applique dans TOUS les modes — pas de restriction sur interiorMode ici.
+    if (this.usePlanning && this.planning().length === 24) {
       payload['planning'] = this.planning();
       payload['heure_debut'] = this.heureDebut;
     }

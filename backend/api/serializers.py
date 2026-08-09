@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Department, UserRecord, ParoiModel, Building, Environment, Job
-from . import geometry
+from . import building_solver, geometry
 
 
 class LayerSerializer(serializers.Serializer):
@@ -76,6 +76,14 @@ class TriangleInputSerializer(serializers.Serializer):
     # amortie que l'air extérieur. Défaut 'exterior_air' = comportement historique
     # (mur/toiture face à l'air extérieur), inchangé pour tout maillage existant.
     boundary = serializers.ChoiceField(choices=['exterior_air', 'ground'], required=False, default='exterior_air')
+    # Lot J : dispositif d'occultation mobile (volet/store) éventuellement
+    # installé sur ce triangle — indépendant de paroi_model_id (deux fenêtres
+    # du même modèle de vitrage peuvent avoir des dispositifs différents, ou
+    # aucun). Défaut None = comportement historique (aucun dispositif, jamais
+    # affecté par un planning `volets_fermes`, voir building_solver.SHADING_PROFILES).
+    shading_profile_id = serializers.ChoiceField(
+        choices=list(building_solver.SHADING_PROFILES), required=False, allow_null=True, default=None,
+    )
 
 
 class EnvironmentTriangleInputSerializer(serializers.Serializer):
@@ -229,9 +237,15 @@ class BuildingSerializer(serializers.Serializer):
 
         triangles = validated_data.pop('triangles', None)
         if triangles is None:
+            # ATTENTION (piège déjà rencontré au Lot K) : toute clé de triangle
+            # absente de ce dict est silencieusement perdue au prochain PATCH
+            # "triangles seul" — étendre explicitement cette liste pour tout
+            # nouveau champ ajouté à TriangleInputSerializer (ex. Lot J,
+            # shading_profile_id).
             triangles = [
                 {'v': t['v'], 'group': t.get('group'), 'paroi_model_id': t.get('paroi_model_id'),
-                 'boundary': t.get('boundary', 'exterior_air')}
+                 'boundary': t.get('boundary', 'exterior_air'),
+                 'shading_profile_id': t.get('shading_profile_id')}
                 for t in existing.get('triangles', [])
             ]
         try:
@@ -425,6 +439,11 @@ class PlanningEntrySerializer(serializers.Serializer):
     debit_vent_m3h = serializers.FloatField(required=False, min_value=0.0, max_value=100_000.0, default=0.0)
     eta_recup_vent = serializers.FloatField(required=False, min_value=0.0, max_value=0.95, default=0.0)
     apports_internes_w = serializers.FloatField(required=False, min_value=0.0, max_value=1_000_000.0, default=0.0)
+    # Lot J : UN SEUL planning volets pour tous les triangles ayant un
+    # shading_profile_id (envelope.triangles[i]) — pas par fenêtre. Contrairement
+    # aux trois champs ci-dessus, s'applique dans TOUS les modes intérieurs (y
+    # compris 'imposed'), voir building_solver.run_building_simulation.
+    volets_fermes = serializers.BooleanField(required=False, default=False)
 
 
 class BuildingCalculRequestSerializer(serializers.Serializer):

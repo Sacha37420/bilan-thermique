@@ -261,6 +261,13 @@
                 <option value="ground">Sol (dallage)</option>
               </select>
               <button type="button" class="btn-secondary" (click)="assignGroupBoundary(g)">Assigner la condition limite</button>
+              <select [(ngModel)]="groupShadingAssignments[g]" name="groupShading_{{g}}">
+                <option [ngValue]="null">— aucun dispositif —</option>
+                @for (p of shadingProfiles; track p.id) {
+                  <option [ngValue]="p.id">{{ p.label }}</option>
+                }
+              </select>
+              <button type="button" class="btn-secondary" (click)="assignGroupShading(g)">Assigner l'occultation</button>
             </div>
           }
         </div>
@@ -268,6 +275,11 @@
           Condition limite : un groupe marqué « Sol » échange avec la température de sol constante
           (réglable sur la page Calcul 3D), pas avec la météo — pour un plancher bas au contact du
           terrain. {{ groundTriangleCount() }} triangle(s) actuellement marqué(s) « Sol ».
+        </p>
+        <p class="hint">
+          Occultation mobile (volet/store) : toujours considérée ENTIÈREMENT fermée quand active
+          (page Calcul 3D, planning horaire) — un même dispositif s'applique à tout le groupe.
+          Pertinent surtout pour des groupes qui sont des fenêtres.
         </p>
       }
 

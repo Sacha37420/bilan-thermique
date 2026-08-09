@@ -4,7 +4,8 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
 import { generateBoxEnvelope } from '../../core/box-generator';
-import { Building, Job, TriangleBoundary, WorkingTriangle } from '../../core/building.types';
+import { Building, Job, ShadingProfileId, TriangleBoundary, WorkingTriangle } from '../../core/building.types';
+import { SHADING_PROFILES } from '../../core/shading-profiles';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 
 interface ParoiModelSummary {
@@ -81,6 +82,10 @@ export class BatimentComponent implements OnInit, OnDestroy {
   // Lot K — assignation de la condition limite ('exterior_air'/'ground') par
   // groupe OBJ, même patron que groupAssignments (paroi_model_id) ci-dessus.
   groupBoundaryAssignments: Record<string, TriangleBoundary> = {};
+  // Lot J — dispositif d'occultation mobile par groupe OBJ, même patron
+  // (null = aucun dispositif, comme groupAssignments ci-dessus via [ngValue]).
+  groupShadingAssignments: Record<string, ShadingProfileId | null> = {};
+  shadingProfiles = SHADING_PROFILES;
 
   selectedIndices = signal<Set<number>>(new Set());
   bulkAssignModelId: number | null = null;
@@ -147,6 +152,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
       this.groups.set(parsed.groups);
       this.groupAssignments = {};
       this.groupBoundaryAssignments = {};
+      this.groupShadingAssignments = {};
       this.selectedIndices.set(new Set());
       this.modelColorMap.clear();
       this.message.set(
@@ -182,6 +188,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.groups.set(mesh.groups);
     this.groupAssignments = {};
     this.groupBoundaryAssignments = {};
+    this.groupShadingAssignments = {};
     this.selectedIndices.set(new Set());
     this.modelColorMap.clear();
     this.message.set(
@@ -223,6 +230,12 @@ export class BatimentComponent implements OnInit, OnDestroy {
   assignGroupBoundary(group: string): void {
     const boundary = this.groupBoundaryAssignments[group] ?? 'exterior_air';
     this.triangles.update(list => list.map(t => (t.group === group ? { ...t, boundary } : t)));
+    this.viewer?.repaint();
+  }
+
+  assignGroupShading(group: string): void {
+    const shadingProfileId = this.groupShadingAssignments[group] ?? null;
+    this.triangles.update(list => list.map(t => (t.group === group ? { ...t, shading_profile_id: shadingProfileId } : t)));
     this.viewer?.repaint();
   }
 
@@ -310,6 +323,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
 
     const triangles = this.triangles().map(t => ({
       v: t.v, group: t.group, paroi_model_id: t.paroi_model_id, boundary: t.boundary ?? 'exterior_air',
+      shading_profile_id: t.shading_profile_id ?? null,
     }));
     const id = this.currentBuildingId();
     const payload: Record<string, unknown> = {
@@ -361,6 +375,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
         this.groups.set([...new Set(b.envelope.triangles.map(t => t.group).filter((g): g is string => !!g))]);
         this.groupAssignments = {};
         this.groupBoundaryAssignments = {};
+        this.groupShadingAssignments = {};
         this.selectedIndices.set(new Set());
         this.modelColorMap.clear();
         this.selectedEnvironmentId = b.environment_id;
@@ -392,6 +407,7 @@ export class BatimentComponent implements OnInit, OnDestroy {
     this.groups.set([]);
     this.groupAssignments = {};
     this.groupBoundaryAssignments = {};
+    this.groupShadingAssignments = {};
     this.selectedIndices.set(new Set());
     this.modelColorMap.clear();
     this.selectedEnvironmentId = null;

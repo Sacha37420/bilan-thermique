@@ -223,10 +223,13 @@
           </div>
           <p class="hint">
             24 lignes, une par heure de la journée (index 0 = minuit) :
-            <code>débit_m3h, eta_recup, apports_w</code>.
+            <code>débit_m3h, eta_recup, apports_w[, volets_fermes]</code>. 4e colonne (occultations
+            mobiles, Lot J) optionnelle — <code>1</code>/<code>true</code> = fermé, sinon ouvert ;
+            s'applique à toutes les fenêtres ayant un dispositif assigné (page Bâtiment), dans TOUS
+            les modes intérieurs (y compris « Imposée », même si ce panneau n'y est pas visible).
           </p>
           <textarea rows="6" [(ngModel)]="planningRaw" name="planningRaw" (blur)="parsePlanning()"
-            placeholder="30,0.6,40&#10;30,0.6,40&#10;...(24 lignes)"></textarea>
+            placeholder="30,0.6,40,0&#10;30,0.6,40,0&#10;...(24 lignes)"></textarea>
           <div class="weather-actions">
             <button type="button" class="btn-secondary" (click)="loadPlanningExample()">Charger un exemple (jour type résidentiel)</button>
             @if (planning().length > 0) {
