@@ -7,6 +7,11 @@ import { Building, BuildingCandidate, WorkingTriangle } from '../../core/buildin
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 import { BuildingSearchComponent } from '../../components/building-search/building-search.component';
 import { VENTILATION_PROFILES, VentilationProfile } from '../../core/ventilation-profiles';
+import {
+  USAGE_PROFILES, UsageProfile, UsageProfileId,
+  defaultOccupationCalendar, computeThermostatSetpoints,
+} from '../../core/usage-profiles';
+import { Job } from '../../core/building.types';
 
 interface ParoiModelSummary {
   id: number;
@@ -46,7 +51,7 @@ export class ModeSimplifieComponent implements OnInit {
 
   @ViewChild(MeshViewerComponent) viewer?: MeshViewerComponent;
 
-  step = signal<'recherche' | 'creation' | 'configuration' | 'termine'>('recherche');
+  step = signal<'recherche' | 'creation' | 'configuration' | 'environnement' | 'calcul' | 'termine'>('recherche');
 
   // ── Étape 1 : recherche ────────────────────────────────────────────────
   // Formulaire et appel réseau délégués au composant partagé (Lot Y,
@@ -328,6 +333,219 @@ export class ModeSimplifieComponent implements OnInit {
   saving = signal(false);
   saveError = signal('');
 
+  // ══ Étape 4 — Environnement voisin + ombrage ═══════════════════════════════
+  // Le mode simplifié s'arrêtait au bâtiment et renvoyait sur Calcul 3D pour
+  // « la météo et le calcul » — qu'il ne faisait ni l'un ni l'autre. Pire : un
+  // bâtiment neuf a son ombrage marqué périmé, donc le calcul y était REFUSÉ.
+  // Le parcours va désormais jusqu'au résultat, en simplifié.
+  includeNeighbours = true;
+  includeVegetation = false;
+  envRadius = 150;
+  envBusy = signal(false);
+  envStatus = signal('');
+  envError = signal('');
+  shadowReady = signal(false);
+
+  private poll(jobId: number, onDone: (job: Job) => void, onError: (m: string) => void): void {
+    const handle = setInterval(() => {
+      this.api.getJob(jobId).subscribe({
+        next: (res) => {
+          const job = res as Job;
+          this.envStatus.set(job.message || `${job.progress}%`);
+          if (job.status === 'DONE') { clearInterval(handle); onDone(job); }
+          else if (job.status === 'ERROR') { clearInterval(handle); onError(job.message || 'Échec.'); }
+        },
+        error: () => { clearInterval(handle); onError('Suivi de la tâche interrompu.'); },
+      });
+    }, 2000);
+  }
+
+  /** Enchaîne, sans rien demander de plus : génération des obstacles alignés sur
+   * ce bâtiment (donc sans lui-même et sans obstacle qui l'empiète) →
+   * enregistrement → association → précalcul d'ombrage. Le précalcul est lancé
+   * même sans voisins : sans lui, le calcul serait refusé. */
+  buildEnvironmentAndShadow(): void {
+    const id = this.buildingId();
+    const c = this.selectedCandidate;
+    if (id === null || !c || this.envBusy()) return;
+    this.envBusy.set(true);
+    this.envError.set('');
+    this.shadowReady.set(false);
+
+    if (!this.includeNeighbours) {
+      this.envStatus.set("Ombrage : le bâtiment sur lui-même uniquement…");
+      this.launchPrecompute(id);
+      return;
+    }
+
+    this.envStatus.set('Recherche des bâtiments voisins…');
+    this.api.generateEnvironment({
+      lat: c.lat, lon: c.lon, radius_m: this.envRadius,
+      include_vegetation: this.includeVegetation, building_id: id,
+    }).subscribe({
+      next: (res) => this.poll((res as Job).id,
+        (job) => this.saveAndLinkEnvironment(id, job),
+        (m) => { this.envBusy.set(false); this.envError.set(m); }),
+      error: () => { this.envBusy.set(false); this.envError.set('Échec du lancement de la recherche.'); },
+    });
+  }
+
+  private saveAndLinkEnvironment(buildingId: number, job: Job): void {
+    const r = job.result as unknown as { vertices: number[][]; triangles: unknown[]; warnings: string[] };
+    this.envWarnings.set(r.warnings ?? []);
+    if (!r.triangles?.length) {
+      // Aucun voisin trouvé : ce n'est pas une erreur, on passe à l'ombrage.
+      this.envStatus.set('Aucun bâtiment voisin trouvé — ombrage sur le bâtiment seul.');
+      this.launchPrecompute(buildingId);
+      return;
+    }
+    this.envStatus.set('Enregistrement des obstacles…');
+    this.api.createEnvironment({
+      name: `Voisinage — ${this.buildingName} — ${new Date().toISOString().slice(0, 16)}`,
+      vertices: r.vertices, triangles: r.triangles,
+    }).subscribe({
+      next: (env) => {
+        this.api.updateBuilding(buildingId, { environment_id: (env as { id: number }).id }).subscribe({
+          next: () => this.launchPrecompute(buildingId),
+          error: () => { this.envBusy.set(false); this.envError.set("Échec de l'association des obstacles."); },
+        });
+      },
+      error: () => { this.envBusy.set(false); this.envError.set("Échec de l'enregistrement des obstacles."); },
+    });
+  }
+
+  private launchPrecompute(buildingId: number): void {
+    this.envStatus.set("Calcul de l'ombrage…");
+    this.api.precomputeShadows(buildingId).subscribe({
+      next: (res) => this.poll((res as Job).id,
+        () => {
+          this.envBusy.set(false);
+          this.shadowReady.set(true);
+          this.envStatus.set('Ombrage calculé.');
+          this.step.set('calcul');
+        },
+        (m) => { this.envBusy.set(false); this.envError.set(m); }),
+      error: (err) => {
+        this.envBusy.set(false);
+        this.envError.set(err?.error?.detail ?? "Échec du lancement de l'ombrage.");
+      },
+    });
+  }
+
+  envWarnings = signal<string[]>([]);
+
+  // ══ Étape 5 — Météo et calcul ═════════════════════════════════════════════
+  usageProfiles = USAGE_PROFILES;
+  selectedUsageProfileId: UsageProfileId = 'habitation';
+  calcBusy = signal(false);
+  calcStatus = signal('');
+  calcError = signal('');
+  result = signal<{ heating_kwh: number; cooling_kwh: number; t_air_mean: number; hours: number } | null>(null);
+
+  get selectedUsageProfile(): UsageProfile | undefined {
+    return this.usageProfiles.find(p => p.id === this.selectedUsageProfileId);
+  }
+
+  get surfaceRefM2(): number | null {
+    const c = this.selectedCandidate;
+    return c ? Math.round(this.footprintAreaM2(c)) : null;
+  }
+
+  /** Récupère une année type puis lance le calcul, sans autre réglage : tous
+   * les paramètres physiques sont dérivés de ce que l'assistant connaît déjà
+   * (volume réel, profil de ventilation choisi à l'étape 2, orientation de
+   * chaque triangle) — voir le texte de l'étape 5 pour la liste exacte. */
+  runCalculation(): void {
+    const id = this.buildingId();
+    const c = this.selectedCandidate;
+    if (id === null || !c || this.calcBusy()) return;
+    this.calcBusy.set(true);
+    this.calcError.set('');
+    this.result.set(null);
+    this.calcStatus.set('Récupération de la météo (année type)…');
+
+    const today = new Date();
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const lastYear = new Date(today.getFullYear() - 1, 0, 1);
+
+    this.api.fetchWeather({
+      lat: c.lat, lon: c.lon, source: 'tmy',
+      start_date: iso(lastYear), end_date: iso(new Date(today.getFullYear() - 1, 11, 31)),
+    }).subscribe({
+      next: (res) => this.pollCalc((res as Job).id, (job) => {
+        const r = job.result as unknown as { weather: Record<string, number>[] };
+        this.launchSolver(id, r.weather);
+      }),
+      error: () => { this.calcBusy.set(false); this.calcError.set('Échec de la récupération météo.'); },
+    });
+  }
+
+  private pollCalc(jobId: number, onDone: (job: Job) => void): void {
+    const handle = setInterval(() => {
+      this.api.getJob(jobId).subscribe({
+        next: (res) => {
+          const job = res as Job;
+          this.calcStatus.set(job.message || `${job.progress}%`);
+          if (job.status === 'DONE') { clearInterval(handle); onDone(job); }
+          else if (job.status === 'ERROR') {
+            clearInterval(handle);
+            this.calcBusy.set(false);
+            this.calcError.set(job.message || 'Échec.');
+          }
+        },
+        error: () => { clearInterval(handle); this.calcBusy.set(false); this.calcError.set('Suivi interrompu.'); },
+      });
+    }, 2000);
+  }
+
+  private launchSolver(buildingId: number, weather: Record<string, number>[]): void {
+    this.calcStatus.set('Simulation heure par heure…');
+    const profile = this.selectedUsageProfile!;
+    const volume = this.estimatedVolumeM3 ?? 250;
+    const setpoints = computeThermostatSetpoints(
+      profile, defaultOccupationCalendar(),
+      weather.map((w, i) => (w['hour_index'] as number | undefined) ?? i),
+    );
+
+    this.api.runBuildingCalcul(buildingId, {
+      dx_max: 0.02,
+      h_e: 22, h_e_dynamic: true,
+      interior: {
+        mode: 'thermostat', h_i: 8, h_i_auto: true,
+        c_air_int: Math.round(volume * 1200),
+        t_min: 19, t_max: 26,
+        debit_vent_m3h: this.suggestedDebitVentM3h ?? 0,
+        eta_recup_vent: this.suggestedEtaRecupVent ?? 0,
+        apports_internes_w: 0,
+      },
+      t_init: 15,
+      weather: weather.map((w, i) => ({ ...w, ...setpoints[i] })),
+      shadow_mode: 'precomputed',
+    }).subscribe({
+      next: (res) => this.pollCalc((res as Job).id, (job) => {
+        this.calcBusy.set(false);
+        this.result.set(job.result as unknown as {
+          heating_kwh: number; cooling_kwh: number; t_air_mean: number; hours: number;
+        });
+        this.step.set('termine');
+      }),
+      error: (err) => {
+        this.calcBusy.set(false);
+        this.calcError.set(err?.error?.detail ?? 'Échec du lancement du calcul.');
+      },
+    });
+  }
+
+  get heatingPerM2(): number | null {
+    const r = this.result(); const s = this.surfaceRefM2;
+    return r && s ? Math.round(r.heating_kwh / s) : null;
+  }
+
+  get coolingPerM2(): number | null {
+    const r = this.result(); const s = this.surfaceRefM2;
+    return r && s ? Math.round(r.cooling_kwh / s) : null;
+  }
+
   save(): void {
     const id = this.buildingId();
     if (id === null || this.assignedCount === 0) return;
@@ -337,7 +555,12 @@ export class ModeSimplifieComponent implements OnInit {
     this.api.updateBuilding(id, { triangles }).subscribe({
       next: () => {
         this.saving.set(false);
-        this.step.set('termine');
+        // Surface de référence renseignée automatiquement : l'empreinte réelle
+        // est connue, et sans elle les résultats en kWh/m² restent indisponibles.
+        if (this.surfaceRefM2 !== null) {
+          this.api.updateBuilding(id, { surface_ref_m2: this.surfaceRefM2 }).subscribe({ error: () => {} });
+        }
+        this.step.set('environnement');
       },
       error: (err) => {
         this.saving.set(false);

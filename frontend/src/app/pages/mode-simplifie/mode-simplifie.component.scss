@@ -150,3 +150,44 @@ select, input[type="number"], input[type="text"] {
   background: var(--bg);
   margin: var(--space-3) 0;
 }
+
+.inline-check {
+  display: flex; flex-direction: row; align-items: center; gap: var(--space-2);
+  min-height: 44px; font-weight: 400; cursor: pointer;
+}
+
+.env-warnings {
+  list-style: none; margin: var(--space-3) 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-2);
+
+  li {
+    border-left: 3px solid var(--warning);
+    background: var(--warning-tint);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--text);
+  }
+}
+
+.result-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
+}
+
+.tile {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex; flex-direction: column; gap: var(--space-1);
+}
+
+.tile-label { font-size: var(--text-xs); color: var(--text-mute); }
+.tile-value {
+  font-family: var(--font-mono); font-size: var(--text-xl); font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--accent);
+}
+.tile-sub { font-size: var(--text-xs); color: var(--text-mute); font-family: var(--font-mono); }

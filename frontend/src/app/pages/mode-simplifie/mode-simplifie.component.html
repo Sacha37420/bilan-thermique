@@ -190,23 +190,131 @@
     </section>
   }
 
-  <!-- ── Étape 4 : terminé ────────────────────────────────────────────── -->
-  @if (step() === 'termine') {
-    <section class="form-card">
-      <h2>4. Météo et calcul</h2>
+  <!-- ── Étape 4 : voisinage et ombrage ──────────────────────────────── -->
+  @if (step() === 'environnement' || step() === 'calcul' || step() === 'termine') {
+    <section class="form-card" [class.done]="step() !== 'environnement'">
+      <h2>4. Voisinage et ombrage</h2>
       <p class="hint">
-        Méthode complète équivalente : construire ou coller une série météo horaire à la main. Ici,
-        rien à faire de plus — le bâtiment est géoréférencé (coordonnées de la recherche), la page
-        Calcul 3D pré-remplira automatiquement le panneau météo avec ces coordonnées. Choisissez-y
-        juste l'année (ou l'année type PVGIS) puis lancez le calcul.
+        Méthode complète équivalente : construire un maillage d'obstacles sur la page Environnement,
+        l'associer au bâtiment, puis lancer le précalcul d'ombrage (page Calcul 3D). Ici tout
+        s'enchaîne : les bâtiments voisins sont récupérés autour du vôtre et alignés sur son repère,
+        <strong>votre bâtiment est écarté</strong> (il figure lui-même dans les données) et tout
+        obstacle qui empiète sur son enveloppe est rogné.
+      </p>
+      @if (step() === 'environnement') {
+        <label class="inline-check">
+          <input type="checkbox" [(ngModel)]="includeNeighbours" name="includeNeighbours" />
+          <span>Tenir compte des bâtiments voisins</span>
+        </label>
+        @if (includeNeighbours) {
+          <div class="field-grid">
+            <label>
+              <span>Rayon de recherche (m)</span>
+              <input type="number" step="10" min="10" max="400" [(ngModel)]="envRadius" name="envRadius" />
+            </label>
+          </div>
+          <label class="inline-check">
+            <input type="checkbox" [(ngModel)]="includeVegetation" name="includeVegetation" />
+            <span>Inclure la végétation (arbres, haies, bois)</span>
+          </label>
+        } @else {
+          <p class="hint">
+            Sans voisinage, le bâtiment ne se fait de l'ombre qu'à lui-même : correct, mais optimiste
+            dès qu'il y a du bâti autour.
+          </p>
+        }
+        <button type="button" class="btn-primary" [disabled]="envBusy()" (click)="buildEnvironmentAndShadow()">
+          {{ envBusy() ? 'En cours…' : 'Calculer l’ombrage' }}
+        </button>
+        @if (envStatus()) { <p class="hint">{{ envStatus() }}</p> }
+        @if (envError()) { <p class="field-error">{{ envError() }}</p> }
+      } @else {
+        <p class="hint">Ombrage calculé — {{ includeNeighbours ? 'voisinage inclus' : 'bâtiment seul' }}.</p>
+      }
+      @if (envWarnings().length > 0) {
+        <ul class="env-warnings">
+          @for (w of envWarnings(); track $index) { <li>{{ w }}</li> }
+        </ul>
+      }
+    </section>
+  }
+
+  <!-- ── Étape 5 : météo et calcul ───────────────────────────────────── -->
+  @if (step() === 'calcul' || step() === 'termine') {
+    <section class="form-card" [class.done]="step() === 'termine'">
+      <h2>5. Météo et calcul</h2>
+      <p class="hint">
+        Méthode complète équivalente : construire une série météo horaire puis régler une quinzaine
+        de paramètres physiques (page Calcul 3D). Ici, une seule question — à quoi sert le bâtiment —
+        et tout le reste est déduit de ce que cet assistant connaît déjà.
+      </p>
+      @if (step() === 'calcul') {
+        <div class="field-grid">
+          <label>
+            <span>Usage du bâtiment</span>
+            <select [(ngModel)]="selectedUsageProfileId" name="selectedUsageProfileId">
+              @for (p of usageProfiles; track p.id) {
+                <option [ngValue]="p.id">{{ p.label }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        @if (selectedUsageProfile; as prof) {
+          <p class="hint">{{ prof.description }}</p>
+        }
+        <p class="hint">
+          Choisi pour vous : <strong>année type PVGIS</strong> aux coordonnées du bâtiment
+          (représentative, plutôt qu'une année particulière) ; capacité thermique déduite du volume
+          réel ({{ estimatedVolumeM3 }} m³) ; renouvellement d'air issu du profil choisi à l'étape 2 ;
+          échange extérieur suivant le vent réel heure par heure et échange intérieur suivant
+          l'orientation de chaque paroi ; consignes de thermostat suivant l'usage ci-dessus. Chacun
+          de ces réglages reste modifiable ensuite sur la page Calcul 3D.
+        </p>
+        <button type="button" class="btn-primary" [disabled]="calcBusy()" (click)="runCalculation()">
+          {{ calcBusy() ? 'Calcul en cours…' : 'Lancer le calcul' }}
+        </button>
+        @if (calcStatus()) { <p class="hint">{{ calcStatus() }}</p> }
+        @if (calcError()) { <p class="field-error">{{ calcError() }}</p> }
+      }
+    </section>
+  }
+
+  <!-- ── Résultat ────────────────────────────────────────────────────── -->
+  @if (step() === 'termine' && result(); as r) {
+    <section class="form-card">
+      <h2>Résultat</h2>
+      <div class="result-tiles">
+        <div class="tile">
+          <span class="tile-label">Besoin de chauffage</span>
+          <span class="tile-value">{{ r.heating_kwh | number:'1.0-0' }} kWh</span>
+          @if (heatingPerM2 !== null) { <span class="tile-sub">{{ heatingPerM2 }} kWh/m²/an</span> }
+        </div>
+        <div class="tile">
+          <span class="tile-label">Besoin de climatisation</span>
+          <span class="tile-value">{{ r.cooling_kwh | number:'1.0-0' }} kWh</span>
+          @if (coolingPerM2 !== null) { <span class="tile-sub">{{ coolingPerM2 }} kWh/m²/an</span> }
+        </div>
+        <div class="tile">
+          <span class="tile-label">Température intérieure moyenne</span>
+          <span class="tile-value">{{ r.t_air_mean | number:'1.1-1' }} °C</span>
+          <span class="tile-sub">sur {{ r.hours }} heures</span>
+        </div>
+      </div>
+      <p class="hint">
+        Ce sont des <strong>besoins</strong>, pas des consommations : l'énergie à fournir à l'air du
+        local, sans rendement de chauffage, ni eau chaude, ni éclairage. Surface de référence prise
+        égale à l'emprise au sol ({{ surfaceRefM2 }} m²). Les simplifications de ce mode — empreinte
+        approximative, toiture plate, fenêtres réparties plutôt que dessinées — se répercutent
+        directement sur ces chiffres : à lire comme un ordre de grandeur.
       </p>
       <p class="hint">
-        « {{ buildingName }} » est un bâtiment ordinaire : ombrage, environnement voisin, cadre de
-        fenêtre, planning horaire… tous les outils complets restent utilisables pour l'affiner.
+        « {{ buildingName }} » est un bâtiment ordinaire : tous les outils complets restent
+        utilisables pour l'affiner et relancer le calcul.
       </p>
       <div class="editor-actions">
-        <a routerLink="/calcul-3d" class="btn-primary">Aller sur Calcul 3D</a>
-        <a routerLink="/batiment" class="btn-secondary">Aller sur Bâtiment</a>
+        <a routerLink="/calcul-3d" class="btn-primary">Affiner sur Calcul 3D</a>
+        <a routerLink="/batiment" class="btn-secondary">Modifier le bâtiment</a>
+        <a routerLink="/environnement" class="btn-secondary">Voir l'environnement</a>
       </div>
     </section>
   }
