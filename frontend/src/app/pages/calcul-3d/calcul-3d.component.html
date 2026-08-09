@@ -394,6 +394,38 @@
           @if (planningError()) {
             <p class="field-error">{{ planningError() }}</p>
           }
+
+          <h4>Jours de fermeture (optionnel)</h4>
+          <p class="hint">
+            Même format, appliqué aux jours où le calendrier d'occupation ci-dessus considère le
+            bâtiment fermé — week-ends et, pour un profil scolaire, vacances. Sans lui, le planning
+            ci-dessus s'applique <strong>tous les jours</strong> : le thermostat passait en hors gel
+            le dimanche pendant que la ventilation continuait au débit d'occupation.
+            @if (!selectedUsageProfile) {
+              <strong>Choisissez d'abord un régime d'occupation</strong> ci-dessus : sans lui, rien
+              ne définit quand le bâtiment est fermé.
+            }
+          </p>
+          <textarea rows="6" [(ngModel)]="planningFermeRaw" name="planningFermeRaw"
+            (blur)="parsePlanningFerme()" [disabled]="!selectedUsageProfile"
+            placeholder="4.5,0.6,0,0&#10;...(24 lignes)"></textarea>
+          <div class="weather-actions">
+            <button type="button" class="btn-secondary" (click)="derivePlanningFerme()"
+              [disabled]="planning().length !== 24 || !selectedUsageProfile">
+              Déduire du planning ci-dessus
+            </button>
+            @if (planningFerme().length > 0) {
+              <span class="weather-count">{{ planningFerme().length }} / 24 heure(s) valides</span>
+            }
+          </div>
+          <p class="hint">
+            « Déduire » applique la convention usuelle : ventilation ramenée aux infiltrations
+            (15 % du débit d'occupation), apports internes nuls — personne n'est là — et volets
+            inchangés. Point de départ modifiable, pas une règle imposée.
+          </p>
+          @if (planningFermeError()) {
+            <p class="field-error">{{ planningFermeError() }}</p>
+          }
         }
       }
     </section>

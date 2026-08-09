@@ -463,6 +463,13 @@ class BuildingWeatherPointSerializer(serializers.Serializer):
                                     min_value=-30.0, max_value=50.0)
     t_max = serializers.FloatField(required=False, allow_null=True, default=None,
                                     min_value=-30.0, max_value=50.0)
+    # Bâtiment occupé à CETTE heure (Lot AG) — résolu côté client à partir du même
+    # calendrier d'occupation que t_min/t_max, donc le serveur ne connaît toujours
+    # aucune date. `false` bascule sur `planning_ferme` (voir
+    # BuildingCalculRequestSerializer) : sans lui, un bureau fermé le dimanche
+    # continuait d'être ventilé au débit d'occupation et de recevoir ses apports
+    # internes, alors que son thermostat était déjà passé en hors gel.
+    occupied = serializers.BooleanField(required=False, allow_null=True, default=None)
 
 
 class BuildingInteriorSerializer(serializers.Serializer):
@@ -557,11 +564,20 @@ class BuildingCalculRequestSerializer(serializers.Serializer):
     # constantes qu'il remplace). Absent -> comportement inchangé (constantes de
     # `interior`).
     planning = PlanningEntrySerializer(many=True, required=False)
+    # Lot AG : planning des jours de FERMETURE, appliqué aux heures dont le point
+    # météo porte `occupied: false`. Absent -> `planning` s'applique à toutes les
+    # heures, comportement du Lot Q inchangé.
+    planning_ferme = PlanningEntrySerializer(many=True, required=False)
     # Heure du premier point de `weather` (0=minuit) — sert à indexer le planning
     # (planning[(heure_debut + hour_idx) % 24]), sans effet si `planning` absent.
     heure_debut = serializers.IntegerField(required=False, min_value=0, max_value=23, default=0)
 
     def validate(self, data):
+        if 'planning_ferme' in data and 'planning' not in data:
+            raise serializers.ValidationError(
+                {'planning_ferme': "planning_ferme n'a de sens qu'avec planning : il ne remplace "
+                                    "que les heures de fermeture, jamais toute la série."}
+            )
         if data.get('h_e_dynamic', False):
             missing = [i for i, w in enumerate(data.get('weather', [])) if w.get('wind_m_s') is None]
             if missing:
@@ -575,6 +591,13 @@ class BuildingCalculRequestSerializer(serializers.Serializer):
         if len(value) != 24:
             raise serializers.ValidationError(
                 f"planning doit contenir exactement 24 entrées (une par heure de la journée), {len(value)} reçue(s)."
+            )
+        return value
+
+    def validate_planning_ferme(self, value):
+        if len(value) != 24:
+            raise serializers.ValidationError(
+                f"planning_ferme doit contenir exactement 24 entrées, {len(value)} reçue(s)."
             )
         return value
 

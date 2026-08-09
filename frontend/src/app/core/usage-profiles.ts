@@ -79,9 +79,18 @@ export const USAGE_PROFILES: UsageProfile[] = [
   },
 ];
 
+/** Le bâtiment est-il fermé ce jour-là ? Extrait de setpointsFor (Lot AG) pour
+ * être partagé avec le planning de ventilation : les consignes de thermostat et
+ * le régime de ventilation doivent basculer sur EXACTEMENT le même critère,
+ * sinon ils divergent en silence — ce qui était le cas jusqu'ici, le thermostat
+ * passant en hors gel le dimanche pendant que la ventilation restait au débit
+ * d'occupation. */
+function isClosed(profile: UsageProfile, isWeekend: boolean, isVacation: boolean): boolean {
+  return (profile.vacancesHorsGel && isVacation) || (profile.weekendHorsGel && isWeekend);
+}
+
 function setpointsFor(profile: UsageProfile, isWeekend: boolean, isVacation: boolean, hourOfDay: number): { t_min: number; t_max: number } {
-  if (profile.vacancesHorsGel && isVacation) return HORS_GEL;
-  if (profile.weekendHorsGel && isWeekend) return HORS_GEL;
+  if (isClosed(profile, isWeekend, isVacation)) return HORS_GEL;
   if (hourOfDay >= HEURE_DEBUT_JOUR && hourOfDay < HEURE_FIN_JOUR) {
     return { t_min: T_MIN_JOUR, t_max: profile.tMaxJour };
   }
@@ -206,3 +215,25 @@ export function schoolHolidayRanges(
   if (open !== null) ranges.push({ debut: open, fin: nDays - 1 });
   return ranges;
 }
+
+/** Bâtiment occupé (`true`) ou fermé (`false`) à chaque heure — même critère que
+ * les consignes de thermostat, par construction (voir isClosed). Envoyé tel quel
+ * dans chaque point météo : le serveur bascule alors sur `planning_ferme` sans
+ * jamais manipuler de date. */
+export function computeOccupancy(
+  profile: UsageProfile, calendar: OccupationCalendar, absoluteHours: number[],
+): boolean[] {
+  return absoluteHours.map(absoluteHour => {
+    const dayIdx = Math.floor(absoluteHour / 24);
+    const weekday = (((calendar.jourDebut + dayIdx) % 7) + 7) % 7;
+    const isWeekend = !calendar.joursOuvres[weekday];
+    const isVacation = calendar.vacances.some(r => dayIdx >= r.debut && dayIdx <= r.fin);
+    return !isClosed(profile, isWeekend, isVacation);
+  });
+}
+
+/** Débit résiduel d'un jour de fermeture, en fraction du débit d'occupation.
+ * Une VMC coupée ne rend pas le bâtiment étanche : il subsiste les
+ * infiltrations. Valeur indicative usuelle, ajustable dans l'interface — même
+ * statut que le reste des profils de ce fichier. */
+export const CLOSED_VENTILATION_FRACTION = 0.15;

@@ -530,6 +530,14 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     sinon tout le planning et les volets pour le reste du run, définitivement et
     sans aucun signe.
 
+    planning_ferme (payload, optionnel — Lot AG) : second jeu de 24 créneaux,
+    appliqué aux heures dont le point météo porte `occupied: false` (résolu côté
+    client depuis le calendrier d'occupation, comme t_min/t_max — le serveur ne
+    connaît toujours aucune date). Absent : `planning` s'applique à toutes les
+    heures, comportement du Lot Q inchangé. Double au plus le nombre de valeurs
+    distinctes de g_vent, donc de factorisations — mesuré largement dans la marge
+    de MAX_DISTINCT_BOUNDARY_COMBOS.
+
     volets_fermes (planning[slot], optionnel booléen, défaut False — Lot J) :
     UN SEUL planning pour TOUS les triangles ayant un `shading_profile_id`
     (envelope.triangles[i], voir SHADING_PROFILES) — pas un planning par
@@ -703,6 +711,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     )
 
     planning = payload.get('planning')
+    planning_ferme = payload.get('planning_ferme')
     heure_debut = payload.get('heure_debut', 0)
 
     # g_vent_by_slot/apports_by_slot : listes de 24 valeurs (une par heure de la
@@ -715,10 +724,22 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     apports_by_slot = None
     g_vent_constant = 0.0
     apports_constant = 0.0
+    # Lot AG : second jeu de créneaux pour les jours de FERMETURE. Le calendrier
+    # d'occupation (Lot V) ne pilotait que les consignes de thermostat : un bureau
+    # dont le thermostat passait en hors gel le dimanche restait ventilé au débit
+    # d'occupation et continuait de recevoir ses apports internes ce jour-là.
+    # L'incohérence n'existait pas avant le Lot V — c'est lui qui a introduit un
+    # calendrier d'un seul côté.
+    g_vent_by_slot_ferme = None
+    apports_by_slot_ferme = None
+
     if mode in ('free', 'thermostat'):
         if planning:
             g_vent_by_slot = [_g_vent_from(p) for p in planning]
             apports_by_slot = [p.get('apports_internes_w', 0.0) for p in planning]
+            if planning_ferme:
+                g_vent_by_slot_ferme = [_g_vent_from(p) for p in planning_ferme]
+                apports_by_slot_ferme = [p.get('apports_internes_w', 0.0) for p in planning_ferme]
         else:
             # 0,34 Wh/(m3.K) = capacité thermique volumique de l'air (valeur
             # usuelle) ; (1 - eta_recup_vent) réduit la perte nette pour une VMC
@@ -732,6 +753,9 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # effet même en mode 'imposed'. Absent de `planning` (ou `planning`
     # absent) -> jamais fermé, comportement inchangé.
     volet_by_slot = [bool(p.get('volets_fermes', False)) for p in planning] if planning else None
+    volet_by_slot_ferme = (
+        [bool(p.get('volets_fermes', False)) for p in planning_ferme] if planning_ferme else None
+    )
 
     if mode in ('free', 'thermostat'):
         C_global = C_global.tolil()
@@ -806,9 +830,16 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         point_hour_index = point.get('hour_index')
         slot = ((point_hour_index if point_hour_index is not None else heure_debut + hour_idx) % 24)
 
+        # `occupied` porté par le point météo (Lot AG) : `.get(...) is not None`
+        # et non `.get(cle, repli)` — le serializer (default=None) rend la clé
+        # toujours présente, même piège que t_min/t_max et hour_index.
+        point_occupied = point.get('occupied')
+        closed = point_occupied is False
+
         if g_vent_by_slot is not None:
-            g_vent = g_vent_by_slot[slot]
-            apports_internes_w = apports_by_slot[slot]
+            use_ferme = closed and g_vent_by_slot_ferme is not None
+            g_vent = (g_vent_by_slot_ferme if use_ferme else g_vent_by_slot)[slot]
+            apports_internes_w = (apports_by_slot_ferme if use_ferme else apports_by_slot)[slot]
         else:
             g_vent = g_vent_constant
             apports_internes_w = apports_constant
@@ -822,7 +853,12 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         else:
             h_e = h_e_constant
 
-        volet_closed = volet_by_slot[slot] if volet_by_slot is not None else False
+        if closed and volet_by_slot_ferme is not None:
+            volet_closed = volet_by_slot_ferme[slot]
+        elif volet_by_slot is not None:
+            volet_closed = volet_by_slot[slot]
+        else:
+            volet_closed = False
 
         key = (g_vent, h_e, volet_closed)
         bundle = bundles.get(key)

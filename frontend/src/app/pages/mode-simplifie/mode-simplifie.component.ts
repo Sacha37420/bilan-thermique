@@ -9,8 +9,8 @@ import { BuildingSearchComponent } from '../../components/building-search/buildi
 import { VENTILATION_PROFILES, VentilationProfile } from '../../core/ventilation-profiles';
 import {
   USAGE_PROFILES, UsageProfile, UsageProfileId,
-  defaultOccupationCalendar, computeThermostatSetpoints, schoolHolidayRanges,
-  SCHOOL_ZONES, SchoolZone,
+  defaultOccupationCalendar, computeThermostatSetpoints, computeOccupancy,
+  schoolHolidayRanges, SCHOOL_ZONES, SchoolZone, CLOSED_VENTILATION_FRACTION,
 } from '../../core/usage-profiles';
 import { Job } from '../../core/building.types';
 
@@ -522,6 +522,20 @@ export class ModeSimplifieComponent implements OnInit {
       calendar.jourDebut = 0;  // le 1er janvier d'une année type n'a pas de jour réel
     }
     const setpoints = computeThermostatSetpoints(profile, calendar, absoluteHours);
+    // Lot AG : la ventilation suit la même occupation que le thermostat. Sans
+    // ça, une école en vacances restait ventilée au débit d'occupation pendant
+    // que ses consignes passaient en hors gel — or le débit est de loin le
+    // premier poste de déperdition d'un bâtiment fermé.
+    const occupancy = computeOccupancy(profile, calendar, absoluteHours);
+    const debit = this.suggestedDebitVentM3h ?? 0;
+    const eta = this.suggestedEtaRecupVent ?? 0;
+    const planning = Array.from({ length: 24 }, () => ({
+      debit_vent_m3h: debit, eta_recup_vent: eta, apports_internes_w: 0, volets_fermes: false,
+    }));
+    const planningFerme = Array.from({ length: 24 }, () => ({
+      debit_vent_m3h: Math.round(debit * CLOSED_VENTILATION_FRACTION * 10) / 10,
+      eta_recup_vent: eta, apports_internes_w: 0, volets_fermes: false,
+    }));
 
     this.api.runBuildingCalcul(buildingId, {
       dx_max: 0.02,
@@ -530,12 +544,13 @@ export class ModeSimplifieComponent implements OnInit {
         mode: 'thermostat', h_i: 8, h_i_auto: true,
         c_air_int: Math.round(volume * 1200),
         t_min: 19, t_max: 26,
-        debit_vent_m3h: this.suggestedDebitVentM3h ?? 0,
-        eta_recup_vent: this.suggestedEtaRecupVent ?? 0,
+        debit_vent_m3h: debit,
+        eta_recup_vent: eta,
         apports_internes_w: 0,
       },
       t_init: 15,
-      weather: weather.map((w, i) => ({ ...w, ...setpoints[i] })),
+      weather: weather.map((w, i) => ({ ...w, ...setpoints[i], occupied: occupancy[i] })),
+      planning, planning_ferme: planningFerme, heure_debut: 0,
       shadow_mode: 'precomputed',
     }).subscribe({
       next: (res) => this.pollCalc((res as Job).id, (job) => {

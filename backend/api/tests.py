@@ -3226,3 +3226,161 @@ class EnvironmentInvalidatesShadowTest(TestCase):
         s.save()
         a.refresh_from_db()
         self.assertFalse(a.sun_visibility_stale)
+
+
+class OccupancyDrivenPlanningTest(SimpleTestCase):
+    """Lot AG — le planning horaire suit le calendrier d'occupation.
+
+    Le Lot V n'a fait varier que les CONSIGNES de thermostat selon le calendrier.
+    Ventilation, apports internes et volets restaient sur un unique « jour type » :
+    un bureau dont le thermostat passait en hors gel le dimanche continuait d'être
+    ventilé au débit d'occupation et de recevoir ses apports internes ce jour-là.
+    """
+
+    databases = []
+
+    LAYERS = [{'e': 0.2, 'lam': 1.0, 'rho': 2000.0, 'c': 900.0, 'tau': 0.0, 'r': 0.9, 'alpha': 0.1}]
+
+    def _envelope(self):
+        vertices = [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 0.0, 3.0]]
+        return {'vertices': vertices,
+                'triangles': geometry.compute_envelope_geometry(
+                    vertices, [{'v': [0, 1, 2], 'paroi_model_id': 1}])}
+
+    @staticmethod
+    def _weather(occupied_flags):
+        """Une heure par entrée ; `occupied_flags[i] is None` = clé absente."""
+        out = []
+        for i, occ in enumerate(occupied_flags):
+            p = {'t_ext': -5.0, 'sun_azimuth': 0.0, 'sun_elevation': -10.0,
+                 'e_dir': 0.0, 'e_dif': 0.0, 'hour_index': i}
+            if occ is not None:
+                p['occupied'] = occ
+            out.append(p)
+        return out
+
+    @staticmethod
+    def _planning(debit, apports=0.0, volets=False):
+        return [{'debit_vent_m3h': debit, 'eta_recup_vent': 0.0,
+                 'apports_internes_w': apports, 'volets_fermes': volets} for _ in range(24)]
+
+    def _run(self, weather, planning, planning_ferme=None):
+        payload = {
+            'dx_max': 0.05, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 20_000.0},
+            't_init': 20.0, 'weather': weather, 'planning': planning, 'heure_debut': 0,
+        }
+        if planning_ferme is not None:
+            payload['planning_ferme'] = planning_ferme
+        return building_solver.run_building_simulation(
+            self._envelope(), {1: self.LAYERS}, None, payload)
+
+    def test_closed_hours_use_the_closed_planning(self):
+        """Le cœur : à -5 °C dehors, une journée fermée doit moins ventiler donc
+        moins refroidir qu'une journée occupée."""
+        occupied = self._run(self._weather([True] * 24), self._planning(200.0),
+                             self._planning(20.0))
+        closed = self._run(self._weather([False] * 24), self._planning(200.0),
+                           self._planning(20.0))
+        self.assertGreater(closed['t_air'][-1], occupied['t_air'][-1])
+
+    def test_without_closed_planning_nothing_changes(self):
+        """Non-régression du Lot Q : sans planning_ferme, `occupied` n'a aucun
+        effet — un payload existant se comporte exactement comme avant."""
+        a = self._run(self._weather([True] * 24), self._planning(200.0))
+        b = self._run(self._weather([False] * 24), self._planning(200.0))
+        self.assertEqual(a['t_air'], b['t_air'])
+
+    def test_absent_occupied_key_falls_back_to_the_open_planning(self):
+        """Série sans `occupied` (météo collée à la main) : le planning normal
+        s'applique, jamais celui de fermeture."""
+        none_flags = self._run(self._weather([None] * 24), self._planning(200.0),
+                               self._planning(20.0))
+        all_open = self._run(self._weather([True] * 24), self._planning(200.0),
+                             self._planning(20.0))
+        self.assertEqual(none_flags['t_air'], all_open['t_air'])
+
+    def test_internal_gains_follow_occupancy_too(self):
+        """Les apports internes vivent dans le même planning : ils doivent
+        disparaître un jour de fermeture, sinon on chaufferait un bâtiment vide
+        avec des occupants absents."""
+        with_gains = self._run(self._weather([True] * 24),
+                               self._planning(0.0, apports=2000.0), self._planning(0.0, apports=0.0))
+        without = self._run(self._weather([False] * 24),
+                            self._planning(0.0, apports=2000.0), self._planning(0.0, apports=0.0))
+        self.assertGreater(with_gains['t_air'][-1], without['t_air'][-1])
+
+    def test_mixed_week_switches_hour_by_hour(self):
+        """Une semaine réelle mélange les deux : le basculement doit se faire
+        heure par heure, pas une fois pour tout le run."""
+        flags = [(i // 24) < 5 for i in range(7 * 24)]  # 5 jours ouvrés puis 2 fermés
+        mixed = self._run(self._weather(flags), self._planning(200.0), self._planning(20.0))
+        all_open = self._run(self._weather([True] * (7 * 24)), self._planning(200.0),
+                             self._planning(20.0))
+        all_closed = self._run(self._weather([False] * (7 * 24)), self._planning(200.0),
+                               self._planning(20.0))
+        final = mixed['t_air'][-1]
+        self.assertGreater(final, all_open['t_air'][-1])
+        self.assertLess(final, all_closed['t_air'][-1])
+
+    def test_shutters_can_differ_when_closed(self):
+        """Les volets aussi : un bâtiment fermé peut les garder baissés en
+        permanence. Vérifié en mode 'imposed', où seul le canal K agit."""
+        envelope = self._envelope()
+        envelope['triangles'][0]['shading_profile_id'] = 'volet-roulant'
+        payload = {
+            'dx_max': 0.05, 'h_e': 25.0,
+            'interior': {'mode': 'imposed', 'h_i': 8.0, 't_int': 20.0},
+            't_init': 20.0, 'planning': self._planning(0.0, volets=False),
+            'planning_ferme': self._planning(0.0, volets=True), 'heure_debut': 0,
+        }
+
+        def run(flags):
+            return building_solver.run_building_simulation(
+                envelope, {1: self.LAYERS}, None,
+                {**payload, 'weather': self._weather(flags)})['envelope_flux_w']
+
+        self.assertNotEqual(run([True] * 24), run([False] * 24))
+
+
+class ClosedPlanningSerializerTest(SimpleTestCase):
+    """Lot AG — validation de planning_ferme."""
+
+    databases = []
+
+    @staticmethod
+    def _payload(**extra):
+        return {
+            'dx_max': 0.02, 'h_e': 25.0,
+            'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 200000.0},
+            't_init': 15.0,
+            'weather': [{'t_ext': 5.0, 'sun_azimuth': 0.0, 'sun_elevation': 10.0,
+                         'e_dir': 0.0, 'e_dif': 0.0}],
+            **extra,
+        }
+
+    ENTRY = {'debit_vent_m3h': 30.0, 'eta_recup_vent': 0.5, 'apports_internes_w': 100.0}
+
+    def test_requires_exactly_24_entries(self):
+        s = serializers.BuildingCalculRequestSerializer(
+            data=self._payload(planning=[self.ENTRY] * 24, planning_ferme=[self.ENTRY] * 12))
+        self.assertFalse(s.is_valid())
+        self.assertIn('planning_ferme', s.errors)
+
+    def test_rejected_without_planning(self):
+        """Un planning de fermeture seul n'a pas de sens : il ne remplace que
+        certaines heures, il ne peut pas porter tout le run."""
+        s = serializers.BuildingCalculRequestSerializer(
+            data=self._payload(planning_ferme=[self.ENTRY] * 24))
+        self.assertFalse(s.is_valid())
+        self.assertIn('planning_ferme', s.errors)
+
+    def test_accepted_with_planning(self):
+        s = serializers.BuildingCalculRequestSerializer(
+            data=self._payload(planning=[self.ENTRY] * 24, planning_ferme=[self.ENTRY] * 24))
+        self.assertTrue(s.is_valid(), s.errors)
+
+    def test_occupied_defaults_to_none_on_each_point(self):
+        s = serializers.BuildingCalculRequestSerializer(data=self._payload())
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertIsNone(s.validated_data['weather'][0]['occupied'])

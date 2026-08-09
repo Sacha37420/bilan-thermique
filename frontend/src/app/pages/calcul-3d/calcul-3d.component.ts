@@ -8,8 +8,8 @@ import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.co
 import { VENTILATION_PROFILES } from '../../core/ventilation-profiles';
 import {
   USAGE_PROFILES, UsageProfile, UsageProfileId, OccupationCalendar,
-  defaultOccupationCalendar, computeThermostatSetpoints, schoolHolidayRanges,
-  SCHOOL_ZONES, SchoolZone,
+  defaultOccupationCalendar, computeThermostatSetpoints, computeOccupancy,
+  schoolHolidayRanges, SCHOOL_ZONES, SchoolZone, CLOSED_VENTILATION_FRACTION,
 } from '../../core/usage-profiles';
 
 interface BuildingSummary {
@@ -307,12 +307,38 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   planningRaw = '';
   planning = signal<PlanningEntry[]>([]);
   planningError = signal('');
+  // Lot AG — planning des jours de FERMETURE. Le calendrier d'occupation ne
+  // pilotait que les consignes de thermostat : un bureau en hors gel le dimanche
+  // restait ventilé au débit d'occupation et recevait ses apports internes.
+  planningFermeRaw = '';
+  planningFerme = signal<PlanningEntry[]>([]);
+  planningFermeError = signal('');
+
+  parsePlanningFerme(): void {
+    const parsed = this.parsePlanningText(this.planningFermeRaw);
+    this.planningFermeError.set(parsed.error);
+    this.planningFerme.set(parsed.entries);
+  }
+
+  /** Déduit le planning de fermeture du planning d'occupation : ventilation
+   * réduite aux infiltrations, apports internes nuls (personne n'est là), volets
+   * inchangés. Point de départ modifiable, pas une règle imposée. */
+  derivePlanningFerme(): void {
+    this.planningFermeRaw = this.planning()
+      .map(e => [
+        Math.round(e.debit_vent_m3h * CLOSED_VENTILATION_FRACTION * 10) / 10,
+        e.eta_recup_vent, 0, e.volets_fermes ? 1 : 0,
+      ].join(','))
+      .join('\n');
+    this.parsePlanningFerme();
+  }
   heureDebut = 0;
 
-  parsePlanning(): void {
-    this.planningError.set('');
-    const text = this.planningRaw.trim();
-    if (!text) { this.planning.set([]); return; }
+  /** Parsing partagé par les deux plannings (occupation et fermeture, Lot AG) :
+   * ils ont exactement le même format, les dupliquer les ferait diverger. */
+  private parsePlanningText(raw: string): { entries: PlanningEntry[]; error: string } {
+    const text = raw.trim();
+    if (!text) return { entries: [], error: '' };
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
     const entries: PlanningEntry[] = [];
     for (const line of lines) {
@@ -328,12 +354,16 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
       const volets_fermes = voletsCell === '1' || voletsCell === 'true';
       entries.push({ debit_vent_m3h, eta_recup_vent, apports_internes_w, volets_fermes });
     }
-    if (entries.length !== 24) {
-      this.planningError.set(
-        `24 lignes attendues (une par heure de la journée) — ${entries.length} ligne(s) valide(s) trouvée(s).`,
-      );
-    }
-    this.planning.set(entries);
+    const error = entries.length === 24
+      ? ''
+      : `24 lignes attendues (une par heure de la journée) — ${entries.length} ligne(s) valide(s) trouvée(s).`;
+    return { entries, error };
+  }
+
+  parsePlanning(): void {
+    const parsed = this.parsePlanningText(this.planningRaw);
+    this.planningError.set(parsed.error);
+    this.planning.set(parsed.entries);
   }
 
   loadPlanningExample(): void {
@@ -663,9 +693,19 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     // exacte (longueur identique — sinon, décalage silencieux, on ignore le
     // calendrier périmé plutôt que d'envoyer des consignes désalignées).
     const calendar = this.thermostatSetpoints();
-    const weatherPayload = (this.interiorMode === 'thermostat' && calendar && calendar.length === this.weather().length)
+    let weatherPayload = (this.interiorMode === 'thermostat' && calendar && calendar.length === this.weather().length)
       ? this.weather().map((w, i) => ({ ...w, t_min: calendar[i].t_min, t_max: calendar[i].t_max }))
       : this.weather();
+
+    // Lot AG : occupation par heure, résolue depuis le MÊME calendrier que les
+    // consignes. Envoyée dès qu'un profil d'usage est choisi, indépendamment du
+    // mode intérieur — le serveur ne s'en sert que si un planning de fermeture
+    // l'accompagne.
+    const profile = this.selectedUsageProfile;
+    if (profile && this.planningFerme().length === 24) {
+      const occupancy = computeOccupancy(profile, this.occupationCalendar, this.absoluteHours());
+      weatherPayload = weatherPayload.map((w, i) => ({ ...w, occupied: occupancy[i] }));
+    }
 
     const payload: Record<string, unknown> = {
       dx_max: this.dxMax, h_e: this.hE, h_e_dynamic: this.hEDynamic, interior, t_init: this.tInit,
@@ -679,6 +719,12 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     if (this.usePlanning && this.planning().length === 24) {
       payload['planning'] = this.planning();
       payload['heure_debut'] = this.heureDebut;
+      // Lot AG : seulement s'il est complet ET qu'un profil d'usage définit
+      // quand le bâtiment est fermé — sinon `occupied` ne serait jamais posé et
+      // le planning de fermeture ne s'appliquerait à aucune heure.
+      if (this.planningFerme().length === 24 && this.selectedUsageProfile) {
+        payload['planning_ferme'] = this.planningFerme();
+      }
     }
 
     // Capturé au moment du lancement (pas relu depuis weatherSourceLabel() dans le
