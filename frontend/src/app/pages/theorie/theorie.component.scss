@@ -263,6 +263,22 @@ figcaption {
   margin-top: var(--space-3);
 }
 
+.callout-heading {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.callout ul {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--text);
+
+  li { margin-bottom: var(--space-2); }
+}
+
 .table-wrap {
   overflow-x: auto;
   margin: var(--space-4) 0;

@@ -32,8 +32,9 @@
         <li><a href="#sec-temps"><span class="n">09</span> Discrétisation temporelle</a></li>
         <li><a href="#sec-algo"><span class="n">10</span> Algorithme pas à pas</a></li>
         <li><a href="#sec-bilan"><span class="n">11</span> Bilan énergétique</a></li>
-        <li><a href="#sec-extensions"><span class="n">12</span> Extensions possibles</a></li>
-        <li><a href="#sec-notations"><span class="n">13</span> Table des notations</a></li>
+        <li><a href="#sec-batiment"><span class="n">12</span> Du modèle 1D au bâtiment complet</a></li>
+        <li><a href="#sec-extensions"><span class="n">13</span> Extensions possibles</a></li>
+        <li><a href="#sec-notations"><span class="n">14</span> Table des notations</a></li>
       </ol>
     </nav>
 
@@ -53,8 +54,9 @@
             <li><a href="#sec-temps"><span class="n">09</span> Discrétisation temporelle</a></li>
             <li><a href="#sec-algo"><span class="n">10</span> Algorithme pas à pas</a></li>
             <li><a href="#sec-bilan"><span class="n">11</span> Bilan énergétique</a></li>
-            <li><a href="#sec-extensions"><span class="n">12</span> Extensions possibles</a></li>
-            <li><a href="#sec-notations"><span class="n">13</span> Table des notations</a></li>
+            <li><a href="#sec-batiment"><span class="n">12</span> Du modèle 1D au bâtiment complet</a></li>
+            <li><a href="#sec-extensions"><span class="n">13</span> Extensions possibles</a></li>
+            <li><a href="#sec-notations"><span class="n">14</span> Table des notations</a></li>
           </ol>
         </nav>
       </details>
@@ -91,24 +93,57 @@
           <p>
             Le solveur bâtiment 3D (généralisation multi-triangle du même modèle : chaque triangle
             de l'enveloppe est sa propre paroi 1D, tous couplés à un même nœud d'air partagé) ajoute
-            deux termes supplémentaires sur ce nœud d'air, absents du bilan 1D d'une paroi isolée :
-            le renouvellement d'air (infiltrations/VMC) et les <strong>apports internes</strong>
-            (occupants, éclairage, électroménager) — une puissance <span class="sym">Q_int</span>
-            (W) injectée directement, <span class="sym">F[air] += Q_int</span>, sans dépendre de la
-            géométrie d'un triangle en particulier. Hypothèse assumée : une valeur
-            <strong>constante sur toute la durée du calcul</strong>, alors qu'un logement réel a des
-            apports qui varient dans la journée (présence, usages) — un profil horaire est une
-            extension possible (section 12).
+            plusieurs termes sur ce nœud d'air, absents du bilan 1D d'une paroi isolée : le
+            renouvellement d'air, les apports internes, le cadre de fenêtre, le rayonnement transmis
+            par les vitrages, et le chauffage/la climatisation. La <strong>section 12</strong> les
+            recense un par un — où chacun s'insère et sous quelle hypothèse.
           </p>
         </div>
         <div class="callout">
-          <span class="callout-label">Hors périmètre de ce document</span>
+          <span class="callout-label">Ce que ce modèle ne fait pas</span>
           <p>
-            Échanges grande longueur d'onde (infrarouge) avec la voûte céleste, rayonnement solaire
-            réfléchi par le sol (albédo), réflexions multiples entre couches vitrées successives,
-            effets 2D/3D (ponts thermiques, angles), couplage simultané avec plusieurs parois d'un
-            même local. Ces raffinements sont mentionnés en section 12 comme extensions possibles —
-            ils ne changent pas la structure du modèle, seulement le contenu de certains termes.
+            Trois catégories, volontairement distinguées : ce qui est <strong>hors périmètre</strong>
+            (et le restera sans refonte), ce qui est une <strong>approximation quantifiée</strong>
+            (le terme existe, sa valeur est simplifiée), et ce qui est une
+            <strong>extension identifiée</strong> (chiffrable, pas encore faite). Un résultat produit
+            par cet outil ne peut se lire sans cette liste.
+          </p>
+
+          <p class="callout-heading">1. Hors périmètre — demanderait une autre structure de modèle</p>
+          <ul>
+            <li><strong>Ponts thermiques, effets 2D/3D</strong> — hors de portée d'un modèle 1D par nature.</li>
+            <li><strong>Multi-zone</strong> — un seul nœud d'air pour tout le bâtiment : ni pièce plus froide qu'une autre, ni stratification, ni paroi de refend.</li>
+            <li><strong>Parois mitoyennes</strong> — un triangle est soit face à l'air extérieur, soit au contact du sol. Le mur partagé avec un bâtiment voisin chauffé déperd donc comme une façade extérieure : les besoins d'une maison de ville ou d'un appartement sont <strong>surestimés</strong>, d'autant plus que la part mitoyenne est grande. Contournement possible sans changer le modèle : affecter à ces triangles une paroi très isolante.</li>
+            <li><strong>Humidité</strong> — aucune chaleur latente (ni ventilation, ni occupants), pas de condensation, pas de transfert de vapeur dans les parois.</li>
+            <li><strong>Inertie intérieure sans résistance</strong> — <span class="sym">C_air,int</span> représente air, mobilier, cloisons et planchers intermédiaires, mais est branchée <em>directement</em> sur le nœud d'air : cette masse réagit instantanément, alors qu'une inertie réelle est séparée de l'air par <span class="sym">1/hᵢ</span> puis diffuse lentement. L'amortissement rapide est surestimé, le déphasage sous-estimé.</li>
+          </ul>
+
+          <p class="callout-heading">2. Approximations quantifiées — le terme existe, sa valeur est simplifiée</p>
+          <ul>
+            <li><strong><span class="sym">hₑ</span> englobe convection ET rayonnement</strong> (corrélation de Jürges). Conséquence directe : <strong>une surface ne peut jamais descendre sous la température de l'air</strong>. Le refroidissement radiatif nocturne par ciel clair — une toiture réelle descend 3 à 6 K sous <span class="sym">T_ext</span> — est structurellement impossible ici, ce qui sous-estime les déperditions nocturnes et surestime la surchauffe d'été.</li>
+            <li><strong><span class="sym">hₑ</span> identique sur toutes les façades</strong>, quelle que soit leur orientation par rapport au vent — alors qu'un facteur 2 entre face au vent et sous le vent est courant.</li>
+            <li><strong>Propriétés optiques à incidence normale</strong> — <span class="sym">τ, r, α</span> sont constants. Sur un vitrage réel, <span class="sym">τ</span> s'effondre au-delà de ~60° (≈ 0,87 à 0° → ≈ 0,4 à 75°) : les apports solaires par les vitrages sont <strong>surestimés</strong>, surtout en façade est/ouest le matin et le soir.</li>
+            <li><strong>Rayonnement transmis instantané</strong> — ce qui traverse un vitrage chauffe l'air immédiatement et intégralement. Dans un local réel il frappe le sol et les parois, y est stocké, puis restitué avec plusieurs heures de déphasage. C'est la simplification la plus lourde de conséquence sur la dynamique jour/nuit d'un bâtiment vitré.</li>
+            <li><strong>Diffus isotrope</strong> — ni renforcement circumsolaire, ni bande d'horizon (modèles de Hay/Perez) : 5 à 15 % d'écart usuel sur une façade verticale.</li>
+            <li><strong>Obstacles parfaitement noirs</strong> — un bâtiment voisin retire sa part de ciel sans rien réémettre ni réfléchir. Combiné à l'albédo absent, les apports diffus sont <strong>sous-estimés en milieu dense</strong> — précisément le cas d'usage de la génération automatique d'environnement.</li>
+            <li><strong>Ombrage précalculé discrétisé à 15°</strong> en azimut et en élévation : un obstacle fin fait basculer une heure entière de « ombré » à « ensoleillé », et tout soleil sous 7,5° d'élévation est évalué à 0°, donc presque toujours bloqué. Le mode « temps réel » relance un vrai lancer de rayons à l'angle exact de chaque heure — à utiliser dès que l'ombrage est déterminant.</li>
+            <li><strong>Sol : source à température constante</strong> — <span class="sym">t_ground</span> ne varie pas dans l'année et la terre n'a aucune inertie. Sa résistance <span class="sym">r_ground</span> est un paramètre saisi, pas un calcul de géométrie (ISO 13370).</li>
+            <li><strong>Végétation à transmittance constante</strong> — un arbre à feuilles caduques est modélisé en feuilles toute l'année, ce qui <strong>surestime l'ombrage hivernal</strong>. Sa hauteur est déduite de son type : aucune des sources cartographiques n'en fournit de fiable.</li>
+          </ul>
+
+          <p class="callout-heading">3. Extensions identifiées — chiffrables, pas encore faites</p>
+          <ul>
+            <li><strong>Infrarouge vers la voûte céleste</strong>, <strong>albédo du sol</strong>, <strong>réflexions multiples entre couches vitrées</strong> — voir section 13, qui indique où chacune s'insérerait.</li>
+            <li><strong>Saisonnalité de la végétation</strong> — les transmittances « sans feuilles » sont déjà tabulées, il manque la bascule.</li>
+          </ul>
+
+          <p class="callout-heading">Et ce que les résultats ne sont pas</p>
+          <p>
+            Les kWh affichés sont des <strong>besoins</strong>, pas des consommations : l'énergie à
+            fournir à l'air du local, avec un thermostat idéal — puissance illimitée, réaction
+            instantanée. Aucun rendement de génération, d'émission ou de distribution, aucun COP,
+            ni eau chaude sanitaire, ni éclairage, ni auxiliaires. La comparaison avec un seuil
+            réglementaire ne peut être qu'indicative.
           </p>
         </div>
       </section>
@@ -771,8 +806,104 @@
         </div>
       </section>
 
+      <section class="chapter" id="sec-batiment">
+        <p class="chapter-eyebrow">12 — Du modèle 1D au bâtiment complet</p>
+        <h2>Tous les termes ajoutés, et où ils s'insèrent</h2>
+        <div class="prose">
+          <p>
+            Les sections précédentes décrivent <em class="term">une</em> paroi. Le solveur bâtiment
+            généralise le même modèle : chaque triangle de l'enveloppe est sa propre paroi 1D, avec
+            ses matrices <span class="sym">[K]</span> et <span class="sym">[C]</span> par m²
+            multipliées par son aire, et tous couplent leur nœud intérieur au
+            <strong>même nœud d'air</strong>. Aucune des extensions ci-dessous n'a demandé de
+            changer cette structure : chacune ajoute un terme à une matrice ou à un vecteur déjà en
+            place. C'est ce qui les rend lisibles d'un coup d'œil — et vérifiables, puisque la somme
+            de tous ces flux doit égaler la variation d'énergie stockée à chaque pas (section 11).
+          </p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Terme</th><th>Où il entre</th><th>Hypothèse assumée</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Renouvellement d'air</strong><br />infiltrations, VMC</td>
+                <td>Conductance <span class="sym">g_vent</span> sur la diagonale du nœud d'air (<span class="sym">[K]</span>) et <span class="sym">g_vent·T_ext</span> dans <span class="sym">&#123;F&#125;</span></td>
+                <td>Débit et rendement de récupération donnés ; air neuf à <span class="sym">T_ext</span>, sans chaleur latente</td>
+              </tr>
+              <tr>
+                <td><strong>Apports internes</strong><br />occupants, éclairage, appareils</td>
+                <td>Puissance directe sur le nœud d'air, <span class="sym">F[air] += Q_int</span></td>
+                <td>Entièrement convectifs et instantanés — aucune part rayonnée vers les parois</td>
+              </tr>
+              <tr>
+                <td><strong>Planning horaire</strong></td>
+                <td>Remplace heure par heure <span class="sym">g_vent</span> et <span class="sym">Q_int</span></td>
+                <td>Un jour type de 24 h répété — pas de distinction semaine/week-end à ce niveau</td>
+              </tr>
+              <tr>
+                <td><strong>Calendrier d'occupation</strong></td>
+                <td>Consignes de thermostat propres à chaque heure, dans le choix du second membre</td>
+                <td>Profils d'usage indicatifs ; jours ouvrés et vacances donnés par l'utilisateur</td>
+              </tr>
+              <tr>
+                <td><strong>Cadre de fenêtre</strong></td>
+                <td>Conductance directe extérieur → air, comme <span class="sym">g_vent</span> mais par triangle ; l'aire du vitrage est réduite d'autant</td>
+                <td>Aucun comportement optique, capacité thermique négligée, pas de pont thermique de liaison</td>
+              </tr>
+              <tr>
+                <td><strong>Rayonnement transmis</strong><br />à travers un vitrage</td>
+                <td>Ce qui traverse toutes les couches sans rencontrer d'opaque est ajouté au nœud d'air</td>
+                <td>Instantané et intégral : ni absorption par les parois intérieures, ni stockage, ni ressortie</td>
+              </tr>
+              <tr>
+                <td><strong>Contact au sol</strong></td>
+                <td>Le nœud extérieur échange avec <span class="sym">t_ground</span> à travers <span class="sym">1/r_ground</span> — ni film convectif, ni vent</td>
+                <td>Sol à température constante et sans inertie ; <span class="sym">r_ground</span> saisi, pas dérivé de la géométrie</td>
+              </tr>
+              <tr>
+                <td><strong>Occultations mobiles</strong><br />volets, stores</td>
+                <td>Résistance ajoutée en série avec <span class="sym">hₑ</span>, et réduction de <span class="sym">E_dir</span>/<span class="sym">E_dif</span></td>
+                <td>Toujours entièrement ouvert ou fermé ; un seul planning pour tous les dispositifs</td>
+              </tr>
+              <tr>
+                <td><strong><span class="sym">hₑ</span> dynamique</strong> (vent)</td>
+                <td>Recalculé heure par heure depuis la vitesse du vent, dans <span class="sym">[K]</span></td>
+                <td>Une seule valeur pour tout le bâtiment : l'orientation par rapport au vent n'est pas modélisée</td>
+              </tr>
+              <tr>
+                <td><strong><span class="sym">hᵢ</span> par orientation</strong></td>
+                <td>Dérivé de l'inclinaison de chaque triangle (ISO 6946 : mur, plafond, plancher)</td>
+                <td>Classé par type d'élément, pas par le signe instantané du flux — convention de la norme</td>
+              </tr>
+              <tr>
+                <td><strong>Ombrage et environnement</strong></td>
+                <td>Fraction de <span class="sym">E_dir</span> reçue par triangle, et facteur de vue du ciel corrigé de l'occlusion réelle</td>
+                <td>Obstacles noirs ; grille à 15° en mode précalculé ; le bâtiment étudié est écarté de ses propres obstacles</td>
+              </tr>
+              <tr>
+                <td><strong>Végétation</strong></td>
+                <td>Occulteur qui <em>atténue</em> : la fraction transmise multiplie <span class="sym">E_dir</span> et le poids de chaque direction du ciel</td>
+                <td>Transmittance constante dans l'année ; hauteur déduite du type ; couronne approchée par un prisme</td>
+              </tr>
+              <tr>
+                <td><strong>Relief du terrain</strong></td>
+                <td>Maillage d'obstacles supplémentaire, traité exactement comme un bâtiment</td>
+                <td>Occultation seulement — n'apporte <strong>pas</strong> la réflexion solaire du sol ; aplani sous l'emprise du bâtiment</td>
+              </tr>
+              <tr>
+                <td><strong>Chauffage / climatisation</strong></td>
+                <td>Nœud d'air forcé à la consigne ; la puissance est le résidu de sa ligne</td>
+                <td>Thermostat idéal : puissance illimitée, réaction instantanée, aucun rendement</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="chapter" id="sec-extensions">
-        <p class="chapter-eyebrow">12 — Extensions possibles</p>
+        <p class="chapter-eyebrow">13 — Extensions possibles</p>
         <h2>Ce que la structure du modèle permet d'ajouter plus tard</h2>
         <div class="prose">
           <p>
@@ -784,13 +915,14 @@
             <li><strong>Albédo du sol</strong> — troisième composante de <span class="sym">E_glo</span>, proportionnelle à l'éclairement horizontal global et au facteur de vue du sol (<span class="sym">1 − F_ciel</span>).</li>
             <li><strong>Réflexions multiples entre couches vitrées</strong> — pour un vitrage multiple, la méthode couche-par-couche en section 05 ignore les réflexions internes répétées entre lames ; un traitement type ISO 15099 les prendrait en compte au prix d'un système optique résolu à part, dont la sortie reste la même grandeur <span class="sym">E_abs,j</span> par couche.</li>
             <li><strong>Ponts thermiques (2D/3D)</strong> — hors de portée d'un modèle 1D par nature ; nécessiterait un maillage surfacique ou volumique.</li>
-            <li><strong>Couplage multizone</strong> — en cas 2, le nœud d'air intérieur ne voit ici qu'une seule paroi ; un bâtiment réel somme les contributions <span class="sym">hᵢ·(Tₙ − T_air,int)</span> de chaque paroi du local sur la même ligne du système.</li>
+            <li><strong>Saisonnalité de la végétation</strong> — les transmittances « feuilles absentes » sont déjà tabulées par type ; il manque la bascule en fonction de la date, qui suppose de faire entrer une notion de calendrier là où le solveur ne connaît aujourd'hui que des heures.</li>
+            <li><strong>Couplage multizone</strong> — la sommation des contributions <span class="sym">hᵢ·(Tₙ − T_air,int)</span> de toutes les parois sur une même ligne du système est <em>déjà faite</em> par le solveur bâtiment (section 12). Ce qui reste une limite, c'est le <strong>mono-zone</strong> : un unique nœud d'air pour tout le bâtiment, donc ni pièce plus froide qu'une autre, ni stratification, ni paroi de refend. Multiplier les nœuds d'air supposerait de découper le bâtiment en zones et d'introduire un type de paroi qui n'existe pas ici — un refend, sans face extérieure.</li>
           </ul>
         </div>
       </section>
 
       <section class="chapter" id="sec-notations">
-        <p class="chapter-eyebrow">13 — Table des notations</p>
+        <p class="chapter-eyebrow">14 — Table des notations</p>
         <h2>Récapitulatif des symboles</h2>
         <div class="table-wrap">
           <table>
