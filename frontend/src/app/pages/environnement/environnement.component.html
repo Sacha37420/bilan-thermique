@@ -66,11 +66,11 @@
     </div>
     <label class="inline-check">
       <input type="checkbox" [(ngModel)]="genVegetation" name="genVegetation" />
-      <span>Arbres et massifs (transparence mesurée)</span>
+      <span>Arbres et massifs relevés par le LiDAR (position, hauteur, houppier et transparence mesurés)</span>
     </label>
     <label class="inline-check">
       <input type="checkbox" [(ngModel)]="genTerrain" name="genTerrain" />
-      <span>Relief du terrain</span>
+      <span>Relief du terrain (MNT LiDAR)</span>
     </label>
 
     <button type="button" class="btn-primary" (click)="generate()" [disabled]="generating()">
