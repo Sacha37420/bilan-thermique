@@ -1,11 +1,11 @@
-import { Component, OnInit, ViewChild, inject, signal } from '@angular/core';
+import { Component, OnInit, ViewChild, WritableSignal, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { Building, BuildingCandidate, WorkingTriangle } from '../../core/building.types';
+import { Building, EnvironmentMesh, EnvironmentObject, Triangle, WorkingTriangle } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
-import { BuildingSearchComponent } from '../../components/building-search/building-search.component';
+import { EnvSceneComponent } from '../../components/env-scene/env-scene.component';
 import { VENTILATION_PROFILES, VentilationProfile } from '../../core/ventilation-profiles';
 import {
   USAGE_PROFILES, UsageProfile, UsageProfileId,
@@ -43,7 +43,7 @@ const UNASSIGNED_COLOR = '--warning';
 @Component({
   selector: 'app-mode-simplifie',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, RouterLink, MeshViewerComponent, BuildingSearchComponent],
+  imports: [FormsModule, DecimalPipe, RouterLink, MeshViewerComponent, EnvSceneComponent],
   templateUrl: './mode-simplifie.component.html',
   styleUrl: './mode-simplifie.component.scss',
 })
@@ -52,78 +52,115 @@ export class ModeSimplifieComponent implements OnInit {
 
   @ViewChild(MeshViewerComponent) viewer?: MeshViewerComponent;
 
-  step = signal<'recherche' | 'creation' | 'configuration' | 'environnement' | 'calcul' | 'termine'>('recherche');
+  step = signal<'quartier' | 'selection' | 'configuration' | 'environnement' | 'calcul' | 'termine'>('quartier');
 
-  // ── Étape 1 : recherche ────────────────────────────────────────────────
-  // Formulaire et appel réseau délégués au composant partagé (Lot Y,
-  // components/building-search) — utilisé aussi par la page Bâtiment. Ce
-  // composant n'écrit rien : il émet le candidat choisi, cette page décide.
-  chosen = signal<BuildingCandidate | null>(null);
+  // ── Étape 1 : le quartier en 3D (Lot AI) ───────────────────────────────
+  // Plutôt que de chercher UN candidat BD TOPO extrudé à toit plat, on
+  // reconstruit tout le quartier (LiDAR HD × BD TOPO : toitures relevées,
+  // arbres, relief) et l'utilisateur y désigne son bâtiment en cliquant.
+  genLat = 47.3445;
+  genLon = 0.6613;
+  envRadius = 120;
+  includeVegetation = true;
+  environments = signal<{ id: number; name: string; n_objects: number }[]>([]);
+  reuseEnvId: number | null = null;
+  quartierBusy = signal(false);
+  quartierStatus = signal('');
+  quartierError = signal('');
+  env = signal<EnvironmentMesh | null>(null);
 
-  get selectedCandidate(): BuildingCandidate | null {
-    return this.chosen();
+  /** Point du monde réel du bâtiment (météo) : l'origine de l'environnement. */
+  get site(): { lat: number; lon: number } | null {
+    const e = this.env();
+    return e && e.georef_lat !== null && e.georef_lon !== null ? { lat: e.georef_lat, lon: e.georef_lon } : null;
   }
 
-  /** Nom proposé par défaut à l'étape 2. Les coordonnées plutôt que la distance
-   * ou la source : `Building.name` est UNIQUE côté serveur (BuildingSerializer.
-   * validate_name), et deux bâtiments cherchés depuis deux points différents
-   * doivent pouvoir coexister sans que l'utilisateur ait à renommer. */
-  private defaultNameFor(c: BuildingCandidate): string {
-    return `Bâtiment ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`;
+  generateQuartier(): void {
+    if (this.quartierBusy()) return;
+    this.quartierBusy.set(true);
+    this.quartierError.set('');
+    this.quartierStatus.set('Reconstruction du quartier (LiDAR HD × BD TOPO)…');
+    this.api.generateEnvironment({
+      lat: this.genLat, lon: this.genLon, radius_m: this.envRadius,
+      include_vegetation: this.includeVegetation, include_terrain: true,
+      name: `Quartier ${this.genLat.toFixed(5)}, ${this.genLon.toFixed(5)}`,
+    }).subscribe({
+      next: (res) => this.poll((res as Job).id, this.quartierStatus,
+        (job) => this.openEnvironment((job.result as unknown as { environment_id: number }).environment_id),
+        (m) => { this.quartierBusy.set(false); this.quartierError.set(m); }),
+      error: (err) => {
+        this.quartierBusy.set(false);
+        const e = err?.error ?? {};
+        this.quartierError.set(e.radius_m?.[0] ?? e.lat?.[0] ?? e.lon?.[0] ?? e.detail ?? 'Échec du lancement.');
+      },
+    });
   }
 
-  onCandidateChosen(candidate: BuildingCandidate): void {
-    // Le nom proposé ne doit jamais écraser une saisie de l'utilisateur : on ne
-    // le (re)pose que si le champ est vide, ou s'il contient encore le nom
-    // proposé pour le candidat précédent (cas « Changer de bâtiment » sans
-    // avoir renommé).
-    const previous = this.chosen();
-    const current = this.buildingName.trim();
-    if (!current || (previous && current === this.defaultNameFor(previous))) {
-      this.buildingName = this.defaultNameFor(candidate);
+  openEnvironment(id: number): void {
+    this.quartierBusy.set(true);
+    this.quartierStatus.set('Chargement de la vue 3D…');
+    this.api.getEnvironment(id).subscribe({
+      next: (res) => {
+        this.env.set(res as EnvironmentMesh);
+        this.selectedIds.set([]);
+        this.quartierBusy.set(false);
+        this.quartierStatus.set('');
+        this.step.set('selection');
+      },
+      error: () => { this.quartierBusy.set(false); this.quartierError.set("Impossible d'ouvrir cet environnement."); },
+    });
+  }
+
+  backToQuartier(): void {
+    if (this.step() !== 'selection') return;
+    this.step.set('quartier');
+  }
+
+  // ── Étape 2 : choisir le bâtiment dans la vue 3D ───────────────────────
+  // Un clic ajoute ou retire un bâtiment : plusieurs emprises BD TOPO qui ne
+  // forment qu'un seul bâtiment réel sont réunies en UNE enveloppe côté
+  // serveur (murs intérieurs supprimés — voir observed_env.merge_objects).
+  selectedIds = signal<number[]>([]);
+
+  get selectedBuildings(): EnvironmentObject[] {
+    const ids = this.selectedIds();
+    return (this.env()?.objects ?? []).filter(o => ids.includes(o.id));
+  }
+
+  onObjectClick(obj: EnvironmentObject): void {
+    if (this.step() !== 'selection' || obj.kind !== 'building' || obj.status === 'studied') return;
+    const ids = this.selectedIds();
+    this.selectedIds.set(ids.includes(obj.id) ? ids.filter(i => i !== obj.id) : [...ids, obj.id]);
+    if (!this.buildingName.trim() || this.buildingName === this.autoName) {
+      this.autoName = this.proposedName();
+      this.buildingName = this.autoName;
     }
-
-    this.chosen.set(candidate);
-    this.createError.set('');
-    // Sans ce passage à 'creation', l'étape 2 reste masquée
-    // (`@if (selectedCandidate && step() !== 'recherche')`) et cliquer
-    // « Choisir » n'a aucun effet visible : c'est très exactement le bug qui a
-    // rendu tout le mode simplifié inutilisable de sa livraison (2026-08-08) au
-    // Lot W — voir to_do_bilan_thermique.md.
-    this.step.set('creation');
   }
 
-  /** Revenir au choix du bâtiment sans relancer la recherche réseau (les
-   * candidats déjà extrudés sont conservés par le composant de recherche).
-   * Volontairement limité à l'étape 'creation' : au-delà, le bâtiment existe
-   * côté serveur et changer de candidat le laisserait orphelin. */
-  backToSearch(): void {
-    if (this.step() !== 'creation') return;
-    this.createError.set('');
-    this.step.set('recherche');
+  private autoName = '';
+
+  private proposedName(): string {
+    const b = this.selectedBuildings;
+    if (!b.length) return '';
+    const label = b.length > 1 ? `${b.length} bâtiments réunis` : (b[0].label || 'Bâtiment');
+    return `${label} — ${this.env()?.name ?? ''}`.slice(0, 140);
   }
 
-  // ── Étape 2 : création + subdivision fine ───────────────────────────────
   buildingName = '';
   // Défaut vérifié en réel (2026-08-08) : le raffinement (geometry.refine_envelope)
   // propage la subdivision à tout le maillage connecté (murs/toiture/sol partagent
-  // des arêtes dans un volume extrudé étanche) — pas de raffinement "murs
-  // seulement". 0,6 m produisait 16384 triangles pour un petit pavillon (bien
-  // au-delà de MAX_TOTAL_DOF du solveur une fois chaque triangle maillé en
-  // profondeur) ; 2,0 m donne ~128 triangles/mur, largement assez fin pour un
-  // taux de vitrage à quelques % près, avec une marge confortable.
+  // des arêtes dans un volume étanche) — pas de raffinement "murs seulement".
+  // 2,0 m donne ~128 triangles/mur, largement assez fin pour un taux de vitrage
+  // à quelques % près, avec une marge confortable.
   maxEdgeLength = 2.0;
   creating = signal(false);
   createError = signal('');
   buildingId = signal<number | null>(null);
+  materials = signal<{ basis: string; assigned: { wall: string | null; roof: string | null; floor: string | null } } | null>(null);
 
   // Renouvellement d'air (entrée simplifiée) — un unique profil catalogue
-  // (frontend/src/app/core/ventilation-profiles.ts, déjà utilisé par Calcul 3D)
-  // appliqué au volume RÉEL du bâtiment trouvé (empreinte × hauteur, exact —
-  // pas une estimation manuelle comme sur Calcul 3D). Optionnel : sans profil
-  // choisi, aucune suggestion n'est envoyée, comme pour tout bâtiment créé
-  // sans passer par ce mode. Reste une SUGGESTION, jamais utilisée telle
-  // quelle par le solveur — voir Building.suggested_debit_vent_m3h.
+  // appliqué au volume RÉEL du bâtiment, calculé sur son enveloppe une fois
+  // créée (voir measureEnvelope). Reste une SUGGESTION pour Calcul 3D.
   ventilationProfiles = VENTILATION_PROFILES;
   selectedVentProfileId: string | null = null;
 
@@ -131,23 +168,14 @@ export class ModeSimplifieComponent implements OnInit {
     return this.ventilationProfiles.find(p => p.id === this.selectedVentProfileId) ?? null;
   }
 
-  private footprintAreaM2(c: BuildingCandidate): number {
-    let area = 0;
-    for (const t of c.triangles) {
-      if (t.group !== 'sol') continue;
-      const [i, j, k] = t.v;
-      const a = c.vertices[i], b = c.vertices[j], p = c.vertices[k];
-      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-      const vx = p[0] - a[0], vy = p[1] - a[1], vz = p[2] - a[2];
-      const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
-      area += 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
-    }
-    return area;
-  }
+  /** Mesurés sur l'enveloppe créée : emprise au sol (aire des triangles `sol`)
+   * et volume EXACT d'un volume 2,5D, Σ aire projetée × hauteur au-dessus du
+   * plancher de chaque triangle de toiture — juste aussi pour un toit en pente. */
+  footprintM2 = signal<number | null>(null);
+  volumeM3 = signal<number | null>(null);
 
   get estimatedVolumeM3(): number | null {
-    const c = this.selectedCandidate;
-    return c ? Math.round(this.footprintAreaM2(c) * c.height_m) : null;
+    return this.volumeM3();
   }
 
   get suggestedDebitVentM3h(): number | null {
@@ -179,40 +207,103 @@ export class ModeSimplifieComponent implements OnInit {
       next: (models) => this.paroiModels.set(models as ParoiModelSummary[]),
       error: () => {},
     });
+    this.api.getEnvironments().subscribe({
+      next: (envs) => this.environments.set(
+        (envs as { id: number; name: string; n_objects: number }[]).filter(e => e.n_objects > 0)),
+      error: () => {},
+    });
   }
 
-  createAndRefine(): void {
-    const c = this.selectedCandidate;
-    if (!c || !this.buildingName.trim()) return;
+  createFromSelection(): void {
+    const e = this.env();
+    const ids = this.selectedIds();
+    if (!e || !ids.length || !this.buildingName.trim() || this.creating()) return;
     this.creating.set(true);
     this.createError.set('');
-
-    const payload = {
-      name: this.buildingName.trim(),
-      vertices: c.vertices,
-      triangles: c.triangles.map(t => ({ v: t.v, group: t.group, paroi_model_id: null, boundary: t.boundary })),
-      georef_lat: c.lat, georef_lon: c.lon, georef_north_offset_deg: 0,
-      suggested_debit_vent_m3h: this.suggestedDebitVentM3h,
-      suggested_eta_recup_vent: this.suggestedEtaRecupVent,
-    };
-
-    this.api.createBuilding(payload).subscribe({
+    this.api.studyEnvironmentObjects(e.id, ids, this.buildingName.trim()).subscribe({
       next: (res) => {
-        const building = res as Building;
-        this.buildingId.set(building.id);
-        this.api.refineBuildingMesh(building.id, this.maxEdgeLength).subscribe({
-          next: () => this.loadRefinedBuilding(building.id),
-          error: (err) => {
-            this.creating.set(false);
-            this.createError.set(err?.error?.detail ?? "Échec de la subdivision — augmentez la taille de maille.");
-          },
-        });
+        const r = res as { building: Building; environment: EnvironmentMesh;
+          materials: { basis: string; assigned: { wall: string | null; roof: string | null; floor: string | null } } | null };
+        this.buildingId.set(r.building.id);
+        this.buildingName = r.building.name;
+        this.env.set(r.environment);
+        this.materials.set(r.materials);
+        this.refineWithFallback(r.building.id, this.maxEdgeLength);
       },
       error: (err) => {
         this.creating.set(false);
-        this.createError.set(err?.error?.name?.[0] ?? "Échec de la création du bâtiment.");
+        this.createError.set(err?.error?.detail ?? err?.error?.name?.[0] ?? 'Échec de la création du bâtiment.');
       },
     });
+  }
+
+  // Réglage commun à toutes les façades exposées (hors toiture, sol et murs
+  // mitoyens) : une fusion de bâtiments compte vite 30 parois et plus, les
+  // régler une à une était la principale difficulté de ce mode.
+  bulkWallModelId: number | null = null;
+  bulkGlazingId: number | null = null;
+  bulkTaux = 20;
+
+  get exposedWallGroups(): string[] {
+    return this.groups().filter(g => g.startsWith('mur_') && !g.endsWith('_mitoyen'));
+  }
+
+  applyToAllWalls(): void {
+    for (const g of this.exposedWallGroups) {
+      const cfg = this.groupConfig[g];
+      if (this.bulkWallModelId !== null) cfg.opaqueModelId = this.bulkWallModelId;
+      cfg.glazingModelId = this.bulkGlazingId;
+      cfg.tauxVitragePct = this.bulkTaux;
+    }
+    this.generateAssignment();
+  }
+
+  refineNote = signal('');
+
+  /** Subdivision à la maille demandée ; si le bâtiment est trop grand pour la
+   * limite de triangles (un collectif de 70 m ne passe pas à 2 m), la maille
+   * est élargie automatiquement par paliers plutôt que de renvoyer
+   * l'utilisateur régler lui-même un paramètre qu'il ne connaît pas. */
+  private refineWithFallback(id: number, edge: number): void {
+    this.api.refineBuildingMesh(id, edge).subscribe({
+      next: () => {
+        this.refineNote.set(edge > this.maxEdgeLength
+          ? `Bâtiment trop grand pour une maille de ${this.maxEdgeLength} m : subdivisé à ${edge} m.` : '');
+        this.maxEdgeLength = edge;
+        this.loadRefinedBuilding(id);
+      },
+      error: (err) => {
+        const next = Math.round(edge * 1.5 * 10) / 10;
+        if (err?.status === 400 && next <= 8) {
+          this.refineWithFallback(id, next);
+          return;
+        }
+        this.creating.set(false);
+        this.createError.set(err?.error?.detail ?? 'Échec de la subdivision du maillage.');
+      },
+    });
+  }
+
+  /** Vitrage proposé par défaut sur les façades exposées : le double vitrage
+   * usuel du catalogue s'il existe — l'utilisateur ajuste ensuite. */
+  private defaultGlazingId(): number | null {
+    const glazing = this.glazingModels;
+    return (glazing.find(m => /double/i.test(m.name)) ?? glazing[0])?.id ?? null;
+  }
+
+  private measureEnvelope(tris: Triangle[], vertices: number[][]): void {
+    let floor = 0;
+    let volume = 0;
+    const base = Math.min(...vertices.map(v => v[2]));
+    for (const t of tris) {
+      if (t.group === 'sol') floor += t.area;
+      else if ((t.group ?? '').startsWith('toiture')) {
+        const zc = (vertices[t.v[0]][2] + vertices[t.v[1]][2] + vertices[t.v[2]][2]) / 3;
+        volume += t.area * Math.abs(t.normal[2]) * (zc - base);
+      }
+    }
+    this.footprintM2.set(Math.round(floor));
+    this.volumeM3.set(Math.round(volume));
   }
 
   private loadRefinedBuilding(id: number): void {
@@ -221,16 +312,41 @@ export class ModeSimplifieComponent implements OnInit {
         const building = res as Building;
         this.vertices.set(building.envelope.vertices);
         this.triangles.set(building.envelope.triangles);
+        this.measureEnvelope(building.envelope.triangles, building.envelope.vertices);
         const groupNames = [...new Set(building.envelope.triangles.map(t => t.group).filter((g): g is string => !!g))];
         this.groups.set(groupNames);
         this.groupConfig = {};
         for (const g of groupNames) {
+          // Modèle pré-assigné d'après la BD TOPO (le plus fréquent du groupe),
+          // vitrage par défaut seulement sur les murs exposés : ni toiture, ni
+          // sol, ni mur mitoyen.
+          const counts = new Map<number, number>();
+          for (const t of building.envelope.triangles) {
+            if (t.group === g && t.paroi_model_id !== null) counts.set(t.paroi_model_id, (counts.get(t.paroi_model_id) ?? 0) + 1);
+          }
+          const preset = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+          const exposedWall = g.startsWith('mur_') && !g.endsWith('_mitoyen');
           this.groupConfig[g] = {
-            opaqueModelId: null, glazingModelId: null,
-            tauxVitragePct: g === 'sol' || g === 'toiture' ? 0 : 20,
+            opaqueModelId: preset,
+            glazingModelId: exposedWall ? this.defaultGlazingId() : null,
+            tauxVitragePct: exposedWall ? 20 : 0,
           };
         }
         this.actualGlazingPct.set({});
+        const firstWall = this.exposedWallGroups[0];
+        this.bulkWallModelId = firstWall ? this.groupConfig[firstWall].opaqueModelId : null;
+        this.bulkGlazingId = this.defaultGlazingId();
+        this.bulkTaux = 20;
+        // Assignation générée d'emblée : tout est pré-rempli, l'utilisateur
+        // n'ajuste que s'il le souhaite.
+        if (this.allGroupsConfigured) this.generateAssignment();
+        // Suggestion de ventilation, désormais connue du volume réel.
+        if (this.suggestedDebitVentM3h !== null) {
+          this.api.updateBuilding(id, {
+            suggested_debit_vent_m3h: this.suggestedDebitVentM3h,
+            suggested_eta_recup_vent: this.suggestedEtaRecupVent,
+          }).subscribe({ error: () => {} });
+        }
         this.creating.set(false);
         this.step.set('configuration');
       },
@@ -340,19 +456,18 @@ export class ModeSimplifieComponent implements OnInit {
   // bâtiment neuf a son ombrage marqué périmé, donc le calcul y était REFUSÉ.
   // Le parcours va désormais jusqu'au résultat, en simplifié.
   includeNeighbours = true;
-  includeVegetation = true;
-  envRadius = 150;
   envBusy = signal(false);
   envStatus = signal('');
   envError = signal('');
   shadowReady = signal(false);
 
-  private poll(jobId: number, onDone: (job: Job) => void, onError: (m: string) => void): void {
+  private poll(jobId: number, status: WritableSignal<string>, onDone: (job: Job) => void,
+               onError: (m: string) => void): void {
     const handle = setInterval(() => {
       this.api.getJob(jobId).subscribe({
         next: (res) => {
           const job = res as Job;
-          this.envStatus.set(job.message || `${job.progress}%`);
+          status.set(job.message || `${job.progress}%`);
           if (job.status === 'DONE') { clearInterval(handle); onDone(job); }
           else if (job.status === 'ERROR') { clearInterval(handle); onError(job.message || 'Échec.'); }
         },
@@ -361,60 +476,26 @@ export class ModeSimplifieComponent implements OnInit {
     }, 2000);
   }
 
-  /** Enchaîne, sans rien demander de plus : génération des obstacles alignés sur
-   * ce bâtiment (donc sans lui-même et sans obstacle qui l'empiète) →
-   * enregistrement → association → précalcul d'ombrage. Le précalcul est lancé
-   * même sans voisins : sans lui, le calcul serait refusé. */
+  /** L'environnement est déjà lié au bâtiment (il en est issu) : il ne reste
+   * que le précalcul d'ombrage. Sans voisinage, on le délie d'abord — le
+   * bâtiment ne se fait alors de l'ombre qu'à lui-même. */
   buildEnvironmentAndShadow(): void {
     const id = this.buildingId();
-    const c = this.selectedCandidate;
-    if (id === null || !c || this.envBusy()) return;
+    if (id === null || this.envBusy()) return;
     this.envBusy.set(true);
     this.envError.set('');
     this.shadowReady.set(false);
-
-    if (!this.includeNeighbours) {
-      this.envStatus.set("Ombrage : le bâtiment sur lui-même uniquement…");
-      this.launchPrecompute(id);
-      return;
-    }
-
-    this.envStatus.set('Reconstruction du voisinage (LiDAR HD)…');
-    this.api.generateEnvironment({
-      lat: c.lat, lon: c.lon, radius_m: this.envRadius,
-      include_vegetation: this.includeVegetation, include_terrain: true, building_id: id,
-      name: `Voisinage — ${this.buildingName}`,
-    }).subscribe({
-      next: (res) => this.poll((res as Job).id,
-        (job) => this.saveAndLinkEnvironment(id, job),
-        (m) => { this.envBusy.set(false); this.envError.set(m); }),
-      error: () => { this.envBusy.set(false); this.envError.set('Échec du lancement de la recherche.'); },
-    });
-  }
-
-  /** Lot AH : le job enregistre lui-même l'environnement (voisins, arbres et
-   * relief issus du LiDAR HD) — il ne reste qu'à le lier au bâtiment. Le
-   * bâtiment lui-même y est reconnu et marqué « étudié », pas obstacle. */
-  private saveAndLinkEnvironment(buildingId: number, job: Job): void {
-    const r = job.result as unknown as { environment_id: number; warnings: string[]; n_triangles: number };
-    this.envWarnings.set(r.warnings ?? []);
-    if (!r.n_triangles) {
-      // Aucun obstacle : ce n'est pas une erreur, on passe à l'ombrage.
-      this.envStatus.set('Aucun obstacle trouvé — ombrage sur le bâtiment seul.');
-      this.launchPrecompute(buildingId);
-      return;
-    }
-    this.envStatus.set('Association des obstacles…');
-    this.api.updateBuilding(buildingId, { environment_id: r.environment_id }).subscribe({
-      next: () => this.launchPrecompute(buildingId),
-      error: () => { this.envBusy.set(false); this.envError.set("Échec de l'association des obstacles."); },
+    const environmentId = this.includeNeighbours ? (this.env()?.id ?? null) : null;
+    this.api.updateBuilding(id, { environment_id: environmentId }).subscribe({
+      next: () => this.launchPrecompute(id),
+      error: () => { this.envBusy.set(false); this.envError.set("Échec de l'association du voisinage."); },
     });
   }
 
   private launchPrecompute(buildingId: number): void {
     this.envStatus.set("Calcul de l'ombrage…");
     this.api.precomputeShadows(buildingId).subscribe({
-      next: (res) => this.poll((res as Job).id,
+      next: (res) => this.poll((res as Job).id, this.envStatus,
         () => {
           this.envBusy.set(false);
           this.shadowReady.set(true);
@@ -453,8 +534,7 @@ export class ModeSimplifieComponent implements OnInit {
   }
 
   get surfaceRefM2(): number | null {
-    const c = this.selectedCandidate;
-    return c ? Math.round(this.footprintAreaM2(c)) : null;
+    return this.footprintM2();
   }
 
   /** Récupère une année type puis lance le calcul, sans autre réglage : tous
@@ -463,7 +543,7 @@ export class ModeSimplifieComponent implements OnInit {
    * chaque triangle) — voir le texte de l'étape 5 pour la liste exacte. */
   runCalculation(): void {
     const id = this.buildingId();
-    const c = this.selectedCandidate;
+    const c = this.site;
     if (id === null || !c || this.calcBusy()) return;
     this.calcBusy.set(true);
     this.calcError.set('');
@@ -578,7 +658,12 @@ export class ModeSimplifieComponent implements OnInit {
     if (id === null || this.assignedCount === 0) return;
     this.saving.set(true);
     this.saveError.set('');
-    const triangles = this.triangles().map(t => ({ v: t.v, group: t.group, paroi_model_id: t.paroi_model_id, boundary: t.boundary }));
+    // alpha_ext (Lot AI) et shading_profile_id doivent survivre à cet
+    // enregistrement : un PATCH de triangles REMPLACE toute la liste.
+    const triangles = this.triangles().map(t => ({
+      v: t.v, group: t.group, paroi_model_id: t.paroi_model_id, boundary: t.boundary,
+      shading_profile_id: t.shading_profile_id ?? null, alpha_ext: t.alpha_ext ?? null,
+    }));
     this.api.updateBuilding(id, { triangles }).subscribe({
       next: () => {
         this.saving.set(false);

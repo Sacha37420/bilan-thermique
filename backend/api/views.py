@@ -185,23 +185,48 @@ class EnvironmentObjectsView(APIView):
 
 class EnvironmentStudyObjectView(APIView):
     """
-    POST /api/environnements/<id>/objets/<obj_id>/etudier/  {name?}
-    Lot AH — fait d'un bâtiment de l'environnement LE bâtiment étudié : crée un
-    Building dans le même repère (aligné par construction), lié à cet
-    environnement, et retire l'objet des obstacles.
+    POST /api/environnements/<id>/etudier/  {ids: [..], name?, assign_materials?}
+    Lot AH/AI — fait d'un bâtiment de l'environnement (ou de PLUSIEURS emprises
+    qui n'en forment qu'un : enveloppe reconstruite sur leur union, murs
+    intérieurs supprimés) LE bâtiment étudié : Building dans le même repère
+    (aligné par construction), lié à cet environnement, parois pré-assignées
+    d'après la BD TOPO ; les objets sont retirés des obstacles.
     """
 
-    def post(self, request, pk, obj_id):
+    def post(self, request, pk):
         env = get_object_or_404(Environment, pk=pk)
         serializer = StudyObjectSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
         try:
-            building, env = environment_service.study_object(env, obj_id, serializer.validated_data['name'])
+            building, env, materials = environment_service.study_objects(
+                env, data['ids'], data['name'], assign_materials=data['assign_materials'],
+            )
         except environment_service.EnvironmentServiceError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'building': BuildingSerializer(building).data,
-                         'environment': EnvironmentSerializer(env).data},
+                         'environment': EnvironmentSerializer(env).data, 'materials': materials},
                         status=status.HTTP_201_CREATED)
+
+
+class EnvironmentOrthophotoView(APIView):
+    """
+    GET /api/environnements/<id>/orthophoto/
+    Lot AI — orthophoto IGN de l'emprise de l'environnement (JPEG), pour la
+    texture de la vue 3D. Récupérée à la demande (1 requête IGN), puis gardée
+    en cache disque local au conteneur.
+    """
+
+    def get(self, request, pk):
+        from django.http import HttpResponse
+        env = get_object_or_404(Environment, pk=pk)
+        try:
+            data = environment_service.orthophoto_bytes(env)
+        except environment_service.EnvironmentServiceError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        response = HttpResponse(data, content_type='image/jpeg')
+        response['Cache-Control'] = 'private, max-age=86400'
+        return response
 
 
 class EnvironmentReplaceObjectView(APIView):

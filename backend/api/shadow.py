@@ -35,6 +35,21 @@ class ShadowError(ValueError):
     pass
 
 
+def _ray_intersector(mesh):
+    """Moteur de lancer de rayons : Embree (Intel, via `embreex`) s'il est
+    installé, sinon l'implémentation numpy de trimesh — même interface.
+
+    Mesuré sur un quartier réel (Lot AI, 2026-09-27) : 200 000 rayons en 4,9 s
+    avec Embree contre 2 313 s en numpy, pour ZÉRO désaccord de résultat. Sans
+    Embree, le précalcul d'ombrage d'un bâtiment subdivisé (12 000 triangles)
+    prenait plus de dix minutes."""
+    try:
+        from trimesh.ray import ray_pyembree
+        return ray_pyembree.RayMeshIntersector(mesh)
+    except Exception:  # noqa: BLE001 — module absent ou plateforme non gérée
+        return trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+
+
 def build_occluder_mesh(*envelopes):
     """Fusionne un ou plusieurs {'vertices':[[x,y,z],...], 'triangles':[{'v':[i,j,k]},...]}
     en un unique trimesh.Trimesh, pour servir de scène d'occlusion.
@@ -89,7 +104,7 @@ class VegetationScene:
     """
 
     def __init__(self, mesh, face_obj, obj_k):
-        self.intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+        self.intersector = _ray_intersector(mesh)
         self.face_obj = face_obj      # indice d'objet par face
         self.obj_k = obj_k            # transmittance par objet
 
@@ -157,7 +172,7 @@ def build_occluder_intersector(building_envelope, environment_envelope=None):
     de building_solver) : construit le maillage occulteur une seule fois,
     réutilisable pour autant de rayons/heures qu'on veut."""
     mesh = build_occluder_mesh(building_envelope, environment_envelope)
-    return trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+    return _ray_intersector(mesh)
 
 
 def sun_direction(azimuth_deg, elevation_deg):
@@ -195,7 +210,7 @@ def compute_visibility_grid(
         raise ShadowError(f"{n_tri} triangles, au-delà de la limite de {MAX_TRIANGLES_FOR_SHADOW}.")
 
     occluder = build_occluder_mesh(building_envelope, environment_envelope)
-    intersector = trimesh.ray.ray_triangle.RayMeshIntersector(occluder)
+    intersector = _ray_intersector(occluder)
     vegetation = build_vegetation_scene(building_envelope, environment_envelope)
 
     azimuths = [float(a) for a in np.arange(0.0, 360.0, azimuth_step_deg)]
@@ -295,46 +310,63 @@ def compute_sky_view_factors(building_envelope, environment_envelope=None, n_sam
         raise ShadowError(f"{n_tri} triangles, au-delà de la limite de {MAX_TRIANGLES_FOR_SHADOW}.")
 
     occluder = build_occluder_mesh(building_envelope, environment_envelope)
-    intersector = trimesh.ray.ray_triangle.RayMeshIntersector(occluder)
+    intersector = _ray_intersector(occluder)
     vegetation = build_vegetation_scene(building_envelope, environment_envelope)
 
     sphere_dirs = _fibonacci_sphere(n_samples)
     is_sky = sphere_dirs[:, 2] > 0.0  # "vrai ciel" : au-dessus de l'horizon réel (Z-up)
 
-    vertices = building_envelope['vertices']
-    factors = []
-    for tri in triangles:
-        p = np.array([vertices[j] for j in tri['v']])
-        centroid = p.mean(axis=0)
-        normal = np.array(tri['normal'])
-        f_ciel_flat = (1.0 + math.cos(math.radians(tri['tilt_deg']))) / 2.0
-
+    # Rayons de TOUS les triangles regroupés en lots (Lot AI) : un appel
+    # d'intersection par triangle coûtait plus de 5 minutes pour un bâtiment de
+    # 12 000 triangles (collectif subdivisé, constaté). Même calcul, même
+    # résultat — seul le découpage des appels change.
+    vertices = np.asarray(building_envelope['vertices'], dtype=float)
+    f_flat = np.zeros(n_tri)
+    origins_all, dirs_all, weights_all, owner = [], [], [], []
+    has_dirs = np.zeros(n_tri, dtype=bool)
+    for idx, tri in enumerate(triangles):
+        normal = np.asarray(tri['normal'], dtype=float)
+        f_flat[idx] = (1.0 + math.cos(math.radians(tri['tilt_deg']))) / 2.0
         cos_normal = sphere_dirs @ normal
         valid = is_sky & (cos_normal > 1e-9)
         if not valid.any():
-            factors.append(0.0)
             continue
+        has_dirs[idx] = True
+        centroid = vertices[tri['v']].mean(axis=0)
+        d = sphere_dirs[valid]
+        origins_all.append(np.tile(centroid + normal * RAY_ORIGIN_EPSILON, (len(d), 1)))
+        dirs_all.append(d)
+        weights_all.append(cos_normal[valid])
+        owner.append(np.full(len(d), idx))
+    if not origins_all:
+        return [0.0] * n_tri
 
-        weight = cos_normal[valid]
-        dirs_valid = sphere_dirs[valid]
-        origins = np.tile(centroid + normal * RAY_ORIGIN_EPSILON, (dirs_valid.shape[0], 1))
-        blocked = intersector.intersects_any(origins, dirs_valid)
-
+    O = np.concatenate(origins_all)
+    D = np.concatenate(dirs_all)
+    W = np.concatenate(weights_all)
+    OWN = np.concatenate(owner)
+    open_fraction = np.zeros(len(O))
+    chunk = 50_000
+    for start in range(0, len(O), chunk):
+        sl = slice(start, start + chunk)
+        blocked = intersector.intersects_any(O[sl], D[sl])
+        part = np.where(blocked, 0.0, 1.0)
         # Lot Z : la végétation ne bloque pas, elle atténue — le poids de chaque
         # direction est multiplié par sa transmittance plutôt que mis à zéro.
-        # Sans végétation, `open_fraction` vaut exactement 1 ou 0 et l'on
-        # retrouve le calcul d'origine au bit près.
-        open_fraction = np.where(blocked, 0.0, 1.0)
         if vegetation is not None:
             unblocked = ~blocked
             if unblocked.any():
-                open_fraction[unblocked] = vegetation.transmittance(
-                    origins[unblocked], dirs_valid[unblocked],
-                )
+                part[unblocked] = vegetation.transmittance(O[sl][unblocked], D[sl][unblocked])
+        open_fraction[sl] = part
 
-        visible_ratio = float((weight * open_fraction).sum() / weight.sum())
-        factors.append(visible_ratio * f_ciel_flat)
-
+    num = np.bincount(OWN, weights=W * open_fraction, minlength=n_tri)
+    den = np.bincount(OWN, weights=W, minlength=n_tri)
+    factors = []
+    for idx in range(n_tri):
+        if not has_dirs[idx]:
+            factors.append(0.0)
+        else:
+            factors.append(float(num[idx] / den[idx]) * f_flat[idx])
     return factors
 
 
@@ -356,3 +388,108 @@ def lookup_visibility(sun_visibility, triangle_index, azimuth_deg, elevation_deg
     ei = min(range(len(elevations)), key=lambda k: abs(elevations[k] - el_clamped))
 
     return float(sun_visibility['per_triangle'][triangle_index][ai][ei])
+
+
+def compute_ground_reflection_factors(building_envelope, environment_envelope, albedo_at,
+                                      ground_obj_ids=(), n_samples=DEFAULT_SKY_SAMPLES):
+    """Lot AI — facteur de réflexion du sol de chaque triangle : la fraction du
+    rayonnement global horizontal (GHI) que le sol lui renvoie, soit
+
+        E_réfléchi = facteur × GHI,   facteur = ρ_vu × (1 − cos β) / 2
+
+    (1 − cos β)/2 est le facteur de vue du sol d'un plan incliné de β au-dessus
+    d'un sol infini ; ρ_vu est l'albédo MOYEN du sol que ce triangle voit
+    réellement, pondéré en Lambert : on lance des rayons dans les directions
+    descendantes de son hémisphère, et chaque rayon prend l'albédo du point de
+    sol touché (`albedo_at(x, y)`) — ou 0 s'il heurte d'abord un bâtiment ou
+    le bâtiment lui-même (obstacles noirs, même convention que le reste de
+    l'ombrage). Un rayon qui ne touche rien (environnement sans terrain, ou
+    sorti de la zone) est prolongé jusqu'au plan du pied du bâtiment.
+
+    Même principe que compute_sky_view_factors : un RAPPORT multipliant la
+    formule analytique — sans obstacle et sol uniforme, résultat exactement
+    ρ(1 − cos β)/2, sans bruit d'échantillonnage.
+
+    Hypothèse assumée (modèle isotrope standard) : le sol vu est éclairé par
+    tout le GHI, ombres portées au sol ignorées.
+
+    ground_obj_ids : identifiants `obj` des triangles d'environnement qui sont
+    du SOL (objet terrain) — les seuls qui renvoient de la lumière."""
+    triangles = building_envelope['triangles']
+    n_tri = len(triangles)
+    if n_tri == 0:
+        raise ShadowError("Le bâtiment n'a aucun triangle.")
+
+    vertices, faces, is_ground = [], [], []
+    for env, ground_ok in ((building_envelope, False), (environment_envelope, True)):
+        if not env:
+            continue
+        base = len(vertices)
+        vertices.extend(env['vertices'])
+        for tri in env['triangles']:
+            if _is_translucent(tri):
+                continue
+            i, j, k = tri['v']
+            faces.append([base + i, base + j, base + k])
+            is_ground.append(ground_ok and tri.get('obj') in ground_obj_ids)
+    mesh = trimesh.Trimesh(np.asarray(vertices, dtype=float), np.asarray(faces, dtype=np.int64), process=False)
+    intersector = _ray_intersector(mesh)
+    is_ground = np.asarray(is_ground, dtype=bool)
+
+    bverts = np.asarray(building_envelope['vertices'], dtype=float)
+    z_foot = float(bverts[:, 2].min())
+    dirs = _fibonacci_sphere(n_samples)
+    down = dirs[dirs[:, 2] < -1e-6]
+
+    origins_all, dirs_all, weights_all, owner = [], [], [], []
+    factors = np.zeros(n_tri)
+    analytic = np.zeros(n_tri)
+    for idx, tri in enumerate(triangles):
+        # Un plancher au contact du sol (boundary 'ground', Lot K) « voit » tout
+        # le sol sous lui — mais c'est sa face ENTERRÉE : aucun rayonnement ne
+        # l'atteint. Sans cette exclusion, il recevait ρ × GHI (constaté : 0,74).
+        if tri.get('boundary') == 'ground':
+            continue
+        normal = np.asarray(tri['normal'], dtype=float)
+        analytic[idx] = (1.0 - math.cos(math.radians(tri['tilt_deg']))) / 2.0
+        cos_n = down @ normal
+        valid = cos_n > 1e-9
+        if not valid.any() or analytic[idx] < 1e-9:
+            continue
+        centroid = bverts[tri['v']].mean(axis=0) + normal * RAY_ORIGIN_EPSILON
+        d = down[valid]
+        origins_all.append(np.tile(centroid, (len(d), 1)))
+        dirs_all.append(d)
+        weights_all.append(cos_n[valid])
+        owner.append(np.full(len(d), idx))
+    if not origins_all:
+        return factors.tolist()
+
+    O = np.concatenate(origins_all)
+    D = np.concatenate(dirs_all)
+    W = np.concatenate(weights_all)
+    OWN = np.concatenate(owner)
+    albedo = np.zeros(len(O))
+    hit_any = np.zeros(len(O), dtype=bool)
+    chunk = 50_000
+    for start in range(0, len(O), chunk):
+        sl = slice(start, start + chunk)
+        locs, ray_idx, tri_idx = intersector.intersects_location(O[sl], D[sl], multiple_hits=False)
+        if len(ray_idx):
+            glob = ray_idx + start
+            hit_any[glob] = True
+            ground_hit = is_ground[tri_idx]
+            albedo[glob[ground_hit]] = albedo_at(locs[ground_hit, 0], locs[ground_hit, 1])
+    miss = ~hit_any
+    if miss.any():
+        t = (z_foot - O[miss, 2]) / D[miss, 2]
+        px = O[miss, 0] + t * D[miss, 0]
+        py = O[miss, 1] + t * D[miss, 1]
+        albedo[miss] = albedo_at(px, py)
+
+    num = np.bincount(OWN, weights=W * albedo, minlength=n_tri)
+    den = np.bincount(OWN, weights=W, minlength=n_tri)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        ratio = np.where(den > 0, num / den, 0.0)
+    factors = ratio * analytic
+    return [round(float(f), 5) for f in factors]

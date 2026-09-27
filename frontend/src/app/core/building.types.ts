@@ -27,6 +27,8 @@ export interface WorkingTriangle {
   paroi_model_id: number | null;
   boundary?: TriangleBoundary;
   shading_profile_id?: ShadingProfileId | null;
+  /** Lot AI — absorptance extérieure propre au triangle (orthophoto / matériau). */
+  alpha_ext?: number | null;
   area?: number;
   normal?: [number, number, number];
   tilt_deg?: number;
@@ -124,6 +126,8 @@ export interface EnvironmentMesh {
   generation: EnvironmentGeneration;
   /** id d'objet → bâtiment étudié qui en est issu (null s'il a été supprimé). */
   studied_buildings: Record<string, { id: number; name: string } | null>;
+  /** Lot AI — texture : u = u[0]·x + u[1]·y + u[2], idem v ; null si indisponible. */
+  ortho: { u: [number, number, number]; v: [number, number, number]; url: string } | null;
   created_at: string;
   updated_at: string;
 }

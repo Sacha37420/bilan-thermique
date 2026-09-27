@@ -49,9 +49,18 @@ CLASS_GROUND = 2
 CLASS_VEG_LOW, CLASS_VEG_MID, CLASS_VEG_HIGH = 3, 4, 5
 CLASS_BUILDING = 6
 CLASS_UNCLASSIFIED = 1
+CLASS_WATER = 9
 CLASS_PERENNIAL = 64
 KEPT_CLASSES = (CLASS_UNCLASSIFIED, CLASS_GROUND, CLASS_VEG_LOW, CLASS_VEG_MID,
-                CLASS_VEG_HIGH, CLASS_BUILDING, CLASS_PERENNIAL)
+                CLASS_VEG_HIGH, CLASS_BUILDING, CLASS_WATER, CLASS_PERENNIAL)
+
+WMS_R_URL = 'https://data.geopf.fr/wms-r'
+ORTHO_RGB_LAYER = 'ORTHOIMAGERY.ORTHOPHOTOS'
+# Infrarouge couleur : canal rouge = proche infrarouge, vert = rouge, bleu = vert.
+# C'est lui qui donne la part infrarouge de l'albédo solaire (la moitié de
+# l'énergie solaire), et un indice de végétation (NDVI).
+ORTHO_IRC_LAYER = 'ORTHOIMAGERY.ORTHOPHOTOS.IRC'
+ORTHO_MAX_PX = 2048
 
 
 class LidarUnavailable(GeodataError):
@@ -256,16 +265,59 @@ def fetch_bdtopo_buildings_l93(bbox_l93, max_features=2000):
                     'id': (props.get('cleabs') or feature.get('id') or '') + (f'#{p_index}' if p_index else ''),
                     'rings': [[(pt[0], pt[1]) for pt in ring] for ring in rings],
                     'hauteur': _float_or_none(props.get('hauteur')),
-                    'etages': _float_or_none(props.get('nombre_d_etages')),
                     'z_sol': _float_or_none(props.get('altitude_minimale_sol')),
                     'z_toit_max': _float_or_none(props.get('altitude_maximale_toit')),
                     'nature': props.get('nature') or '',
                     'usage': props.get('usage_1') or '',
+                    # Lot AI — codes fichiers fonciers à deux chiffres (voir
+                    # observed_env.decode_materials) et année d'apparition.
+                    'mat_murs': props.get('materiaux_des_murs') or None,
+                    'mat_toit': props.get('materiaux_de_la_toiture') or None,
+                    'annee': _year_or_none(props.get('date_d_apparition')),
+                    'logements': props.get('nombre_de_logements'),
+                    'etages': _float_or_none(props.get('nombre_d_etages')),
                 })
         if len(features) < 1000 or len(buildings) >= max_features:
             break
         start += 1000
     return buildings
+
+
+def _year_or_none(value):
+    try:
+        year = int(str(value)[:4])
+    except (TypeError, ValueError):
+        return None
+    return year if 1000 < year < 2100 else None
+
+
+def fetch_orthophoto(bbox_l93, layer, px_per_m=4.0):
+    """Orthophoto IGN (WMS-R, JPEG) couvrant bbox_l93 = (xmin, ymin, xmax, ymax),
+    axes Lambert 93 (x = colonnes, y = lignes vers le HAUT de l'emprise en haut
+    de l'image). Retourne (octets JPEG, largeur, hauteur). 20 cm/pixel natifs ;
+    on s'en tient par défaut à 25 cm, plafonné à ORTHO_MAX_PX de côté.
+    Vérifié le 2026-09-27 : emprise arbitraire acceptée, JPEG 1500 px ≈ 380 ko."""
+    xmin, ymin, xmax, ymax = bbox_l93
+    width = max(16, min(ORTHO_MAX_PX, int(round((xmax - xmin) * px_per_m))))
+    height = max(16, min(ORTHO_MAX_PX, int(round((ymax - ymin) * px_per_m))))
+    params = {
+        'SERVICE': 'WMS', 'VERSION': '1.3.0', 'REQUEST': 'GetMap', 'LAYERS': layer,
+        'FORMAT': 'image/jpeg', 'STYLES': '', 'CRS': 'EPSG:2154',
+        'BBOX': f'{xmin},{ymin},{xmax},{ymax}', 'WIDTH': str(width), 'HEIGHT': str(height),
+    }
+    try:
+        resp = _throttled_get(WMS_R_URL, params=params)
+    except requests.RequestException as exc:
+        raise GeodataError(f"Orthophoto IGN injoignable ({exc}).") from exc
+    if not resp.headers.get('content-type', '').startswith('image/'):
+        raise GeodataError(f"Orthophoto IGN : réponse inattendue ({resp.text[:200]}).")
+    return resp.content, width, height
+
+
+def decode_jpeg(data):
+    """Octets JPEG → tableau numpy (h, w, 3) uint8, ligne 0 = HAUT de l'image."""
+    from PIL import Image
+    return np.asarray(Image.open(io.BytesIO(data)).convert('RGB'))
 
 
 def _float_or_none(value):

@@ -158,9 +158,17 @@ def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max):
             raise BuildingSimulationError(f"Triangle {idx} sans modèle de paroi assigné.")
         if pid not in paroi_layers_by_id:
             raise BuildingSimulationError(f"Triangle {idx} : modèle de paroi #{pid} introuvable.")
-        key = (pid, dx_max)
+        # Lot AI : absorptance solaire du parement extérieur propre à ce triangle
+        # (mesurée sur l'orthophoto pour une toiture, ou usuelle pour le matériau
+        # BD TOPO d'un mur) — remplace celle de la 1ʳᵉ couche du modèle, sans
+        # dupliquer le modèle au catalogue. Seulement sur une couche opaque
+        # (tau = 0) : r = 1 − alpha garde tau + r + alpha = 1.
+        alpha_ext = tri.get('alpha_ext')
+        key = (pid, dx_max, alpha_ext)
         if key not in cache:
             layers = paroi_layers_by_id[pid]
+            if alpha_ext is not None and layers and layers[0].get('tau', 0) == 0:
+                layers = [dict(layers[0], alpha=float(alpha_ext), r=1.0 - float(alpha_ext))] + list(layers[1:])
             mesh = wall_solver._build_mesh(layers, dx_max)
             K, C = wall_solver._assemble_kc(mesh)
             cache[key] = (mesh, K, C, layers)
@@ -242,7 +250,7 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
                       occluder_intersector=None, centroids=None, vegetation_scene=None,
                       air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None,
                       frame_g=None, shading_fs_dir=None, shading_fs_dif=None, volet_closed=False,
-                      diagnostics=None):
+                      diagnostics=None, ground_reflect_factor=None):
     """h_e_vec : la valeur DE CETTE HEURE, PAR TRIANGLE (Lot R — constante du
     run ou dérivée du vent, uniforme par défaut ; Lot J — réduite pour les
     triangles dont le volet/store est fermé, voir SHADING_PROFILES/
@@ -277,6 +285,9 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
 
     sun_up = sun_el > 0.0
     direction = shadow.sun_direction(sun_az, sun_el) if sun_up else None
+    # Lot AI : rayonnement global horizontal — e_dir est normal au soleil,
+    # e_dif horizontal. Seule source de la réflexion par le sol.
+    ghi = (e_dir * math.sin(math.radians(sun_el)) if sun_up else 0.0) + e_dif
 
     # Test d'occlusion en temps réel : un seul lot de rayons pour tous les
     # triangles faisant face au soleil à cette heure (même principe que
@@ -338,6 +349,11 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
         else:
             e_dir_i, e_dif_i = e_dir, e_dif
         e_glo = e_dir_i * cos_ti + e_dif_i * f_ciel
+        # Lot AI : réflexion par le sol (albédo relevé), traitée comme du diffus —
+        # y compris vis-à-vis d'un store fermé (même facteur que e_dif).
+        if ground_reflect_factor is not None and ground_reflect_factor[i]:
+            fs = shading_fs_dif[i] if (volet_closed and shading_fs_dif is not None) else 1.0
+            e_glo += ground_reflect_factor[i] * ghi * fs
 
         # Lot K : un triangle 'ground' échange avec la température de sol
         # constante plutôt qu'avec l'air extérieur — même conductance h_e
@@ -466,7 +482,8 @@ def _factorize_for(K_global_base, C_global, air_idx, mode, g_vent, h_e_addition)
 
 
 def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibility, payload,
-                             environment_envelope=None, progress_cb=None, paroi_frame_by_id=None):
+                             environment_envelope=None, progress_cb=None, paroi_frame_by_id=None,
+                             ground_albedo=None, ground_obj_ids=()):
     """payload : {dx_max, h_e, h_e_dynamic?, interior: {mode, h_i?, h_i_auto?, c_air_int,
     t_int?, t_min?, t_max?, debit_vent_m3h?, eta_recup_vent?, apports_internes_w?}, t_init,
     weather: [{t_ext, sun_azimuth, sun_elevation, e_dir, e_dif, wind_m_s?, t_min?, t_max?}, ...],
@@ -672,6 +689,22 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         sun_visibility_grid = sun_visibility
         if 'sky_view_factor' in sun_visibility:
             sky_view_factor = sun_visibility['sky_view_factor']
+
+    # Lot AI : réflexion par le sol. Seulement si l'environnement porte un
+    # albédo relevé (environnement observé) — sinon aucun terme, exactement le
+    # comportement antérieur (obstacles et sol noirs).
+    ground_reflect_factor = None
+    if ground_albedo:
+        if shadow_mode == 'realtime' or not (sun_visibility or {}).get('ground_reflect_factor'):
+            from . import observed_env
+            ground_reflect_factor = shadow.compute_ground_reflection_factors(
+                building_envelope, environment_envelope, observed_env.albedo_lookup(ground_albedo),
+                ground_obj_ids=set(ground_obj_ids),
+            )
+        else:
+            ground_reflect_factor = sun_visibility['ground_reflect_factor']
+    elif sun_visibility and sun_visibility.get('ground_reflect_factor') and shadow_mode != 'realtime':
+        ground_reflect_factor = sun_visibility['ground_reflect_factor']
     # h_i (Lot R) : soit une constante répétée pour tous les triangles (défaut,
     # comportement historique), soit dérivée de tilt_deg par triangle (ISO 6946
     # via h_i_from_tilt) si interior.h_i_auto est activé.
@@ -891,6 +924,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w, t_ground=t_ground,
             frame_g=frame_g, shading_fs_dir=shading_fs_dir, shading_fs_dif=shading_fs_dif,
             volet_closed=volet_closed, diagnostics=hour_diagnostics,
+            ground_reflect_factor=ground_reflect_factor,
         )
         b_free = (C_global / DT_SECONDS) @ T + F
 

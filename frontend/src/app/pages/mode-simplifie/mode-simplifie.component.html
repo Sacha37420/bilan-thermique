@@ -4,8 +4,8 @@
     <p class="eyebrow"><span class="dot"></span> Point d'entrée guidé</p>
     <h1>Mode simplifié</h1>
     <p class="subtitle">
-      Pour évaluer rapidement un bâtiment réel existant — recherche automatique, taux de vitrage
-      par paroi plutôt qu'un import de maillage détaillé. Le bâtiment produit est un bâtiment
+      Pour évaluer rapidement un bâtiment réel existant — choisi dans son quartier reconstruit en 3D,
+      avec un taux de vitrage par paroi plutôt qu'un import de maillage détaillé. Le bâtiment produit est un bâtiment
       ordinaire, éditable ensuite avec tous les outils complets (page <a routerLink="/batiment">Bâtiment</a>).
     </p>
   </div>
@@ -13,96 +13,127 @@
   <div class="callout">
     <span class="callout-label">Ce que ce mode simplifie — et ce qu'il ne fait pas</span>
     <p>
-      Chaque étape ci-dessous indique ce que ferait la méthode complète à sa place. En résumé :
-      l'empreinte vient d'IGN/OpenStreetMap (souvent approximative), la hauteur est parfois estimée,
-      la toiture est toujours plate, il n'y a pas de vraie disposition de fenêtres — seulement une
-      proportion de petits triangles répartis régulièrement — et le cadre de fenêtre n'est pas
-      modélisé ici. Pour un résultat plus fin, continuez ensuite sur la page Bâtiment.
+      Le quartier est reconstruit depuis le relevé LiDAR HD de l'IGN (toitures, hauteurs, arbres et
+      relief réels) croisé avec la BD TOPO, et les parois sont pré-assignées d'après les matériaux et
+      l'année de construction connus. Ce qui reste simplifié : les fenêtres ne sont qu'une
+      proportion de petits triangles répartis régulièrement sur chaque façade, sans cadre, et les
+      parois pré-assignées sont des ordres de grandeur par époque. Pour un résultat plus fin,
+      continuez ensuite sur la page Bâtiment.
     </p>
   </div>
 
-  <!-- ── Étape 1 : recherche ─────────────────────────────────────────── -->
-  <section class="form-card" [class.done]="step() !== 'recherche'">
-    <h2>1. Rechercher le bâtiment</h2>
+  <!-- ── Étape 1 : le quartier ───────────────────────────────────────── -->
+  <section class="form-card" [class.done]="step() !== 'quartier'">
+    <h2>1. Reconstruire le quartier</h2>
     <p class="hint">
-      Méthode complète équivalente : importer un fichier OBJ/STL déjà modélisé (page Bâtiment). Ici,
-      on récupère directement l'empreinte réelle du bâtiment depuis IGN BD TOPO (France) ou
-      OpenStreetMap (ailleurs) — mêmes sources que la génération d'environnement.
+      Méthode complète équivalente : générer l'environnement (page
+      <a routerLink="/environnement">Environnement</a>). Donnez un point proche de votre bâtiment :
+      bâtiments, arbres et relief alentour sont reconstruits en 3D (environ 30 secondes).
     </p>
-    @if (step() === 'recherche') {
-      <app-building-search (candidateChosen)="onCandidateChosen($event)" />
-    } @else if (selectedCandidate) {
-      <p class="hint">
-        Bâtiment choisi à {{ selectedCandidate.distance_m }} m, {{ selectedCandidate.n_walls }} paroi(s),
-        source : {{ selectedCandidate.source === 'ign' ? 'IGN BD TOPO' : 'OpenStreetMap' }}.
-      </p>
-      @if (step() === 'creation') {
-        <div class="editor-actions">
-          <button type="button" class="btn-secondary" (click)="backToSearch()">Changer de bâtiment</button>
+    @if (step() === 'quartier') {
+      <div class="field-grid">
+        <label><span>Latitude</span><input type="number" step="0.0001" min="-90" max="90" [(ngModel)]="genLat" name="genLat" /></label>
+        <label><span>Longitude</span><input type="number" step="0.0001" min="-180" max="180" [(ngModel)]="genLon" name="genLon" /></label>
+        <label>
+          <span>Rayon (m)</span>
+          <input type="number" step="10" min="30" max="250" [(ngModel)]="envRadius" name="envRadius" />
+          <small>Assez pour inclure les voisins qui peuvent masquer le soleil.</small>
+        </label>
+      </div>
+      <label class="inline-check">
+        <input type="checkbox" [(ngModel)]="includeVegetation" name="includeVegetation" />
+        <span>Inclure les arbres (hauteur et transparence mesurées)</span>
+      </label>
+      <button type="button" class="btn-primary" [disabled]="quartierBusy()" (click)="generateQuartier()">
+        {{ quartierBusy() ? 'Reconstruction…' : 'Reconstruire le quartier' }}
+      </button>
+      @if (environments().length) {
+        <div class="field-grid reuse">
+          <label>
+            <span>… ou reprendre un quartier déjà reconstruit</span>
+            <select [(ngModel)]="reuseEnvId" name="reuseEnvId">
+              <option [ngValue]="null">—</option>
+              @for (e of environments(); track e.id) { <option [ngValue]="e.id">{{ e.name }}</option> }
+            </select>
+          </label>
         </div>
+        <button type="button" class="btn-secondary" [disabled]="reuseEnvId === null || quartierBusy()"
+                (click)="openEnvironment(reuseEnvId!)">Ouvrir</button>
       }
+      @if (quartierStatus()) { <p class="hint">{{ quartierStatus() }}</p> }
+      @if (quartierError()) { <p class="field-error">{{ quartierError() }}</p> }
+    } @else if (env(); as e) {
+      <p class="hint">Quartier « {{ e.name }} » — {{ e.objects.length }} éléments.</p>
     }
   </section>
 
-  <!-- ── Étape 2 : création + subdivision ────────────────────────────── -->
-  @if (selectedCandidate && step() !== 'recherche') {
-    <section class="form-card" [class.done]="step() !== 'creation'">
-      <h2>2. Créer et subdiviser le maillage</h2>
-      <p class="hint">
-        Méthode complète équivalente : assigner un modèle de paroi triangle par triangle, puis
-        raffiner le maillage à la main (page Bâtiment). Ici, le maillage est subdivisé finement tout
-        de suite — c'est ce qui permettra d'approximer le taux de vitrage choisi à l'étape suivante.
-      </p>
-      @if (step() === 'creation') {
+  <!-- ── Étape 2 : choisir le bâtiment ───────────────────────────────── -->
+  @if (env() && step() !== 'quartier') {
+    <section class="form-card" [class.done]="step() !== 'selection'">
+      <h2>2. Choisir votre bâtiment</h2>
+      @if (step() === 'selection') {
+        <p class="hint">
+          Cliquez votre bâtiment dans la vue (un glisser fait tourner la vue). S'il est découpé en
+          plusieurs volumes — extension, garage accolé, corps de bâtiment distincts dans la BD TOPO —
+          cliquez-les tous : ils seront réunis en <strong>une seule enveloppe</strong>, recalculée
+          sur l'ensemble, sans les murs qui les séparent.
+        </p>
+        <div class="scene-wrap">
+          <app-env-scene [env]="env()" [selectedIds]="selectedIds()" (objectClick)="onObjectClick($event)" />
+        </div>
+        <p class="hint">
+          @if (selectedBuildings.length === 0) {
+            Aucun bâtiment sélectionné.
+          } @else if (selectedBuildings.length === 1) {
+            1 bâtiment sélectionné{{ selectedBuildings[0].info['annee'] ? ', construit en ' + selectedBuildings[0].info['annee'] : '' }}.
+          } @else {
+            {{ selectedBuildings.length }} bâtiments sélectionnés — ils seront réunis en un seul.
+          }
+        </p>
+
         <div class="field-grid">
           <label><span>Nom du bâtiment</span><input type="text" [(ngModel)]="buildingName" name="buildingName" /></label>
           <label>
             <span>Finesse de subdivision (m)</span>
             <input type="number" step="0.1" min="0.5" max="5" [(ngModel)]="maxEdgeLength" name="maxEdgeLength" />
             <small>
-              Plus petit = meilleure précision du taux de vitrage, mais beaucoup plus de triangles —
-              la subdivision touche tout le bâtiment (murs, toiture, sol), pas seulement les murs.
-              2 m convient pour la plupart des bâtiments ; augmentez si la subdivision échoue
-              (bâtiment de grande taille).
+              Plus petit = meilleure précision du taux de vitrage, mais beaucoup plus de triangles.
+              2 m convient pour la plupart des bâtiments ; augmentez si la subdivision échoue.
             </small>
           </label>
-        </div>
-
-        <h3>Renouvellement d'air (optionnel)</h3>
-        <p class="hint">
-          Méthode complète équivalente : régler séparément le débit de ventilation et le rendement
-          de récupération de chaleur (page Calcul 3D). Ici, un seul profil par génération de
-          bâtiment suffit — le volume est calculé automatiquement depuis l'empreinte réelle et la
-          hauteur trouvées ({{ estimatedVolumeM3 }} m³), pas besoin de le saisir à la main.
-        </p>
-        <div class="field-grid">
           <label>
-            <span>Profil de ventilation</span>
+            <span>Profil de ventilation (optionnel)</span>
             <select [(ngModel)]="selectedVentProfileId" name="selectedVentProfileId">
               <option [ngValue]="null">— aucun —</option>
               @for (p of ventilationProfiles; track p.id) {
                 <option [ngValue]="p.id">{{ p.label }}</option>
               }
             </select>
+            <small>Débit calculé sur le volume réel du bâtiment, une fois créé.</small>
           </label>
         </div>
-        @if (selectedVentProfile) {
-          <p class="hint">{{ selectedVentProfile.description }}</p>
+        <div class="editor-actions">
+          <button type="button" class="btn-secondary" (click)="backToQuartier()">Changer de quartier</button>
+          <button type="button" class="btn-primary"
+                  [disabled]="creating() || !selectedBuildings.length || !buildingName.trim()"
+                  (click)="createFromSelection()">
+            {{ creating() ? 'Création…' : 'Créer ce bâtiment' }}
+          </button>
+        </div>
+        @if (createError()) { <p class="field-error">{{ createError() }}</p> }
+      } @else {
+        <p class="hint">
+          « {{ buildingName }} » créé — {{ triangles().length }} triangles après subdivision,
+          emprise {{ footprintM2() }} m², volume {{ volumeM3() }} m³.
+          @if (refineNote()) { {{ refineNote() }} }
+        </p>
+        @if (materials(); as m) {
           <p class="hint">
-            Débit suggéré : {{ suggestedDebitVentM3h }} m³/h, rendement de récupération :
-            {{ suggestedEtaRecupVent }} — préremplira le panneau « Renouvellement d'air » de
-            Calcul 3D, où les deux valeurs restent modifiables librement.
+            Parois pré-assignées d'après la BD TOPO — {{ m.basis }}
+            Murs : {{ m.assigned.wall ?? 'à choisir' }} · toiture : {{ m.assigned.roof ?? 'à choisir' }}
+            · plancher : {{ m.assigned.floor ?? 'à choisir' }}.
           </p>
         }
-
-        <button type="button" class="btn-primary" [disabled]="creating() || !buildingName.trim()" (click)="createAndRefine()">
-          {{ creating() ? 'Création…' : 'Créer et subdiviser' }}
-        </button>
-        @if (createError()) {
-          <p class="field-error">{{ createError() }}</p>
-        }
-      } @else {
-        <p class="hint">« {{ buildingName }} » créé — {{ triangles().length }} triangles après subdivision.</p>
       }
     </section>
   }
@@ -119,6 +150,36 @@
         applicable ensuite via la page Bibliothèque de parois si le modèle de vitrage en a un).
       </p>
       @if (step() === 'configuration') {
+        <div class="bulk-config">
+          <h3>Toutes les façades exposées ({{ exposedWallGroups.length }})</h3>
+          <div class="field-grid">
+            <label>
+              <span>Mur</span>
+              <select [(ngModel)]="bulkWallModelId" name="bulkWallModelId">
+                <option [ngValue]="null">— garder la pré-assignation —</option>
+                @for (m of opaqueModels; track m.id) { <option [ngValue]="m.id">{{ m.name }}</option> }
+              </select>
+            </label>
+            <label>
+              <span>Vitrage</span>
+              <select [(ngModel)]="bulkGlazingId" name="bulkGlazingId">
+                <option [ngValue]="null">— aucun —</option>
+                @for (m of glazingModels; track m.id) { <option [ngValue]="m.id">{{ m.name }}</option> }
+              </select>
+            </label>
+            <label>
+              <span>Taux de vitrage (%)</span>
+              <input type="number" step="5" min="0" max="95" [(ngModel)]="bulkTaux" name="bulkTaux" />
+            </label>
+          </div>
+          <button type="button" class="btn-secondary" (click)="applyToAllWalls()">Appliquer à toutes les façades</button>
+          <p class="hint">
+            Toitures, plancher et murs mitoyens gardent leur pré-assignation, sans vitrage. Le détail
+            paroi par paroi reste réglable ci-dessous.
+          </p>
+        </div>
+        <details class="group-details">
+          <summary>Réglage paroi par paroi ({{ groups().length }} parois)</summary>
         <div class="group-config-list">
           @for (g of groups(); track g) {
             <div class="group-config-row">
@@ -158,6 +219,7 @@
             </div>
           }
         </div>
+        </details>
         <button type="button" class="btn-secondary" [disabled]="!allGroupsConfigured" (click)="generateAssignment()">
           Générer l'assignation
         </button>
@@ -195,29 +257,17 @@
     <section class="form-card" [class.done]="step() !== 'environnement'">
       <h2>4. Voisinage et ombrage</h2>
       <p class="hint">
-        Méthode complète équivalente : construire un maillage d'obstacles sur la page Environnement,
-        l'associer au bâtiment, puis lancer le précalcul d'ombrage (page Calcul 3D). Ici tout
-        s'enchaîne : voisins, arbres et relief sont reconstruits autour du vôtre depuis le relevé
-        LiDAR HD de l'IGN (toitures et hauteurs réelles), dans son repère, et
-        <strong>votre bâtiment y est reconnu</strong> pour ne pas se masquer lui-même en double.
+        Méthode complète équivalente : associer un environnement au bâtiment puis lancer le
+        précalcul d'ombrage (page Calcul 3D). Ici le quartier reconstruit à l'étape 1 est déjà
+        associé — votre bâtiment en a été retiré pour ne pas se masquer lui-même en double — et
+        la réflexion du sol utilise l'albédo relevé sur l'orthophoto.
       </p>
       @if (step() === 'environnement') {
         <label class="inline-check">
           <input type="checkbox" [(ngModel)]="includeNeighbours" name="includeNeighbours" />
           <span>Tenir compte des bâtiments voisins</span>
         </label>
-        @if (includeNeighbours) {
-          <div class="field-grid">
-            <label>
-              <span>Rayon de recherche (m)</span>
-              <input type="number" step="10" min="10" max="250" [(ngModel)]="envRadius" name="envRadius" />
-            </label>
-          </div>
-          <label class="inline-check">
-            <input type="checkbox" [(ngModel)]="includeVegetation" name="includeVegetation" />
-            <span>Inclure les arbres (hauteur et transparence mesurées)</span>
-          </label>
-        } @else {
+        @if (!includeNeighbours) {
           <p class="hint">
             Sans voisinage, le bâtiment ne se fait de l'ombre qu'à lui-même : correct, mais optimiste
             dès qu'il y a du bâti autour.

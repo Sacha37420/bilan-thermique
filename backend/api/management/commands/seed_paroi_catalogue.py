@@ -70,6 +70,93 @@ def plancher_terre_plein(epaisseur_isolant):
     return [dict(DALLE_BETON), isolant_sous_chape(epaisseur_isolant), dict(CHAPE)]
 
 
+# ── Bâti existant (Lot AI) ─────────────────────────────────────────────────
+# Parois d'avant les réglementations actuelles, par époque et par matériau —
+# ce que la pré-assignation d'après la BD TOPO (matériaux des murs et de la
+# toiture, année d'apparition) va chercher, par NOM exact (voir
+# observed_env.WALL_BY_ERA/ROOF_BY_ERA/FLOOR_BY_ERA). Même statut que le reste
+# du catalogue : ordres de grandeur usuels, pas une référence. Parement
+# extérieur à alpha 0,5 : l'absorptance réelle est posée par triangle
+# (alpha_ext) quand le matériau ou l'orthophoto la donnent.
+
+ENDUIT_CHAUX = {'e': 0.02, 'lam': 0.87, 'rho': 1800, 'c': 1000, 'tau': 0, 'r': 0.5, 'alpha': 0.5}
+PLATRE_ENDUIT = {'e': 0.015, 'lam': 0.35, 'rho': 1000, 'c': 1000, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+
+
+def maconnerie(e, lam, rho, c):
+    return {'e': e, 'lam': lam, 'rho': rho, 'c': c, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+
+
+def isolant_ancien(epaisseur):
+    """Isolant des années 1975–2000 (laine ou polystyrène de première génération)."""
+    return {'e': epaisseur, 'lam': 0.041, 'rho': 20, 'c': 1030, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+
+
+def mur_iti_ancien(epaisseur_isolant):
+    return [dict(ENDUIT_EXT), dict(BLOC_BETON), isolant_ancien(epaisseur_isolant), dict(PLACO)]
+
+
+def toiture_ancienne(epaisseur_isolant):
+    return [dict(COUVERTURE_TUILE), dict(SUPPORT_TOITURE), isolant_ancien(epaisseur_isolant), dict(PLACO)]
+
+
+LAME_AIR_TOITURE = {'e': 0.05, 'lam': 0.28, 'rho': 1.2, 'c': 1000, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+BARDAGE_BOIS = {'e': 0.02, 'lam': 0.13, 'rho': 500, 'c': 1600, 'tau': 0, 'r': 0.3, 'alpha': 0.7}
+OSB = {'e': 0.012, 'lam': 0.13, 'rho': 600, 'c': 1700, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+# Laine entre montants : λ équivalent dégradé par les ponts thermiques des montants.
+LAINE_OSSATURE = {'e': 0.10, 'lam': 0.045, 'rho': 40, 'c': 1100, 'tau': 0, 'r': 0.9, 'alpha': 0.1}
+
+EXISTANT = [
+    {'name': 'Mur pierre 50 cm (avant 1948)',
+     'description': "Moellons de pierre calcaire 50 cm, enduit chaux extérieur, enduit plâtre intérieur, "
+                    "sans isolant. U indicatif ≈ 1,9 W/m²·K. Aussi retenu pour la meulière.",
+     'layers': [dict(ENDUIT_CHAUX), maconnerie(0.50, 1.7, 2200, 900), dict(PLATRE_ENDUIT)]},
+    {'name': 'Mur brique pleine 34 cm (avant 1948)',
+     'description': "Brique pleine 34 cm, enduit extérieur, enduit plâtre intérieur, sans isolant. "
+                    "U indicatif ≈ 1,6 W/m²·K.",
+     'layers': [dict(ENDUIT_CHAUX), maconnerie(0.34, 0.84, 1800, 840), dict(PLATRE_ENDUIT)]},
+    {'name': 'Mur pan de bois / torchis (avant 1948)',
+     'description': "Colombage hourdé de torchis 15 cm, enduit, sans isolant. U indicatif ≈ 2,0 W/m²·K.",
+     'layers': [dict(ENDUIT_CHAUX), maconnerie(0.15, 0.55, 1400, 1000), dict(PLATRE_ENDUIT)]},
+    {'name': 'Mur béton banché 16 cm non isolé (1948–1974)',
+     'description': "Béton banché 16 cm, enduit, sans isolant — reconstruction et grands ensembles. "
+                    "U indicatif ≈ 3,2 W/m²·K.",
+     'layers': [dict(ENDUIT_CHAUX), maconnerie(0.16, 2.0, 2300, 1000), dict(PLATRE_ENDUIT)]},
+    {'name': 'Mur parpaing 20 cm non isolé (1948–1974)',
+     'description': "Bloc béton creux 20 cm enduit, plâtre intérieur, sans isolant. U indicatif ≈ 2,3 W/m²·K.",
+     'layers': [dict(ENDUIT_CHAUX), dict(BLOC_BETON), dict(PLATRE_ENDUIT)]},
+    {'name': 'Mur maçonné ITI — 1975–1981 (isolant 40 mm)',
+     'description': "Bloc béton 20 cm + 40 mm d'isolant (1ʳᵉ réglementation thermique, 1974). "
+                    "U indicatif ≈ 0,71 W/m²·K.",
+     'layers': mur_iti_ancien(0.04)},
+    {'name': 'Mur maçonné ITI — 1982–1988 (isolant 60 mm)',
+     'description': "Bloc béton 20 cm + 60 mm d'isolant. U indicatif ≈ 0,53 W/m²·K.",
+     'layers': mur_iti_ancien(0.06)},
+    {'name': 'Mur maçonné ITI — 1989–2000 (isolant 80 mm)',
+     'description': "Bloc béton 20 cm + 80 mm d'isolant (RT 1988). U indicatif ≈ 0,42 W/m²·K.",
+     'layers': mur_iti_ancien(0.08)},
+    {'name': 'Mur ossature bois (isolant 100 mm)',
+     'description': "Bardage bois + OSB + 100 mm de laine entre montants + plaque de plâtre. "
+                    "U indicatif ≈ 0,37 W/m²·K.",
+     'layers': [dict(BARDAGE_BOIS), dict(OSB), dict(LAINE_OSSATURE), dict(PLACO)]},
+    {'name': 'Toiture non isolée (avant 1975)',
+     'description': "Couverture + support bois + lame d'air + plafond, sans isolant. U indicatif ≈ 2,0 W/m²·K.",
+     'layers': [dict(COUVERTURE_TUILE), dict(SUPPORT_TOITURE), dict(LAME_AIR_TOITURE), dict(PLACO)]},
+    {'name': 'Toiture isolée — 1975–1981 (isolant 60 mm)',
+     'description': "Couverture + support + 60 mm d'isolant + plafond. U indicatif ≈ 0,56 W/m²·K.",
+     'layers': toiture_ancienne(0.06)},
+    {'name': 'Toiture isolée — 1982–1988 (isolant 100 mm)',
+     'description': "Couverture + support + 100 mm d'isolant + plafond. U indicatif ≈ 0,36 W/m²·K.",
+     'layers': toiture_ancienne(0.10)},
+    {'name': 'Toiture isolée — 1989–2000 (isolant 150 mm)',
+     'description': "Couverture + support + 150 mm d'isolant + plafond. U indicatif ≈ 0,25 W/m²·K.",
+     'layers': toiture_ancienne(0.15)},
+    {'name': 'Plancher bas non isolé (avant 1975)',
+     'description': "Dallage béton 15 cm + chape 5 cm sur terre-plein, sans isolant. U indicatif ≈ 1,25 W/m²·K "
+                    "(Rsi = 0,17 et r_ground = 0,5 compris).",
+     'layers': [dict(DALLE_BETON), dict(CHAPE)]},
+]
+
 # ── Vitrages ─────────────────────────────────────────────────────────────
 
 VITRAGE_SIMPLE = [
@@ -231,7 +318,7 @@ class Command(BaseCommand):
     help = "Peuple la bibliothèque de modèles de paroi avec un catalogue de départ (vitrages, murs ITE/ITI, toitures RT2005/RT2012/RE2020)."
 
     def handle(self, *args, **options):
-        for entry in CATALOGUE:
+        for entry in CATALOGUE + EXISTANT:
             obj, created = ParoiModel.objects.update_or_create(
                 name=entry['name'],
                 defaults={
@@ -243,4 +330,4 @@ class Command(BaseCommand):
             verb = 'créé' if created else 'mis à jour'
             self.stdout.write(self.style.SUCCESS(f"  {verb} : {obj.name}"))
 
-        self.stdout.write(self.style.SUCCESS(f"Terminé — {len(CATALOGUE)} modèle(s) dans le catalogue."))
+        self.stdout.write(self.style.SUCCESS(f"Terminé — {len(CATALOGUE) + len(EXISTANT)} modèle(s) dans le catalogue."))

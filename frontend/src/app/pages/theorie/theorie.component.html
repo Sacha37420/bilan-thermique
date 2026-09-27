@@ -125,7 +125,7 @@
             <li><strong>Propriétés optiques à incidence normale</strong> — <span class="sym">τ, r, α</span> sont constants. Sur un vitrage réel, <span class="sym">τ</span> s'effondre au-delà de ~60° (≈ 0,87 à 0° → ≈ 0,4 à 75°) : les apports solaires par les vitrages sont <strong>surestimés</strong>, surtout en façade est/ouest le matin et le soir.</li>
             <li><strong>Rayonnement transmis instantané</strong> — ce qui traverse un vitrage chauffe l'air immédiatement et intégralement. Dans un local réel il frappe le sol et les parois, y est stocké, puis restitué avec plusieurs heures de déphasage. C'est la simplification la plus lourde de conséquence sur la dynamique jour/nuit d'un bâtiment vitré.</li>
             <li><strong>Diffus isotrope</strong> — ni renforcement circumsolaire, ni bande d'horizon (modèles de Hay/Perez) : 5 à 15 % d'écart usuel sur une façade verticale.</li>
-            <li><strong>Obstacles parfaitement noirs</strong> — un bâtiment voisin retire sa part de ciel sans rien réémettre ni réfléchir. Combiné à l'albédo absent, les apports diffus sont <strong>sous-estimés en milieu dense</strong> — précisément le cas d'usage de la génération automatique d'environnement.</li>
+            <li><strong>Obstacles parfaitement noirs</strong> — un bâtiment voisin retire sa part de ciel sans rien réémettre ni réfléchir. Les apports diffus sont donc <strong>sous-estimés en milieu dense</strong>. Seul le <em>sol</em> réfléchit : son albédo est relevé sur l'orthophoto IGN (environnement généré depuis le LiDAR), éclairé uniformément par l'éclairement global horizontal — ses ombres portées sont ignorées.</li>
             <li><strong>Ombrage précalculé discrétisé à 15°</strong> en azimut et en élévation : un obstacle fin fait basculer une heure entière de « ombré » à « ensoleillé », et tout soleil sous 7,5° d'élévation est évalué à 0°, donc presque toujours bloqué. Le mode « temps réel » relance un vrai lancer de rayons à l'angle exact de chaque heure — à utiliser dès que l'ombrage est déterminant.</li>
             <li><strong>Sol : source à température constante</strong> — <span class="sym">t_ground</span> ne varie pas dans l'année et la terre n'a aucune inertie. Sa résistance <span class="sym">r_ground</span> est un paramètre saisi, pas un calcul de géométrie (ISO 13370).</li>
             <li><strong>Végétation à transmittance constante</strong> — un arbre à feuilles caduques est modélisé en feuilles toute l'année, ce qui <strong>surestime l'ombrage hivernal</strong>. Sa hauteur et son houppier sont relevés par le LiDAR HD ; sa transparence aussi, mais un relevé fait feuilles tombées ne renseigne que l'hiver — c'est alors une valeur « en feuilles » par défaut qui s'applique.</li>
@@ -134,7 +134,7 @@
 
           <p class="callout-heading">3. Extensions identifiées — chiffrables, pas encore faites</p>
           <ul>
-            <li><strong>Infrarouge vers la voûte céleste</strong>, <strong>albédo du sol</strong>, <strong>réflexions multiples entre couches vitrées</strong> — voir section 13, qui indique où chacune s'insérerait.</li>
+            <li><strong>Infrarouge vers la voûte céleste</strong>, <strong>réflexion par les façades voisines</strong>, <strong>réflexions multiples entre couches vitrées</strong> — voir section 13, qui indique où chacune s'insérerait.</li>
             <li><strong>Saisonnalité de la végétation</strong> — les transmittances « sans feuilles » sont déjà tabulées, il manque la bascule.</li>
           </ul>
 
@@ -913,7 +913,7 @@
           </p>
           <ul>
             <li><strong>Grande longueur d'onde (IR)</strong> — perte radiative nette vers le ciel nocturne, à ajouter au bilan du nœud 0 comme un terme <span class="sym">εσ(T₀⁴ − T_ciel⁴)</span> linéarisé autour de <span class="sym">T₀</span> pour rester dans un système linéaire.</li>
-            <li><strong>Albédo du sol</strong> — troisième composante de <span class="sym">E_glo</span>, proportionnelle à l'éclairement horizontal global et au facteur de vue du sol (<span class="sym">1 − F_ciel</span>).</li>
+            <li><strong>Albédo du sol</strong> — <em>fait</em> (Lot AI) : troisième composante de <span class="sym">E_glo</span>, <span class="sym">ρ_vu · (1 − cos β)/2 · E_gh</span>, où <span class="sym">ρ_vu</span> est l'albédo moyen du sol réellement vu par la paroi (lancer de rayons vers le bas, voisins masquants), relevé sur l'orthophoto IGN. Absent pour un environnement sans albédo relevé (import, générations antérieures).</li>
             <li><strong>Réflexions multiples entre couches vitrées</strong> — pour un vitrage multiple, la méthode couche-par-couche en section 05 ignore les réflexions internes répétées entre lames ; un traitement type ISO 15099 les prendrait en compte au prix d'un système optique résolu à part, dont la sortie reste la même grandeur <span class="sym">E_abs,j</span> par couche.</li>
             <li><strong>Ponts thermiques (2D/3D)</strong> — hors de portée d'un modèle 1D par nature ; nécessiterait un maillage surfacique ou volumique.</li>
             <li><strong>Saisonnalité de la végétation</strong> — les transmittances « feuilles absentes » sont déjà tabulées par type ; il manque la bascule en fonction de la date, qui suppose de faire entrer une notion de calendrier là où le solveur ne connaît aujourd'hui que des heures.</li>

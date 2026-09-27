@@ -35,6 +35,12 @@
   --nav-h: 64px;
   --sidebar-w: 240px;
   --sidebar-w-collapsed: 76px;
+
+  /* Teintes de façade par matériau (BD TOPO) dans la vue 3D de l'environnement
+     (bilan-thermique, Lot AI). Couleurs de DONNÉE, comme l'orthophoto drapée à
+     côté d'elles : identiques dans les deux thèmes, volontairement. */
+  --mat-pierre: #cbbd9c; --mat-brique: #b2634a; --mat-beton: #9b9c98;
+  --mat-enduit: #d8d0bf; --mat-bois: #8a6a4a; --mat-inconnu: #a6a9b1;
   color-scheme: light;
 }
 

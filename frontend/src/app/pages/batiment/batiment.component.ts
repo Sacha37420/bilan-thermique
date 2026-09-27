@@ -334,6 +334,9 @@ export class BatimentComponent implements OnInit {
     const triangles = this.triangles().map(t => ({
       v: t.v, group: t.group, paroi_model_id: t.paroi_model_id, boundary: t.boundary ?? 'exterior_air',
       shading_profile_id: t.shading_profile_id ?? null,
+      // Lot AI : absorptance mesurée (orthophoto) ou usuelle (matériau) — la
+      // perdre ici l'effacerait au premier enregistrement.
+      alpha_ext: t.alpha_ext ?? null,
     }));
     const id = this.currentBuildingId();
     const payload: Record<string, unknown> = {

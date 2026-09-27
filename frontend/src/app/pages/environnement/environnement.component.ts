@@ -1,11 +1,11 @@
-import { Component, OnDestroy, OnInit, ViewChild, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe, UpperCasePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
 import { EnvironmentMesh, EnvironmentObject, Job } from '../../core/building.types';
-import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
+import { EnvSceneComponent } from '../../components/env-scene/env-scene.component';
 
 interface EnvironmentSummary {
   id: number;
@@ -30,7 +30,14 @@ interface FitReport {
   degenerate_removed: number;
 }
 
-type ViewTriangle = { v: [number, number, number]; k?: number | null };
+/** Lot AI — pré-assignation des parois d'après la BD TOPO (rapport serveur). */
+interface MaterialsReport {
+  basis: string;
+  era: string | null;
+  assigned: { wall: string | null; roof: string | null; floor: string | null };
+  wall_alpha: number | null;
+  roof_alpha: number | null;
+}
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -55,14 +62,12 @@ const ORIGIN_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-environnement',
   standalone: true,
-  imports: [FormsModule, RouterLink, DecimalPipe, UpperCasePipe, MeshViewerComponent],
+  imports: [FormsModule, RouterLink, DecimalPipe, UpperCasePipe, EnvSceneComponent],
   templateUrl: './environnement.component.html',
   styleUrl: './environnement.component.scss',
 })
 export class EnvironnementComponent implements OnInit, OnDestroy {
   private api = inject(ApiService);
-
-  @ViewChild(MeshViewerComponent) viewer?: MeshViewerComponent;
 
   environments = signal<EnvironmentSummary[]>([]);
   buildings = signal<{ id: number; name: string }[]>([]);
@@ -71,12 +76,11 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
   env = signal<EnvironmentMesh | null>(null);
   name = '';
   description = '';
-  // Géométrie AFFICHÉE : tous les objets, y compris retirés (en pâle) — un
-  // changement de statut ne fait que repeindre, la vue ne saute pas.
-  vertices = signal<number[][]>([]);
-  triangles = signal<ViewTriangle[]>([]);
-  private triObject: Int32Array = new Int32Array(0);
-  selectedId = signal<number | null>(null);
+  // Sélection : un objet, ou plusieurs bâtiments en mode « sélection
+  // multiple » (plusieurs emprises BD TOPO qui ne forment qu'un bâtiment).
+  selectedIds = signal<number[]>([]);
+  multiSelect = false;
+  showTexture = true;
 
   loading = signal(false);
   saving = signal(false);
@@ -85,6 +89,7 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
   message = signal('');
   createdBuilding = signal<{ id: number; name: string } | null>(null);
   fitReport = signal<FitReport | null>(null);
+  materialsReport = signal<MaterialsReport | null>(null);
 
   // ── Génération ───────────────────────────────────────────────────────
   genLat = 47.3445;
@@ -138,90 +143,61 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** rebuild = reconstruire la géométrie affichée (chargement) ; sinon, les
-   * objets n'ont changé que de statut : on repeint, la caméra ne bouge pas. */
-  private applyEnvironment(e: EnvironmentMesh, rebuild: boolean): void {
+  /** La scène (EnvSceneComponent) ne reconstruit sa géométrie que si
+   * l'environnement change d'identité ou d'objets ; un changement de statut
+   * la repeint seulement, la caméra ne bouge pas. */
+  private applyEnvironment(e: EnvironmentMesh, resetSelection: boolean): void {
     this.env.set(e);
     this.name = e.name;
     this.description = e.description;
-    if (!rebuild) {
-      this.viewer?.repaint();
-      return;
-    }
-    this.selectedId.set(null);
-    if (e.objects?.length) {
-      const vertices: number[][] = [];
-      const triangles: ViewTriangle[] = [];
-      const owner: number[] = [];
-      e.objects.forEach((obj, index) => {
-        const offset = vertices.length;
-        for (const v of obj.vertices) vertices.push(v);
-        for (const t of obj.triangles) {
-          triangles.push({ v: [t.v[0] + offset, t.v[1] + offset, t.v[2] + offset], k: obj.k });
-          owner.push(index);
-        }
-      });
-      this.triObject = Int32Array.from(owner);
-      this.vertices.set(vertices);
-      this.triangles.set(triangles);
-    } else {
-      // Maillage d'un seul tenant (import de fichier, ou environnement antérieur
-      // au Lot AH) : pas d'objets, pas de sélection.
-      this.triObject = new Int32Array(0);
-      this.vertices.set(e.envelope.vertices);
-      this.triangles.set(e.envelope.triangles as ViewTriangle[]);
-    }
+    if (resetSelection) this.selectedIds.set([]);
   }
 
   get hasObjects(): boolean {
     return (this.env()?.objects?.length ?? 0) > 0;
   }
 
-  get selected(): EnvironmentObject | null {
-    const id = this.selectedId();
-    return this.env()?.objects.find(o => o.id === id) ?? null;
+  get selectedObjects(): EnvironmentObject[] {
+    const ids = this.selectedIds();
+    return (this.env()?.objects ?? []).filter(o => ids.includes(o.id));
   }
 
-  colorForTriangle = (index: number): string => {
-    const e = this.env();
-    if (!e?.objects?.length) {
-      const k = this.triangles()[index]?.k;
-      return k !== null && k !== undefined && k > 0 ? '--success' : '--text-mute';
-    }
-    const obj = e.objects[this.triObject[index]];
-    if (!obj) return '--border';
-    if (obj.id === this.selectedId()) return '--danger';
-    if (obj.status === 'studied') return '--accent';
-    if (obj.status === 'removed') return '--border';
-    if (obj.kind === 'vegetation') return '--success';
-    if (obj.kind === 'terrain') return '--success-tint';
-    if (obj.origin === 'lidar') return '--text';
-    if (obj.origin === 'bdtopo' || obj.origin === 'osm') return '--warning';
-    return '--text-mute';
-  };
+  /** L'objet détaillé dans la fiche : seulement quand un seul est choisi. */
+  get selected(): EnvironmentObject | null {
+    const objs = this.selectedObjects;
+    return objs.length === 1 ? objs[0] : null;
+  }
 
-  onTriangleClick(index: number): void {
-    const obj = this.env()?.objects[this.triObject[index]];
-    if (!obj) return;
-    // Le terrain couvre tout : un clic « à côté » d'un bâtiment ne doit pas
-    // sélectionner le terrain par surprise si un objet était déjà choisi.
-    this.selectedId.set(this.selectedId() === obj.id ? null : obj.id);
+  get selectionIsStudiable(): boolean {
+    const objs = this.selectedObjects;
+    return objs.length > 0 && objs.every(o => o.kind === 'building' && o.status !== 'studied');
+  }
+
+  onObjectClick(obj: EnvironmentObject): void {
+    const ids = this.selectedIds();
+    if (this.multiSelect) {
+      // En sélection multiple, seuls les bâtiments comptent : un clic tombé sur
+      // le terrain ou un arbre entre deux bâtiments ne doit pas effacer la
+      // sélection en cours (constaté en navigateur).
+      if (obj.kind !== 'building' || obj.status === 'studied') return;
+      this.selectedIds.set(ids.includes(obj.id) ? ids.filter(i => i !== obj.id) : [...ids, obj.id]);
+    } else {
+      this.selectedIds.set(ids.length === 1 && ids[0] === obj.id ? [] : [obj.id]);
+    }
     this.studyName = '';
     this.fitReport.set(null);
+    this.materialsReport.set(null);
     this.createdBuilding.set(null);
-    this.viewer?.repaint();
   }
 
   select(obj: EnvironmentObject): void {
-    this.selectedId.set(obj.id);
+    this.selectedIds.set([obj.id]);
     this.fitReport.set(null);
     this.createdBuilding.set(null);
-    this.viewer?.repaint();
   }
 
   clearSelection(): void {
-    this.selectedId.set(null);
-    this.viewer?.repaint();
+    this.selectedIds.set([]);
   }
 
   // ── Synthèse ─────────────────────────────────────────────────────────
@@ -284,18 +260,22 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
 
   studySelected(): void {
     const e = this.env();
-    const obj = this.selected;
-    if (!e || !obj || this.busy()) return;
+    const ids = this.selectedIds();
+    if (!e || !ids.length || this.busy()) return;
     this.busy.set(true);
     this.error.set('');
-    this.api.studyEnvironmentObject(e.id, obj.id, this.studyName.trim()).subscribe({
+    this.api.studyEnvironmentObjects(e.id, ids, this.studyName.trim()).subscribe({
       next: (res) => {
-        const r = res as { building: { id: number; name: string }; environment: EnvironmentMesh };
+        const r = res as { building: { id: number; name: string }; environment: EnvironmentMesh;
+          materials: MaterialsReport | null };
         this.busy.set(false);
         this.applyEnvironment(r.environment, false);
         this.createdBuilding.set({ id: r.building.id, name: r.building.name });
+        this.materialsReport.set(r.materials);
         this.buildings.update(list => [...list, { id: r.building.id, name: r.building.name }]);
-        this.message.set(`Bâtiment étudié « ${r.building.name} » créé, déjà lié à cet environnement.`);
+        this.message.set(ids.length > 1
+          ? `Bâtiment étudié « ${r.building.name} » créé : ${ids.length} emprises réunies en une seule enveloppe, liée à cet environnement.`
+          : `Bâtiment étudié « ${r.building.name} » créé, déjà lié à cet environnement.`);
       },
       error: (err) => {
         this.busy.set(false);
@@ -374,10 +354,7 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
 
   closeEnvironment(): void {
     this.env.set(null);
-    this.vertices.set([]);
-    this.triangles.set([]);
-    this.triObject = new Int32Array(0);
-    this.selectedId.set(null);
+    this.selectedIds.set([]);
   }
 
   // ── Génération ───────────────────────────────────────────────────────

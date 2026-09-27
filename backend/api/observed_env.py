@@ -374,6 +374,9 @@ def build_rasters(x, y, z, cls, half_m, ground_z=None):
 
     r.n_ground = _count(g1, x[ground], y[ground])
     r.n_total = _count(g1, x, y)
+    from .lidar_source import CLASS_WATER
+    water = cls == CLASS_WATER
+    r.n_water = _count(g1, x[water], y[water])
     return r, float(ground_z)
 
 
@@ -1297,6 +1300,11 @@ ROOF_SECTORS = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO']
 
 
 def building_envelope_from_object(obj, other_objects=()):
+    """Voir building_envelope_from_mesh — cas d'un objet unique."""
+    return building_envelope_from_mesh(obj['vertices'], obj['triangles'], {obj['id']}, other_objects)
+
+
+def building_envelope_from_mesh(vertices, triangles, exclude_ids, other_objects=()):
     """Enveloppe de Building (format TriangleInputSerializer) à partir d'un
     objet bâtiment de l'environnement, DANS LE MÊME REPÈRE : aucun
     changement de coordonnées, c'est ce qui garantit l'alignement parfait
@@ -1308,15 +1316,15 @@ def building_envelope_from_object(obj, other_objects=()):
     (ou `toiture_plate`), `sol` (au contact du terrain)."""
     from . import geometry
 
-    vertices = [list(v) for v in obj['vertices']]
-    triangles = [dict(t) for t in obj['triangles']]
+    vertices = [list(v) for v in vertices]
+    triangles = [dict(t) for t in triangles]
     geom = geometry.compute_envelope_geometry(vertices, [{'v': t['v']} for t in triangles])
 
     neighbours = [rings_to_poly(o['footprint']) for o in other_objects
                   if o.get('kind') == 'building' and o.get('status') == STATUS_ACTIVE
-                  and o.get('footprint') and o['id'] != obj['id']]
+                  and o.get('footprint') and o['id'] not in exclude_ids]
     neighbours = [p for p in neighbours if p is not None and not p.is_empty]
-    shared_walls = _shared_wall_groups(obj, vertices, triangles, neighbours)
+    shared_walls = _shared_wall_groups(vertices, triangles, neighbours)
 
     out = []
     for tri, g in zip(triangles, geom):
@@ -1335,7 +1343,7 @@ def building_envelope_from_object(obj, other_objects=()):
     return vertices, out
 
 
-def _shared_wall_groups(obj, vertices, triangles, neighbours):
+def _shared_wall_groups(vertices, triangles, neighbours):
     if not neighbours:
         return set()
     union = shapely.ops.unary_union([p.buffer(0.4) for p in neighbours])
@@ -1482,7 +1490,7 @@ def _fallback_height(fp):
 
 
 def build_objects(frame, half_m, points, bdtopo, acquisition_months, include_vegetation=True,
-                  include_terrain=True, self_polygon=None, progress_cb=None):
+                  include_terrain=True, self_polygon=None, progress_cb=None, return_rasters=False):
     """Chaîne complète, sans réseau. points = (e, n, z, cls) en Lambert 93 ;
     bdtopo = sortie de lidar_source.fetch_bdtopo_buildings_l93.
 
@@ -1570,6 +1578,8 @@ def build_objects(frame, half_m, points, bdtopo, acquisition_months, include_veg
             continue
         info.update({
             'bdtopo_id': fp.get('id'), 'nature': fp.get('nature'), 'usage': fp.get('usage'),
+            'mat_murs': fp.get('mat_murs'), 'mat_toit': fp.get('mat_toit'), 'annee': fp.get('annee'),
+            'logements': fp.get('logements'), 'etages': fp.get('etages'),
             'shift_m': fp.get('shift'), 'lidar_cover_before': fp.get('cover_before'),
             'lidar_cover': cover, 'hauteur_bdtopo': fp.get('hauteur'), 'distance_m': round(dist, 1),
         })
@@ -1655,7 +1665,9 @@ def build_objects(frame, half_m, points, bdtopo, acquisition_months, include_veg
             f"Emprises BD TOPO recalées de {math.hypot(*global_shift):.1f} m en bloc sur le LiDAR, "
             "puis bâtiment par bâtiment (±2 m au plus)."
         )
-    report('done', 95)
+    report('done', 88)
+    if return_rasters:
+        return objects, ground_z, stats, warnings, rasters
     return objects, ground_z, stats, warnings
 
 
@@ -1710,3 +1722,342 @@ def _apply_budget(objects, warnings):
         )
     kept.sort(key=lambda o: o['id'])
     return kept
+
+
+# ── Lot AI — orthophoto : albédo du sol, absorptance des toitures ──────────────
+
+WATER_ALBEDO = 0.07
+DEFAULT_GROUND_ALBEDO = 0.20
+ALBEDO_CELL_M = 2.0
+
+
+class OrthoImage:
+    """Orthophotos RVB + infrarouge couleur (IRC) d'une même emprise Lambert 93,
+    échantillonnables en coordonnées Lambert 93.
+
+    Albédo solaire « large bande » estimé par pixel : moitié visible (moyenne
+    des canaux RVB), moitié proche infrarouge (canal rouge de l'IRC) — le
+    rayonnement solaire se partage à peu près en deux entre ces domaines.
+    Chaque canal est d'abord ramené à une grandeur linéaire (inverse du gamma
+    d'affichage, 2,2). Ce n'est PAS une réflectance calibrée (l'orthophoto est
+    corrigée pour l'œil, pas pour la radiométrie) : un ordre de grandeur,
+    borné à [0,04 ; 0,80]. Une pelouse, sombre dans le visible mais très claire
+    dans l'infrarouge, en ressort correctement plus claire qu'un enrobé — ce
+    que le visible seul inverserait."""
+
+    def __init__(self, rgb, irc, bbox_l93):
+        self.rgb = rgb
+        self.irc = irc
+        self.bbox = bbox_l93
+        h, w = rgb.shape[:2]
+        self.h, self.w = h, w
+        lin = lambda a: (a.astype(np.float32) / 255.0) ** 2.2  # noqa: E731
+        vis = lin(rgb).mean(axis=2)
+        nir = lin(irc[..., 0])
+        red = lin(irc[..., 1])
+        self.albedo = np.clip(0.5 * vis + 0.5 * nir, 0.04, 0.80)
+        self.ndvi = (nir - red) / np.maximum(nir + red, 1e-6)
+
+    def _pix(self, e, n):
+        xmin, ymin, xmax, ymax = self.bbox
+        col = np.clip(((np.asarray(e) - xmin) / (xmax - xmin) * self.w).astype(int), 0, self.w - 1)
+        row = np.clip(((ymax - np.asarray(n)) / (ymax - ymin) * self.h).astype(int), 0, self.h - 1)
+        return row, col
+
+    def albedo_at(self, e, n):
+        row, col = self._pix(e, n)
+        return self.albedo[row, col]
+
+    def ndvi_at(self, e, n):
+        row, col = self._pix(e, n)
+        return self.ndvi[row, col]
+
+
+def ground_albedo_grid(ortho, frame, rasters, half_m, cell_m=ALBEDO_CELL_M):
+    """Grille d'albédo du sol dans le repère local (maille de 2 m), moyenne de
+    16 échantillons d'orthophoto par maille. L'eau vient du LiDAR (classe 9),
+    plus fiable que l'image — reflets et ombres y trompent l'albédo apparent.
+
+    Retourne {'half', 'cell', 'n', 'values'} : values[j * n + i], maille (i, j)
+    centrée en x = -half + (i + ½)·cell, y = -half + (j + ½)·cell."""
+    g = Grid(half_m, cell_m)
+    sub = (np.arange(4) + 0.5) / 4.0 - 0.5
+    X, Y = g.centers()
+    acc = np.zeros_like(X)
+    for dx in sub:
+        for dy in sub:
+            e, n = frame.to_l93(X + dx * cell_m, Y + dy * cell_m)
+            acc += ortho.albedo_at(e, n)
+    values = acc / (len(sub) ** 2)
+    water = rasters.grid.sample(rasters.n_water.astype(float), X.ravel(), Y.ravel(), order=0).reshape(X.shape)
+    total = rasters.grid.sample(rasters.n_total.astype(float), X.ravel(), Y.ravel(), order=0).reshape(X.shape)
+    values = np.where((total > 0) & (water / np.maximum(total, 1) > 0.5), WATER_ALBEDO, values)
+    return {'half': half_m, 'cell': cell_m, 'n': g.n,
+            'values': [round(float(v), 3) for v in values.ravel()]}
+
+
+def albedo_lookup(grid_dict, default=DEFAULT_GROUND_ALBEDO):
+    """Fonction (x, y) → albédo pour une grille ground_albedo_grid ; hors grille,
+    la moyenne de la grille (le sol au-delà ressemble à celui de la zone)."""
+    if not grid_dict or not grid_dict.get('values'):
+        return lambda x, y: np.full(np.shape(x), default)
+    half, cell, n = grid_dict['half'], grid_dict['cell'], grid_dict['n']
+    vals = np.asarray(grid_dict['values'], dtype=float).reshape(n, n)
+    mean = float(vals.mean())
+
+    def lookup(x, y):
+        i = np.floor((np.asarray(x) + half) / cell).astype(int)
+        j = np.floor((np.asarray(y) + half) / cell).astype(int)
+        ok = (i >= 0) & (i < n) & (j >= 0) & (j < n)
+        out = np.full(np.shape(i), mean)
+        out[ok] = vals[j[ok], i[ok]]
+        return out
+    return lookup
+
+
+def roof_albedo(poly, ortho, frame):
+    """Albédo de toiture relevé sur l'orthophoto : 75ᵉ centile des pixels de
+    l'emprise érodée de 0,7 m, hors pixels de végétation (NDVI > 0,3 — arbre en
+    surplomb).
+
+    Pourquoi le 75ᵉ centile et non la médiane : l'image est prise sous un soleil
+    donné, et le pan d'un toit à deux versants tourné à l'opposé paraît sombre
+    sans l'être — la médiane mélangeait les deux pans (tuiles à 0,12 mesurées sur
+    un quartier réel, contre 0,16 au 75ᵉ centile ; ardoises 0,09 → 0,12, zinc
+    0,26 → 0,48 — ordre conservé, valeurs plus proches des références). La
+    calibration de l'albédo lui-même a été vérifiée sur la même image :
+    feuillus 0,15, pelouse 0,20, enrobé 0,04, minéral clair 0,44.
+
+    Limite connue : l'orthophoto n'est pas une « vraie ortho », le toit d'un
+    bâtiment haut y est déporté de sa base (jusqu'à quelques mètres en bord
+    d'image). Retourne None si trop peu de pixels exploitables."""
+    inner = poly.buffer(-0.7)
+    if inner.is_empty or inner.area < 2.0:
+        inner = poly
+    xmin, ymin, xmax, ymax = inner.bounds
+    xs, ys = np.meshgrid(np.arange(xmin, xmax, 0.4), np.arange(ymin, ymax, 0.4))
+    sel = shapely.contains_xy(inner, xs, ys)
+    if sel.sum() < 6:
+        return None
+    e, n = frame.to_l93(xs[sel], ys[sel])
+    alb = ortho.albedo_at(e, n)
+    ndvi = ortho.ndvi_at(e, n)
+    alb = alb[ndvi < 0.3]
+    if len(alb) < 6:
+        return None
+    return round(float(np.percentile(alb, 75)), 3)
+
+
+def apply_ortho(objects, ortho, frame, rasters, half_m):
+    """Complète les objets bâtiment de leur albédo de toiture mesuré et
+    retourne la grille d'albédo du sol."""
+    for obj in objects:
+        if obj['kind'] != 'building' or not obj.get('footprint'):
+            continue
+        alb = roof_albedo(rings_to_poly(obj['footprint']), ortho, frame)
+        if alb is not None:
+            obj['info']['roof_albedo'] = alb
+    return ground_albedo_grid(ortho, frame, rasters, half_m)
+
+
+# ── Lot AI — matériaux BD TOPO → parois du catalogue ───────────────────────────
+
+WALL_MATERIALS = {'1': 'pierre', '2': 'meulière', '3': 'béton', '4': 'briques', '5': 'aggloméré',
+                  '6': 'bois', '9': 'autres'}
+ROOF_MATERIALS = {'1': 'tuiles', '2': 'ardoises', '3': 'zinc aluminium', '4': 'béton', '9': 'autres'}
+
+# Absorptance solaire usuelle du parement extérieur, par matériau (valeurs
+# indicatives, même statut que le catalogue de parois). Un parpaing est
+# presque toujours enduit, d'où une valeur d'enduit clair.
+WALL_ALPHA = {'pierre': 0.55, 'meulière': 0.60, 'béton': 0.65, 'briques': 0.70,
+              'aggloméré': 0.50, 'bois': 0.75, 'autres': 0.60}
+ROOF_ALPHA = {'tuiles': 0.70, 'ardoises': 0.90, 'zinc aluminium': 0.60, 'béton': 0.75, 'autres': 0.70}
+
+
+def decode_materials(code, table):
+    """Code fichiers fonciers à deux chiffres : chaque chiffre non nul est un
+    matériau (« 35 » = béton + aggloméré, « 10 » = pierre, « 00 » = inconnu)."""
+    if not code:
+        return []
+    out = []
+    for ch in str(code).strip():
+        name = table.get(ch)
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def _era(year):
+    if year is None:
+        return None
+    for limit, era in ((1948, 'ancien'), (1975, '1948-1974'), (1982, '1975-1981'), (1989, '1982-1988'),
+                       (2001, '1989-2000'), (2013, '2001-2012'), (2022, '2013-2021')):
+        if year < limit:
+            return era
+    return '2022+'
+
+
+# Noms EXACTS des modèles du catalogue (seed_paroi_catalogue). Une entrée
+# absente du catalogue en base est simplement ignorée par l'appelant.
+WALL_BY_ERA = {
+    '1975-1981': 'Mur maçonné ITI — 1975–1981 (isolant 40 mm)',
+    '1982-1988': 'Mur maçonné ITI — 1982–1988 (isolant 60 mm)',
+    '1989-2000': 'Mur maçonné ITI — 1989–2000 (isolant 80 mm)',
+    '2001-2012': 'Mur ITI — RT2005 (isolant 100 mm)',
+    '2013-2021': 'Mur ITI — RT2012 (isolant 140 mm)',
+    '2022+': 'Mur ITI — RE2020 (isolant 180 mm)',
+}
+ROOF_BY_ERA = {
+    'ancien': 'Toiture non isolée (avant 1975)',
+    '1948-1974': 'Toiture non isolée (avant 1975)',
+    '1975-1981': 'Toiture isolée — 1975–1981 (isolant 60 mm)',
+    '1982-1988': 'Toiture isolée — 1982–1988 (isolant 100 mm)',
+    '1989-2000': 'Toiture isolée — 1989–2000 (isolant 150 mm)',
+    '2001-2012': 'Toiture — RT2005 (isolant 200 mm)',
+    '2013-2021': 'Toiture — RT2012 (isolant 300 mm)',
+    '2022+': 'Toiture — RE2020 (isolant 400 mm)',
+}
+FLOOR_BY_ERA = {
+    'ancien': 'Plancher bas non isolé (avant 1975)',
+    '1948-1974': 'Plancher bas non isolé (avant 1975)',
+    '1975-1981': 'Plancher bas sur terre-plein — RT2005 (isolant 40 mm)',
+    '1982-1988': 'Plancher bas sur terre-plein — RT2005 (isolant 40 mm)',
+    '1989-2000': 'Plancher bas sur terre-plein — RT2005 (isolant 40 mm)',
+    '2001-2012': 'Plancher bas sur terre-plein — RT2005 (isolant 40 mm)',
+    '2013-2021': 'Plancher bas sur terre-plein — RT2012 (isolant 80 mm)',
+    '2022+': 'Plancher bas sur terre-plein — RE2020 (isolant 120 mm)',
+}
+
+
+def _wall_model(era, materials):
+    main = materials[0] if materials else None
+    if main == 'bois':
+        return 'Mur pan de bois / torchis (avant 1948)' if era == 'ancien' else 'Mur ossature bois (isolant 100 mm)'
+    if era == 'ancien':
+        if main == 'briques':
+            return 'Mur brique pleine 34 cm (avant 1948)'
+        return 'Mur pierre 50 cm (avant 1948)'
+    if era == '1948-1974':
+        if main in ('pierre', 'meulière'):
+            return 'Mur pierre 50 cm (avant 1948)'
+        if main == 'béton':
+            return 'Mur béton banché 16 cm non isolé (1948–1974)'
+        return 'Mur parpaing 20 cm non isolé (1948–1974)'
+    if era is None:
+        # Sans année : le matériau seul départage l'ancien (pierre, brique) du
+        # reste, qu'on ne sait pas dater — aucune suggestion plutôt qu'une
+        # isolation inventée.
+        if main in ('pierre', 'meulière'):
+            return 'Mur pierre 50 cm (avant 1948)'
+        if main == 'briques':
+            return 'Mur brique pleine 34 cm (avant 1948)'
+        return None
+    return WALL_BY_ERA.get(era)
+
+
+def suggest_materials(info):
+    """Suggestion de parois et d'absorptances pour un bâtiment, à partir des
+    attributs BD TOPO (matériaux, année) et de l'albédo de toiture mesuré.
+    Retourne {'wall', 'roof', 'floor' (noms du catalogue ou None),
+    'wall_alpha', 'roof_alpha', 'basis' (explication lisible)}."""
+    walls = decode_materials(info.get('mat_murs'), WALL_MATERIALS)
+    roofs = decode_materials(info.get('mat_toit'), ROOF_MATERIALS)
+    year = info.get('annee')
+    era = _era(year)
+    roof_alb = info.get('roof_albedo')
+    if roof_alb is not None:
+        roof_alpha = round(min(max(1.0 - roof_alb, 0.30), 0.95), 2)
+        roof_alpha_src = f"mesurée sur l'orthophoto (albédo {roof_alb:.2f})"
+    elif roofs:
+        roof_alpha = ROOF_ALPHA[roofs[0]]
+        roof_alpha_src = f"usuelle pour {roofs[0]}"
+    else:
+        roof_alpha, roof_alpha_src = None, None
+    wall_alpha = WALL_ALPHA[walls[0]] if walls else None
+
+    parts = []
+    parts.append(f"construit en {year}" if year else "année inconnue")
+    parts.append(f"murs : {', '.join(walls)}" if walls else "matériau des murs inconnu")
+    parts.append(f"toiture : {', '.join(roofs)}" if roofs else "matériau de toiture inconnu")
+    if roof_alpha_src:
+        parts.append(f"absorptance du toit {roof_alpha:.2f}, {roof_alpha_src}")
+    return {
+        'wall': _wall_model(era, walls), 'roof': ROOF_BY_ERA.get(era), 'floor': FLOOR_BY_ERA.get(era),
+        'wall_alpha': wall_alpha, 'roof_alpha': roof_alpha, 'era': era, 'basis': ' ; '.join(parts) + '.',
+    }
+
+
+# ── Lot AI — plusieurs objets = un seul bâtiment ───────────────────────────────
+
+def merge_objects(objs):
+    """Un bâtiment réel découpé en plusieurs emprises BD TOPO (fréquent : corps
+    principal, extension, garage accolé) doit être étudié comme UN volume : les
+    murs entre ces parties sont intérieurs. Assembler les maillages tels quels
+    garderait ces murs comme des parois exposées à l'extérieur — erreur
+    directe sur les déperditions.
+
+    On reconstruit donc une enveloppe neuve sur l'UNION des emprises (jours de
+    quelques centimètres entre emprises voisines refermés), avec pour toiture
+    les hauteurs des toitures des parties, relevées par lancer de rayons
+    vertical sur leurs maillages : les ressauts entre parties deviennent des
+    murs extérieurs seulement au-dessus du toit le plus bas, ce qui est exact.
+    Retourne (vertices, triangles, polygon, info)."""
+    import trimesh
+
+    polys = [rings_to_poly(o['footprint']) for o in objs if o.get('footprint')]
+    if len(polys) != len(objs):
+        raise ObservedEnvError("Un des objets sélectionnés n'a pas d'emprise.")
+    union = shapely.ops.unary_union([p.buffer(0.3, join_style=2) for p in polys]).buffer(-0.3, join_style=2)
+    if union.geom_type != 'Polygon':
+        raise ObservedEnvError(
+            "Les bâtiments sélectionnés ne se touchent pas : ils ne forment pas un seul volume."
+        )
+    union = orient(union.simplify(0.1, preserve_topology=True), 1.0)
+
+    verts, faces = [], []
+    for o in objs:
+        base = len(verts)
+        verts.extend(o['vertices'])
+        faces.extend([t['v'][0] + base, t['v'][1] + base, t['v'][2] + base] for t in o['triangles'])
+    mesh = trimesh.Trimesh(np.asarray(verts, float), np.asarray(faces), process=False)
+    base_z = float(min(v[2] for o in objs for v in o['vertices']))
+    top = float(max(v[2] for o in objs for v in o['vertices'])) + 10.0
+
+    inner = union.buffer(-0.3)
+    if inner.is_empty:
+        inner = union
+    xmin, ymin, xmax, ymax = inner.bounds
+    xs, ys = np.meshgrid(np.arange(xmin, xmax, 0.5), np.arange(ymin, ymax, 0.5))
+    sel = shapely.contains_xy(inner, xs, ys)
+    pts = np.column_stack([xs[sel], ys[sel]])
+    origins = np.column_stack([pts, np.full(len(pts), top)])
+    locs, ray_idx, _ = mesh.ray.intersects_location(origins, np.tile([0, 0, -1.0], (len(pts), 1)),
+                                                    multiple_hits=False)
+    rz = np.full(len(pts), np.nan)
+    rz[ray_idx] = locs[:, 2]
+    ok = ~np.isnan(rz)
+    rxy, rz = pts[ok], rz[ok]
+    if len(rz) < 8:
+        raise ObservedEnvError("Toiture des bâtiments sélectionnés introuvable.")
+    if len(rz) > 800:
+        keep = np.arange(len(rz))[::2]
+        rxy, rz = rxy[keep], rz[keep]
+
+    budget = int(min(max(union.area / 6.0, 30), 300))
+    rings3d, interior, tris, _n = roof_surface(union, (rxy, rz), _eave_sampler(rxy, rz), 0.3, budget,
+                                               float(np.median(rz)))
+    original = [_ring_coords(union.exterior)] + [_ring_coords(r) for r in union.interiors]
+    groups = _edge_groups_for(rings3d, original)
+    vertices, triangles = solid_mesh(rings3d, interior, tris, base_z, groups)
+
+    # Attributs : ceux de la plus grande partie (matériaux, année, albédo de
+    # toiture pondéré par l'aire des parties qui en ont un).
+    areas = [p.area for p in polys]
+    main = objs[int(np.argmax(areas))]
+    info = {k: main['info'].get(k) for k in ('mat_murs', 'mat_toit', 'annee', 'usage', 'nature')}
+    albs = [(o['info'].get('roof_albedo'), a) for o, a in zip(objs, areas) if o['info'].get('roof_albedo') is not None]
+    if albs:
+        info['roof_albedo'] = round(sum(v * a for v, a in albs) / sum(a for _v, a in albs), 3)
+    info.update({'merged_ids': [o['id'] for o in objs], 'base_z': round(base_z, 2),
+                 'height_m': round(max(v[2] for v in vertices) - base_z, 2)})
+    return vertices, triangles, union, info

@@ -14,6 +14,8 @@ testé — sinon un bug dans ces fonctions se reproduirait à l'identique côté
 import math
 from unittest import mock
 
+import numpy as np
+
 from django.test import SimpleTestCase, TestCase
 
 from . import building_solver, elevation, geodata, geometry, serializers, shadow, solver, weather_source
@@ -3783,3 +3785,278 @@ class EnvironmentServiceTest(TestCase):
         # z relatif au sol d'origine (90 m), pas l'altitude NGF absolue.
         self.assertAlmostEqual(min(v[2] for v in b['vertices']), 1.0, places=2)
         self.assertAlmostEqual(max(v[2] for v in b['vertices']), 10.0, places=2)
+
+
+# ── Lot AI — sol (albédo), matériaux, fusion de bâtiments ─────────────────────
+
+class CatalogueExistingBuildingsTest(SimpleTestCase):
+    databases = []
+
+    def test_every_suggested_model_exists_and_is_valid(self):
+        """Toute paroi que la pré-assignation peut suggérer doit exister au
+        catalogue sous CE nom exact — sinon la famille reste silencieusement
+        non assignée."""
+        from api.management.commands.seed_paroi_catalogue import CATALOGUE, EXISTANT
+        from . import observed_env as oe
+        names = {e['name'] for e in CATALOGUE + EXISTANT}
+        suggested = set(oe.WALL_BY_ERA.values()) | set(oe.ROOF_BY_ERA.values()) | set(oe.FLOOR_BY_ERA.values())
+        suggested |= {'Mur pierre 50 cm (avant 1948)', 'Mur brique pleine 34 cm (avant 1948)',
+                      'Mur pan de bois / torchis (avant 1948)', 'Mur béton banché 16 cm non isolé (1948–1974)',
+                      'Mur parpaing 20 cm non isolé (1948–1974)', 'Mur ossature bois (isolant 100 mm)'}
+        self.assertEqual(suggested - names, set())
+        for entry in EXISTANT:
+            with self.subTest(name=entry['name']):
+                s = serializers.LayerSerializer(data=entry['layers'], many=True)
+                self.assertTrue(s.is_valid(), s.errors)
+
+    def test_indicative_u_values(self):
+        """U recalculé à la main depuis les couches (Rsi 0,13 / Rse 0,04) :
+        l'ordre de grandeur annoncé dans la description doit être tenu."""
+        from api.management.commands.seed_paroi_catalogue import EXISTANT
+        by_name = {e['name']: e['layers'] for e in EXISTANT}
+
+        def u(name):
+            return 1.0 / (0.17 + sum(l['e'] / l['lam'] for l in by_name[name]))
+        self.assertAlmostEqual(u('Mur pierre 50 cm (avant 1948)'), 1.89, delta=0.05)
+        self.assertAlmostEqual(u('Mur béton banché 16 cm non isolé (1948–1974)'), 3.17, delta=0.05)
+        self.assertAlmostEqual(u('Mur maçonné ITI — 1975–1981 (isolant 40 mm)'), 0.71, delta=0.03)
+
+
+class MaterialsSuggestionTest(SimpleTestCase):
+    databases = []
+
+    def test_decode_two_digit_codes(self):
+        from . import observed_env as oe
+        self.assertEqual(oe.decode_materials('35', oe.WALL_MATERIALS), ['béton', 'aggloméré'])
+        self.assertEqual(oe.decode_materials('10', oe.WALL_MATERIALS), ['pierre'])
+        self.assertEqual(oe.decode_materials('00', oe.WALL_MATERIALS), [])
+        self.assertEqual(oe.decode_materials('03', oe.ROOF_MATERIALS), ['zinc aluminium'])
+
+    def test_era_and_material_choices(self):
+        from . import observed_env as oe
+        s = oe.suggest_materials({'mat_murs': '10', 'mat_toit': '20', 'annee': 1930})
+        self.assertEqual(s['wall'], 'Mur pierre 50 cm (avant 1948)')
+        self.assertEqual(s['roof'], 'Toiture non isolée (avant 1975)')
+        self.assertEqual(s['roof_alpha'], 0.90)          # ardoise, sans mesure
+        s = oe.suggest_materials({'mat_murs': '30', 'annee': 1965})
+        self.assertEqual(s['wall'], 'Mur béton banché 16 cm non isolé (1948–1974)')
+        s = oe.suggest_materials({'mat_murs': '50', 'annee': 1995, 'roof_albedo': 0.25})
+        self.assertEqual(s['wall'], 'Mur maçonné ITI — 1989–2000 (isolant 80 mm)')
+        self.assertEqual(s['roof_alpha'], 0.75)          # mesurée : 1 − 0,25
+        self.assertEqual(s['wall_alpha'], 0.50)          # aggloméré enduit
+        # Ni année ni matériau : aucune isolation inventée.
+        s = oe.suggest_materials({})
+        self.assertIsNone(s['wall'])
+        self.assertIsNone(s['roof'])
+
+
+class OrthoAlbedoTest(SimpleTestCase):
+    databases = []
+
+    def test_broadband_albedo_from_rgb_and_nir(self):
+        """Gris 50 % dans le visible ET l'infrarouge : albédo = 0,5^2,2.
+        Même visible mais infrarouge très clair (végétation) : plus élevé."""
+        import numpy as np
+        from . import observed_env as oe
+        rgb = np.full((10, 10, 3), 128, dtype=np.uint8)
+        irc = np.full((10, 10, 3), 128, dtype=np.uint8)
+        ortho = oe.OrthoImage(rgb, irc, (0.0, 0.0, 10.0, 10.0))
+        self.assertAlmostEqual(float(ortho.albedo_at(5.0, 5.0)), (128 / 255) ** 2.2, places=4)
+        irc[..., 0] = 230
+        veg = oe.OrthoImage(rgb, irc, (0.0, 0.0, 10.0, 10.0))
+        self.assertGreater(float(veg.albedo_at(5.0, 5.0)), float(ortho.albedo_at(5.0, 5.0)) + 0.1)
+        self.assertGreater(float(veg.ndvi_at(5.0, 5.0)), 0.3)
+
+
+def _terrain_env(half=60.0, obj=7):
+    return {'vertices': [[-half, -half, 0.0], [half, -half, 0.0], [half, half, 0.0], [-half, half, 0.0]],
+            'triangles': [{'v': [0, 1, 2], 'obj': obj}, {'v': [0, 2, 3], 'obj': obj}]}
+
+
+def _vertical_wall_envelope(z0=0.0):
+    """Triangle vertical, normale −Y (face au sud du repère), pied à z0."""
+    vertices = [[0.0, 0.0, z0], [4.0, 0.0, z0 + 0.001], [0.0, 0.0, z0 + 4.0]]
+    triangles = geometry.compute_envelope_geometry(vertices, [{'v': [0, 1, 2], 'paroi_model_id': 1}])
+    return {'vertices': vertices, 'triangles': triangles}
+
+
+class GroundReflectionFactorTest(SimpleTestCase):
+    databases = []
+
+    def test_uniform_ground_gives_analytic_value(self):
+        """Sol plat uniforme d'albédo 0,3, aucun obstacle : exactement
+        ρ(1 − cos β)/2 = 0,3 × 0,5 pour un mur vertical, sans bruit."""
+        env = _vertical_wall_envelope()
+        self.assertAlmostEqual(env['triangles'][0]['tilt_deg'], 90.0, places=1)
+        self.assertLess(env['triangles'][0]['normal'][1], -0.99)
+        f = shadow.compute_ground_reflection_factors(env, _terrain_env(), lambda x, y: np.full(np.shape(x), 0.3),
+                                                     ground_obj_ids={7})
+        self.assertAlmostEqual(f[0], 0.15, places=4)
+        # Sans terrain dans l'environnement : repli sur le plan du pied, même valeur.
+        f2 = shadow.compute_ground_reflection_factors(env, None, lambda x, y: np.full(np.shape(x), 0.3))
+        self.assertAlmostEqual(f2[0], 0.15, places=4)
+
+    def test_roof_sees_no_ground_and_obstacle_darkens(self):
+        roof = _single_triangle_envelope(area=4.0)
+        f = shadow.compute_ground_reflection_factors(roof, _terrain_env(), lambda x, y: np.full(np.shape(x), 0.3),
+                                                     ground_obj_ids={7})
+        self.assertEqual(f[0], 0.0)
+        # Un mur noir de 10 m face à la paroi masque une partie du sol vu.
+        wall = _vertical_wall_envelope()
+        env = _terrain_env()
+        base = len(env['vertices'])
+        env['vertices'] += [[-20, -3, 0], [20, -3, 0], [20, -3, 10], [-20, -3, 10]]
+        env['triangles'] += [{'v': [base, base + 1, base + 2], 'obj': 9}, {'v': [base, base + 2, base + 3], 'obj': 9}]
+        f = shadow.compute_ground_reflection_factors(wall, env, lambda x, y: np.full(np.shape(x), 0.3),
+                                                     ground_obj_ids={7})
+        self.assertLess(f[0], 0.15 - 0.02)
+        self.assertGreater(f[0], 0.0)
+
+    def test_floor_on_ground_receives_nothing(self):
+        """Un plancher sur terre-plein regarde le sol par sa face enterrée :
+        aucune réflexion, même si géométriquement il « voit » tout le sol."""
+        vertices = [[0.0, 0.0, 0.0], [0.0, 4.0, 0.0], [4.0, 0.0, 0.0]]
+        tris = geometry.compute_envelope_geometry(vertices, [{'v': [0, 1, 2], 'boundary': 'ground'}])
+        self.assertAlmostEqual(tris[0]['tilt_deg'], 180.0, places=3)
+        env = {'vertices': vertices, 'triangles': tris}
+        f = shadow.compute_ground_reflection_factors(env, _terrain_env(), lambda x, y: np.full(np.shape(x), 0.3),
+                                                     ground_obj_ids={7})
+        self.assertEqual(f[0], 0.0)
+        tris[0]['boundary'] = 'exterior_air'   # sous-face d'un porte-à-faux : elle, oui
+        f = shadow.compute_ground_reflection_factors(env, _terrain_env(), lambda x, y: np.full(np.shape(x), 0.3),
+                                                     ground_obj_ids={7})
+        self.assertGreater(f[0], 0.25)
+
+    def test_albedo_sampled_where_rays_land(self):
+        """Sol sombre (0,05) partout sauf une bande claire (0,6) devant la paroi :
+        le facteur doit refléter le sol effectivement vu, pas une moyenne de zone."""
+        wall = _vertical_wall_envelope()
+        near = lambda x, y: np.where((np.asarray(y) < 0) & (np.asarray(y) > -6), 0.6, 0.05)  # noqa: E731
+        far = lambda x, y: np.where(np.asarray(y) < -30, 0.6, 0.05)  # noqa: E731
+        f_near = shadow.compute_ground_reflection_factors(wall, _terrain_env(), near, ground_obj_ids={7})[0]
+        f_far = shadow.compute_ground_reflection_factors(wall, _terrain_env(), far, ground_obj_ids={7})[0]
+        self.assertGreater(f_near, 3 * f_far)
+
+
+class GroundReflectionSolverTest(SimpleTestCase):
+    """Le terme réfléchi est, pour le solveur, exactement un supplément de
+    diffus : e_glo = e_dif·F_ciel + f·GHI. Oracle : un run avec facteur f et
+    e_dif = D doit être IDENTIQUE à un run sans facteur et e_dif = D·(F_ciel + f)/F_ciel
+    (soleil sous l'horizon : GHI = D)."""
+
+    databases = []
+
+    def _run(self, e_dif, ground_factor=None, alpha_ext=None, layers=None):
+        env = _wall_envelope(4.0)
+        if alpha_ext is not None:
+            env['triangles'][0]['alpha_ext'] = alpha_ext
+        weather = [{'t_ext': 5.0, 'sun_azimuth': 0.0, 'sun_elevation': -10.0, 'e_dir': 0.0, 'e_dif': e_dif}
+                   for _ in range(12)]
+        payload = {'dx_max': 0.02, 'h_e': 25.0, 'interior': {'mode': 'free', 'h_i': 8.0, 'c_air_int': 5e4},
+                   't_init': 15.0, 'weather': weather}
+        sv = {'ground_reflect_factor': [ground_factor]} if ground_factor is not None else None
+        return building_solver.run_building_simulation(env, {1: layers or [_flat_wall_layer()]}, sv, payload)
+
+    def test_reflection_equivalent_to_extra_diffuse(self):
+        d, f = 120.0, 0.12
+        with_reflection = self._run(d, ground_factor=f)
+        equivalent = self._run(d * (0.5 + f) / 0.5)
+        for a, b in zip(with_reflection['t_air'], equivalent['t_air']):
+            self.assertAlmostEqual(a, b, places=9)
+
+    def test_no_factor_is_historical_behaviour(self):
+        a = self._run(120.0)
+        b = self._run(120.0, ground_factor=0.0)
+        self.assertEqual(a['t_air'], b['t_air'])
+
+    def test_alpha_ext_equals_editing_the_layer(self):
+        """alpha_ext sur le triangle ⇔ couche extérieure modifiée à la main."""
+        edited = dict(_flat_wall_layer(), alpha=0.85, r=0.15)
+        a = self._run(200.0, alpha_ext=0.85)
+        b = self._run(200.0, layers=[edited])
+        for x, y in zip(a['t_air'], b['t_air']):
+            self.assertAlmostEqual(x, y, places=9)
+        c = self._run(200.0)
+        self.assertGreater(a['t_air'][-1], c['t_air'][-1])   # plus absorbant → plus chaud
+
+
+class MergeObjectsTest(SimpleTestCase):
+    databases = []
+
+    def test_two_parts_one_envelope_without_inner_wall(self):
+        """Corps à 6 m (10 × 8) accolé à une aile à 9 m (8 × 8) : UN volume
+        fermé, volume ≈ somme des parties, et aucun mur sur l'arête commune
+        sous le toit le plus bas (ce serait un mur intérieur compté extérieur)."""
+        import shapely.geometry as sg
+        import trimesh
+        from . import observed_env as oe
+        a, b = sg.box(0, 0, 10, 8), sg.box(10, 0, 18, 8)
+        va, ta = oe.prism_solid(a, 0.0, 6.0)
+        vb, tb = oe.prism_solid(b, 0.0, 9.0)
+        objs = [oe.make_object(1, 'building', 'bdtopo+lidar', 'A', va, ta, a, {'annee': 1930, 'mat_murs': '10'}),
+                oe.make_object(2, 'building', 'bdtopo+lidar', 'B', vb, tb, b, {'annee': 1990})]
+        verts, tris, poly, info = oe.merge_objects(objs)
+        m = trimesh.Trimesh(verts, [t['v'] for t in tris], process=False)
+        self.assertTrue(m.is_watertight and m.is_winding_consistent)
+        self.assertAlmostEqual(m.volume, 10 * 8 * 6 + 8 * 8 * 9, delta=0.04 * 1056)
+        self.assertAlmostEqual(poly.area, 18 * 8, delta=0.5)
+        inner_low = [t for t in tris if t['group'].startswith('mur')
+                     and all(abs(verts[i][0] - 10.0) < 0.05 for i in t['v'])
+                     and max(verts[i][2] for i in t['v']) < 5.5]
+        self.assertEqual(inner_low, [])
+        self.assertEqual(info['mat_murs'], '10')          # attributs de la plus grande partie
+        self.assertEqual(info['merged_ids'], [1, 2])
+
+    def test_disjoint_selection_refused(self):
+        import shapely.geometry as sg
+        from . import observed_env as oe
+        a, b = sg.box(0, 0, 5, 5), sg.box(20, 0, 25, 5)
+        objs = [oe.make_object(k, 'building', 'lidar', 'X', *oe.prism_solid(p, 0, 5), p)
+                for k, p in ((1, a), (2, b))]
+        with self.assertRaises(oe.ObservedEnvError):
+            oe.merge_objects(objs)
+
+
+class StudyObjectsMaterialsTest(TestCase):
+    def test_merge_and_preassign(self):
+        import shapely.geometry as sg
+        from django.core.management import call_command
+        from . import environment_service as svc
+        from . import observed_env as oe
+        from .models import ParoiModel
+        call_command('seed_paroi_catalogue', stdout=mock.MagicMock())
+        a, b = sg.box(0, 0, 10, 8), sg.box(10, 0, 18, 8)
+        objs = [oe.make_object(1, 'building', 'bdtopo+lidar', 'A', *oe.prism_solid(a, 0.0, 6.0), a,
+                               {'annee': 1965, 'mat_murs': '30', 'mat_toit': '10', 'roof_albedo': 0.2}),
+                oe.make_object(2, 'building', 'bdtopo+lidar', 'B', *oe.prism_solid(b, 0.0, 6.0), b, {})]
+        env = Environment.objects.create(name='mat', georef_lat=47.0, georef_lon=0.7, georef_ground_z=90.0,
+                                         scene_objects=objs, envelope=oe.compose_envelope(objs))
+        building, env, report = svc.study_objects(env, [1, 2], 'Maison réunie')
+        tris = building.envelope['triangles']
+        wall_id = ParoiModel.objects.get(name='Mur béton banché 16 cm non isolé (1948–1974)').pk
+        roof_id = ParoiModel.objects.get(name='Toiture non isolée (avant 1975)').pk
+        self.assertTrue(all(t['paroi_model_id'] == wall_id for t in tris if t['group'].startswith('mur')))
+        self.assertTrue(all(t['paroi_model_id'] == roof_id and t['alpha_ext'] == 0.8
+                            for t in tris if t['group'].startswith('toiture')))
+        self.assertEqual({o['status'] for o in env.scene_objects}, {'studied'})
+        self.assertIn('1965', report['basis'])
+        # Un PATCH qui ne renvoie que les sommets reconstruit les triangles depuis
+        # l'enveloppe existante : alpha_ext ne doit pas s'y perdre (piège du Lot K).
+        s = serializers.BuildingSerializer(building, data={'vertices': building.envelope['vertices']}, partial=True)
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+        building.refresh_from_db()
+        self.assertTrue(any(t.get('alpha_ext') == 0.8 for t in building.envelope['triangles']))
+
+
+class HourlySetpointNoCoolingTest(SimpleTestCase):
+    """Lot AI — « pas de climatisation » est codé t_max = 100 par les profils
+    d'usage : la consigne horaire doit l'accepter (refusée à 50 depuis le Lot V)."""
+
+    databases = []
+
+    def test_hourly_t_max_100_accepted(self):
+        point = {'t_ext': 5.0, 'sun_azimuth': 0.0, 'sun_elevation': -5.0, 'e_dir': 0.0, 'e_dif': 0.0,
+                 't_min': 7.0, 't_max': 100.0}
+        s = serializers.BuildingWeatherPointSerializer(data=point)
+        self.assertTrue(s.is_valid(), s.errors)

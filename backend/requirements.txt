@@ -31,3 +31,9 @@ pyproj>=3.6
 # bibliothèque Triangle de J. R. Shewchuk — usage libre non commercial ; une
 # distribution dans un produit commercial demanderait l'accord de l'auteur.
 triangle>=20230923
+# pillow : décodage des orthophotos IGN (albédo du sol et des toitures, Lot AI).
+pillow>=10.0
+# embreex : moteur de lancer de rayons Embree pour trimesh (Apache 2.0) —
+# ~500 fois plus rapide que l'implémentation numpy, résultats identiques
+# (mesuré). Repli automatique sur numpy s'il manque (voir shadow._ray_intersector).
+embreex>=2.17

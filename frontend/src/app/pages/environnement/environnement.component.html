@@ -124,7 +124,20 @@
           <li><span class="swatch sw-removed"></span>Retirés <strong>{{ removedObjects.length }}</strong></li>
           <li><span class="swatch sw-studied"></span>Bâtiment étudié <strong>{{ studiedObjects.length }}</strong></li>
         </ul>
-        <p class="hint">Cliquez un élément dans la vue pour le sélectionner (un glisser fait tourner la vue).</p>
+        <p class="hint">
+          Cliquez un élément dans la vue pour le sélectionner (un glisser fait tourner la vue). Toits et
+          terrain portent l'orthophoto IGN, les façades la teinte de leur matériau BD TOPO.
+        </p>
+        <div class="scene-options">
+          <label class="inline-check">
+            <input type="checkbox" [(ngModel)]="multiSelect" name="multiSelect" />
+            <span>Sélection multiple — plusieurs emprises BD TOPO qui ne forment qu'un seul bâtiment</span>
+          </label>
+          <label class="inline-check">
+            <input type="checkbox" [(ngModel)]="showTexture" name="showTexture" />
+            <span>Orthophoto</span>
+          </label>
+        </div>
       } @else {
         <p class="hint">
           Environnement d'un seul tenant (maillage importé, ou généré avant la décomposition en
@@ -134,14 +147,42 @@
       }
 
       <div class="viewer-wrap">
-        <app-mesh-viewer
-          [vertices]="vertices()"
-          [triangles]="triangles()"
-          [colorForTriangle]="colorForTriangle"
+        <app-env-scene
+          [env]="e"
+          [selectedIds]="selectedIds()"
           [pickable]="hasObjects"
-          (triangleClick)="onTriangleClick($event)"
+          [showTexture]="showTexture"
+          (objectClick)="onObjectClick($event)"
         />
       </div>
+
+      @if (selectedObjects.length > 1) {
+        <div class="object-panel">
+          <div class="card-head">
+            <h3>{{ selectedObjects.length }} bâtiments sélectionnés</h3>
+            <button type="button" class="btn-secondary" (click)="clearSelection()">Désélectionner</button>
+          </div>
+          <p class="hint">
+            Ils seront réunis en <strong>un seul</strong> bâtiment étudié : son enveloppe est reconstruite
+            sur l'union des emprises, les murs qui les séparent disparaissent (ce sont des murs
+            intérieurs), et un ressaut de toiture entre deux parties devient un mur extérieur au-dessus
+            du toit le plus bas. Les bâtiments doivent se toucher.
+          </p>
+          @if (selectionIsStudiable) {
+            <label>
+              <span>Nom du bâtiment étudié</span>
+              <input type="text" [(ngModel)]="studyName" name="studyNameMulti" placeholder="Nom automatique" />
+            </label>
+            <div class="actions">
+              <button type="button" class="btn-primary" (click)="studySelected()" [disabled]="busy()">
+                Réunir en un bâtiment étudié
+              </button>
+            </div>
+          } @else {
+            <p class="hint">La sélection doit ne contenir que des bâtiments, pas déjà étudiés.</p>
+          }
+        </div>
+      }
 
       @if (selected; as obj) {
         <div class="object-panel">
@@ -262,24 +303,32 @@
             </div>
           }
 
-          @if (fitReport(); as fit) {
-            <p class="hint" [class.fit-poor]="fit.iou < 0.6">
-              Ajustement : emprises superposées à {{ fit.iou * 100 | number:'1.0-0' }} %,
-              axe vertical {{ fit.up_axis | uppercase }}, échelle ×{{ fit.scale }},
-              rotation {{ fit.rotation_deg | number:'1.1-1' }}°.
-              @if (fit.degenerate_removed) { {{ fit.degenerate_removed }} triangle(s) dégénéré(s) écarté(s). }
-              @if (fit.iou < 0.6) {
-                <strong>Recouvrement faible : le modèle ne ressemble pas à l'emprise observée — vérifiez-le.</strong>
-              }
-            </p>
-          }
-          @if (createdBuilding(); as b) {
-            <p class="feedback ok">
-              <a routerLink="/batiment" [queryParams]="{ id: b.id }">Ouvrir « {{ b.name }} » sur la page Bâtiment</a>
-              pour assigner ses parois, puis lancer l'ombrage et le calcul.
-            </p>
-          }
         </div>
+      }
+
+      @if (fitReport(); as fit) {
+        <p class="hint" [class.fit-poor]="fit.iou < 0.6">
+          Ajustement : emprises superposées à {{ fit.iou * 100 | number:'1.0-0' }} %,
+          axe vertical {{ fit.up_axis | uppercase }}, échelle ×{{ fit.scale }},
+          rotation {{ fit.rotation_deg | number:'1.1-1' }}°.
+          @if (fit.degenerate_removed) { {{ fit.degenerate_removed }} triangle(s) dégénéré(s) écarté(s). }
+          @if (fit.iou < 0.6) {
+            <strong>Recouvrement faible : le modèle ne ressemble pas à l'emprise observée — vérifiez-le.</strong>
+          }
+        </p>
+      }
+      @if (materialsReport(); as m) {
+        <p class="hint">
+          Parois pré-assignées d'après la BD TOPO — {{ m.basis }}
+          Murs : {{ m.assigned.wall ?? 'non assignés' }} · toiture : {{ m.assigned.roof ?? 'non assignée' }}
+          · plancher : {{ m.assigned.floor ?? 'non assigné' }}. Modifiables sur la page Bâtiment.
+        </p>
+      }
+      @if (createdBuilding(); as b) {
+        <p class="feedback ok">
+          <a routerLink="/batiment" [queryParams]="{ id: b.id }">Ouvrir « {{ b.name }} » sur la page Bâtiment</a>
+          pour vérifier ses parois, puis lancer l'ombrage et le calcul.
+        </p>
       }
 
       @if (removedObjects.length > 0) {

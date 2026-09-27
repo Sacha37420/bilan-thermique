@@ -100,26 +100,134 @@ def _save_building(payload):
     return serializer.save()
 
 
+def _assign_materials(triangles, info, catalogue):
+    """Pré-assignation (Lot AI) : un modèle de paroi par famille de groupes
+    (murs / toiture / sol) d'après les matériaux et l'année BD TOPO, et
+    l'absorptance extérieure par triangle (toiture mesurée sur l'orthophoto).
+    Les murs mitoyens reçoivent le modèle de mur mais pas d'absorptance : ils
+    ne voient pas le soleil. `catalogue` : {nom: id} des modèles en base — un
+    nom suggéré absent du catalogue laisse la famille non assignée.
+    Retourne le rapport de suggestion (pour l'interface)."""
+    suggestion = observed_env.suggest_materials(info)
+    ids = {k: catalogue.get(suggestion[k]) for k in ('wall', 'roof', 'floor')}
+    for tri in triangles:
+        group = tri.get('group') or ''
+        if group.startswith('mur_'):
+            tri['paroi_model_id'] = ids['wall']
+            if suggestion['wall_alpha'] is not None and not group.endswith('_mitoyen'):
+                tri['alpha_ext'] = suggestion['wall_alpha']
+        elif group.startswith('toiture'):
+            tri['paroi_model_id'] = ids['roof']
+            if suggestion['roof_alpha'] is not None:
+                tri['alpha_ext'] = suggestion['roof_alpha']
+        elif group == 'sol':
+            tri['paroi_model_id'] = ids['floor']
+    suggestion['assigned'] = {k: (suggestion[k] if ids[k] else None) for k in ('wall', 'roof', 'floor')}
+    return suggestion
+
+
 @transaction.atomic
-def study_object(env, obj_id, name=''):
-    """Le bâtiment étudié EST un objet de l'environnement : son maillage
-    (murs par arête d'emprise, pans de toiture, plancher au sol) devient
-    l'enveloppe d'un Building, dans le même repère."""
+def study_objects(env, obj_ids, name='', assign_materials=True):
+    """Le bâtiment étudié EST un (ou plusieurs) objet(s) de l'environnement.
+
+    Un objet : son maillage (murs par arête d'emprise, pans de toiture, plancher
+    au sol) devient l'enveloppe d'un Building, dans le même repère.
+    Plusieurs : enveloppe REconstruite sur l'union des emprises
+    (observed_env.merge_objects) — jamais la juxtaposition des volumes, qui
+    garderait les murs entre parties comme des parois extérieures.
+    Retourne (building, env, rapport de matériaux ou None)."""
     env = Environment.objects.select_for_update().get(pk=env.pk)
-    obj = find_object(env, obj_id)
-    if obj['kind'] != 'building':
-        raise EnvironmentServiceError("Seul un bâtiment peut devenir le bâtiment étudié.")
-    if obj['status'] == observed_env.STATUS_STUDIED:
-        raise EnvironmentServiceError("Cet objet est déjà le bâtiment étudié d'un autre bâtiment.")
-    vertices, triangles = observed_env.building_envelope_from_object(obj, env.scene_objects)
+    objs = [find_object(env, oid) for oid in dict.fromkeys(obj_ids)]
+    for obj in objs:
+        if obj['kind'] != 'building':
+            raise EnvironmentServiceError("Seuls des bâtiments peuvent former le bâtiment étudié.")
+        if obj['status'] == observed_env.STATUS_STUDIED:
+            raise EnvironmentServiceError(
+                f"L'objet {obj['id']} est déjà le bâtiment étudié d'un autre bâtiment."
+            )
+    ids = {o['id'] for o in objs}
+    try:
+        if len(objs) == 1:
+            info = objs[0]['info']
+            vertices, triangles = observed_env.building_envelope_from_object(objs[0], env.scene_objects)
+            label = objs[0]['label']
+        else:
+            mv, mt, _poly, info = observed_env.merge_objects(objs)
+            vertices, triangles = observed_env.building_envelope_from_mesh(mv, mt, ids, env.scene_objects)
+            label = f"{len(objs)} bâtiments réunis"
+    except observed_env.ObservedEnvError as exc:
+        raise EnvironmentServiceError(str(exc)) from exc
+
+    materials = None
+    if assign_materials:
+        from .models import ParoiModel
+        catalogue = dict(ParoiModel.objects.values_list('name', 'id'))
+        materials = _assign_materials(triangles, info, catalogue)
+
     building = _save_building(_building_payload(
-        env, unique_name(Building, name or f"{obj['label']} — {env.name}"), vertices, triangles,
+        env, unique_name(Building, name or f"{label} — {env.name}"), vertices, triangles,
     ))
-    obj['status'] = observed_env.STATUS_STUDIED
-    obj['building_id'] = building.pk
-    obj['reason'] = None
+    for obj in objs:
+        obj['status'] = observed_env.STATUS_STUDIED
+        obj['building_id'] = building.pk
+        obj['reason'] = "Fusionné avec d'autres emprises en un seul bâtiment étudié." if len(objs) > 1 else None
     recompose(env)
+    return building, env, materials
+
+
+def study_object(env, obj_id, name=''):
+    """Compatibilité : un seul objet, sans pré-assignation."""
+    building, env, _m = study_objects(env, [obj_id], name, assign_materials=False)
     return building, env
+
+
+# ── Orthophoto ─────────────────────────────────────────────────────────────────
+
+ORTHO_CACHE_DIR = '/tmp/bilan-thermique-ortho'
+
+
+def _ortho_extent(env):
+    radius = (env.generation or {}).get('radius_m')
+    if env.georef_lat is None or radius is None or not geodata.is_in_france(env.georef_lat, env.georef_lon):
+        return None, None
+    frame = observed_env.LocalFrame(env.georef_lat, env.georef_lon, env.georef_north_offset_deg or 0.0)
+    return frame, frame.l93_bbox(float(radius) + observed_env.RASTER_MARGIN_M)
+
+
+def ortho_descriptor(env):
+    frame, bbox = _ortho_extent(env)
+    if frame is None:
+        return None
+    xmin, ymin, xmax, ymax = bbox
+    # E = e0 + s(x·cos + y·sin) ; N = n0 + s(−x·sin + y·cos) — voir LocalFrame.to_l93.
+    c, sn, k = frame._cos, frame._sin, frame.scale
+    w, h = xmax - xmin, ymax - ymin
+    return {
+        'u': [k * c / w, k * sn / w, (frame.e0 - xmin) / w],
+        'v': [-k * sn / h, k * c / h, (frame.n0 - ymin) / h],
+        'url': f'/api/environnements/{env.pk}/orthophoto/',
+    }
+
+
+def orthophoto_bytes(env):
+    import hashlib
+    import os
+    frame, bbox = _ortho_extent(env)
+    if frame is None:
+        raise EnvironmentServiceError("Pas d'orthophoto pour cet environnement (non géoréférencé ou hors France).")
+    key = hashlib.sha1(repr(tuple(round(b, 2) for b in bbox)).encode()).hexdigest()
+    path = os.path.join(ORTHO_CACHE_DIR, f'{key}.jpg')
+    if os.path.exists(path):
+        with open(path, 'rb') as fh:
+            return fh.read()
+    try:
+        data, _w, _h = lidar_source.fetch_orthophoto(bbox, lidar_source.ORTHO_RGB_LAYER)
+    except geodata.GeodataError as exc:
+        raise EnvironmentServiceError(str(exc)) from exc
+    os.makedirs(ORTHO_CACHE_DIR, exist_ok=True)
+    with open(path, 'wb') as fh:
+        fh.write(data)
+    return data
 
 
 @transaction.atomic
@@ -215,15 +323,31 @@ def generate(params, building=None, progress_cb=None):
             )
         months = sorted({int(t['acq_end'][5:7]) for t in tiles if len(t['acq_end']) >= 7}
                         | {int(t['acq_start'][5:7]) for t in tiles if len(t['acq_start']) >= 7})
-        objects, ground_z, stats, warnings = observed_env.build_objects(
+        objects, ground_z, stats, warnings, rasters = observed_env.build_objects(
             frame, half, points, bdtopo, months, include_vegetation=include_veg,
             include_terrain=include_terrain, self_polygon=self_polygon, progress_cb=report,
+            return_rasters=True,
         )
         warnings = warnings_pre + warnings
+        # Lot AI : orthophotos RVB + infrarouge → albédo du sol (réflexion vers
+        # les parois) et albédo de chaque toiture (absorptance pour le calcul).
+        report('ortho', 90)
+        try:
+            bbox = frame.l93_bbox(half + observed_env.RASTER_MARGIN_M)
+            rgb, _w, _h = lidar_source.fetch_orthophoto(bbox, lidar_source.ORTHO_RGB_LAYER, px_per_m=2.0)
+            irc, _w, _h = lidar_source.fetch_orthophoto(bbox, lidar_source.ORTHO_IRC_LAYER, px_per_m=2.0)
+            ortho = observed_env.OrthoImage(lidar_source.decode_jpeg(rgb), lidar_source.decode_jpeg(irc), bbox)
+            ground_albedo = observed_env.apply_ortho(objects, ortho, frame, rasters, half)
+            vals = ground_albedo['values']
+            stats['ground_albedo_mean'] = round(sum(vals) / len(vals), 3)
+        except (geodata.GeodataError, OSError, ValueError) as exc:
+            ground_albedo = None
+            warnings.append(f"Orthophoto indisponible ({exc}) : ni albédo du sol ni couleur des toits.")
         stats.update({'lidar_requests': read_stats['requests'],
                       'lidar_mb': round(read_stats['bytes'] / 1e6, 1), 'bdtopo': len(bdtopo)})
     except lidar_source.LidarUnavailable as exc:
         source = 'legacy'
+        ground_albedo = None
         objects, ground_z, stats, warnings = legacy_objects(
             lat0, lon0, half, north, ground_z, include_veg, include_terrain,
             params.get('terrain_spacing_m') or 10.0, self_polygon, report,
@@ -244,6 +368,7 @@ def generate(params, building=None, progress_cb=None):
             'source': source, 'radius_m': half, 'lidar': lidar_meta, 'stats': stats,
             'warnings': warnings, 'generated_at': date.today().isoformat(),
             'include_vegetation': include_veg, 'include_terrain': include_terrain,
+            'ground_albedo': ground_albedo,
         },
     )
     if building is not None:

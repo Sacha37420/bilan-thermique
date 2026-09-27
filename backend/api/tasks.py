@@ -8,6 +8,17 @@ from . import geodata
 from . import weather_source
 
 
+def _environment_ground(environment):
+    """(grille d'albédo du sol, identifiants des objets terrain actifs) d'un
+    environnement observé ; (None, set()) sinon."""
+    if environment is None:
+        return None, set()
+    albedo = (environment.generation or {}).get('ground_albedo')
+    ids = {o['id'] for o in (environment.scene_objects or [])
+           if o.get('kind') == 'terrain' and o.get('status') == 'active'}
+    return albedo, ids
+
+
 @shared_task(bind=True)
 def precompute_shadows(self, job_id: int, building_id: int):
     job = Job.objects.get(pk=job_id)
@@ -30,6 +41,16 @@ def precompute_shadows(self, job_id: int, building_id: int):
 
         job.set_state(progress=80, message="Facteur de vue du ciel (occlusion réelle)…")
         result['sky_view_factor'] = shadow.compute_sky_view_factors(building.envelope, environment_envelope)
+
+        # Lot AI : réflexion par le sol, si l'environnement porte un albédo relevé.
+        albedo, ground_ids = _environment_ground(building.environment)
+        if albedo:
+            from . import observed_env
+            job.set_state(progress=92, message="Réflexion par le sol (albédo relevé)…")
+            result['ground_reflect_factor'] = shadow.compute_ground_reflection_factors(
+                building.envelope, environment_envelope, observed_env.albedo_lookup(albedo),
+                ground_obj_ids=ground_ids,
+            )
 
         building.sun_visibility = result
         building.sun_visibility_stale = False
@@ -83,10 +104,12 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
                 last_write[0] = now
                 job.set_state(progress=pct, message=f"Résolution heure par heure… {done}/{total}")
 
+        albedo, ground_ids = _environment_ground(building.environment)
         result = building_solver.run_building_simulation(
             building.envelope, paroi_layers, sun_visibility, calcul_payload,
             environment_envelope=environment_envelope, progress_cb=progress_cb,
             paroi_frame_by_id=paroi_frame_by_id,
+            ground_albedo=albedo, ground_obj_ids=ground_ids,
         )
 
         job.result = {
@@ -146,6 +169,7 @@ def generate_environment(self, job_id, params):
         'lidar-only': "Bâtiments absents de la BD TOPO…",
         'vegetation': "Arbres et massifs…",
         'terrain': "Maillage du terrain…",
+        'ortho': "Orthophotos : albédo du sol et couleur des toits…",
         'legacy-buildings': "Bâtiments (BD TOPO / OpenStreetMap)…",
         'legacy-vegetation': "Végétation (BD TOPO / OpenStreetMap)…",
         'legacy-terrain': "Altitude du terrain…",
@@ -248,3 +272,19 @@ def fetch_weather(self, job_id, params):
         job.set_state(status=Job.ERROR, message=str(exc))
     except Exception as exc:
         job.set_state(status=Job.ERROR, message=str(exc))
+
+
+from celery.signals import worker_ready  # noqa: E402
+
+
+@worker_ready.connect
+def _release_orphan_jobs(**_kwargs):
+    """Au démarrage du worker, toute tâche encore « en attente » ou « en cours »
+    en base est orpheline : le worker unique (--concurrency=1) vient de
+    redémarrer, et la file Redis, sans volume, est recréée à chaque
+    déploiement. Laissée telle quelle, elle bloquait indéfiniment tout nouveau
+    précalcul d'ombrage et tout calcul (verrous « un seul à la fois » des vues,
+    409) — constaté après un redéploiement pendant un précalcul (Lot AI)."""
+    Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).update(
+        status=Job.ERROR, message="Interrompu : le worker a redémarré. Relancez l'opération.",
+    )

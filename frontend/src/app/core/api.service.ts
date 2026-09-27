@@ -129,9 +129,16 @@ export class ApiService {
     return this.http.patch(`${this.base}/api/environnements/${envId}/objets/`, { ids, status });
   }
 
-  /** Lot AH — un bâtiment de l'environnement devient LE bâtiment étudié. */
-  studyEnvironmentObject(envId: number, objId: number, name: string): Observable<unknown> {
-    return this.http.post(`${this.base}/api/environnements/${envId}/objets/${objId}/etudier/`, { name });
+  /** Lot AH/AI — un bâtiment de l'environnement (ou plusieurs emprises qui n'en
+   * forment qu'un : enveloppe fusionnée) devient LE bâtiment étudié, parois
+   * pré-assignées d'après la BD TOPO. */
+  studyEnvironmentObjects(envId: number, ids: number[], name: string): Observable<unknown> {
+    return this.http.post(`${this.base}/api/environnements/${envId}/etudier/`, { ids, name });
+  }
+
+  /** Lot AI — orthophoto IGN de l'environnement, pour la texture de la vue 3D. */
+  getEnvironmentOrthophoto(envId: number): Observable<Blob> {
+    return this.http.get(`${this.base}/api/environnements/${envId}/orthophoto/`, { responseType: 'blob' });
   }
 
   /** Lot AH — remplace un bâtiment de l'environnement par un modèle importé,

@@ -84,6 +84,11 @@ class TriangleInputSerializer(serializers.Serializer):
     shading_profile_id = serializers.ChoiceField(
         choices=list(building_solver.SHADING_PROFILES), required=False, allow_null=True, default=None,
     )
+    # Lot AI : absorptance solaire du parement extérieur propre à ce triangle
+    # (toiture mesurée sur l'orthophoto, mur selon son matériau BD TOPO). None =
+    # celle de la 1ʳᵉ couche du modèle de paroi, comportement historique.
+    alpha_ext = serializers.FloatField(required=False, allow_null=True, default=None,
+                                       min_value=0.05, max_value=0.98)
 
 
 class EnvironmentTriangleInputSerializer(serializers.Serializer):
@@ -127,8 +132,18 @@ class EnvironmentSerializer(serializers.Serializer):
     objects = serializers.JSONField(source='scene_objects', read_only=True)
     generation = serializers.JSONField(read_only=True)
     studied_buildings = serializers.SerializerMethodField()
+    ortho = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+    def get_ortho(self, obj):
+        """Lot AI — de quoi draper l'orthophoto dans la vue 3D : coefficients
+        de la transformation affine repère local → coordonnées de texture,
+        u = ua·x + ub·y + uc, v = va·x + vb·y + vc (v = 0 en BAS de l'image).
+        L'image elle-même : GET /api/environnements/<id>/orthophoto/. None pour
+        un environnement non géoréférencé ou hors France."""
+        from . import environment_service
+        return environment_service.ortho_descriptor(obj)
 
     def get_studied_buildings(self, obj):
         """{id d'objet: {id, name} du bâtiment étudié, ou null s'il a été supprimé
@@ -218,9 +233,13 @@ class EnvironmentObjectsStatusSerializer(serializers.Serializer):
 
 
 class StudyObjectSerializer(serializers.Serializer):
-    """POST /api/environnements/<id>/objets/<obj>/etudier/"""
+    """POST /api/environnements/<id>/etudier/ {ids, name?} — un bâtiment, ou
+    plusieurs emprises qui ne forment en réalité qu'un seul bâtiment (fusion)."""
 
+    ids = serializers.ListField(child=serializers.IntegerField(min_value=1), min_length=1, max_length=50)
     name = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
+    # Pré-assignation des parois d'après les matériaux et l'année BD TOPO.
+    assign_materials = serializers.BooleanField(required=False, default=True)
 
 
 class ReplaceObjectTriangleSerializer(serializers.Serializer):
@@ -347,7 +366,8 @@ class BuildingSerializer(serializers.Serializer):
             triangles = [
                 {'v': t['v'], 'group': t.get('group'), 'paroi_model_id': t.get('paroi_model_id'),
                  'boundary': t.get('boundary', 'exterior_air'),
-                 'shading_profile_id': t.get('shading_profile_id')}
+                 'shading_profile_id': t.get('shading_profile_id'),
+                 'alpha_ext': t.get('alpha_ext')}
                 for t in existing.get('triangles', [])
             ]
         try:
@@ -561,8 +581,13 @@ class BuildingWeatherPointSerializer(serializers.Serializer):
     # — le serveur ne connaît que ces deux nombres, jamais de date calendaire.
     t_min = serializers.FloatField(required=False, allow_null=True, default=None,
                                     min_value=-30.0, max_value=50.0)
+    # Borne haute à 100 °C et non 50 : les profils d'usage codent « pas de
+    # climatisation » par t_max = 100 (usage-profiles.ts, HORS_GEL/REDUIT et
+    # tMaxJour des profils sans clim). Avec 50, tout calcul utilisant un tel
+    # profil était refusé heure par heure — constaté au Lot AI, présent depuis
+    # le Lot V.
     t_max = serializers.FloatField(required=False, allow_null=True, default=None,
-                                    min_value=-30.0, max_value=50.0)
+                                    min_value=-30.0, max_value=100.0)
     # Bâtiment occupé à CETTE heure (Lot AG) — résolu côté client à partir du même
     # calendrier d'occupation que t_min/t_max, donc le serveur ne connaît toujours
     # aucune date. `false` bascule sur `planning_ferme` (voir

@@ -346,3 +346,4 @@ label small { font-weight: 400; color: var(--text-mute); font-size: var(--text-x
 @media (max-width: 600px) {
   .facts { grid-template-columns: 1fr; dt { margin-top: var(--space-2); } }
 }
+.scene-options { display: flex; flex-wrap: wrap; gap: 0 var(--space-5); }
