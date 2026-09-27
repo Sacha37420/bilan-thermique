@@ -9,7 +9,7 @@ from .serializers import (
     BuildingSerializer, EnvironmentSerializer, EnvironmentSummarySerializer,
     EnvironmentObjectsStatusSerializer, StudyObjectSerializer, ReplaceObjectSerializer,
     JobSerializer, BuildingCalculRequestSerializer,
-    RefineMeshRequestSerializer, GenerateEnvironmentRequestSerializer,
+    RefineMeshRequestSerializer, GenerateEnvironmentRequestSerializer, FacadeApplySerializer,
     WeatherFetchRequestSerializer,
     SearchNearbyBuildingsRequestSerializer, GroundAltitudeRequestSerializer,
 )
@@ -433,3 +433,81 @@ class Calcul1DView(APIView):
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(result)
+
+
+class FacadeAnalyseView(APIView):
+    """
+    POST /api/batiments/<id>/facades/analyser/
+    Lot AK — lance l'analyse des façades sur les photos de rue Panoramax
+    (texture, baies). Même verrou « un calcul lourd à la fois » que le reste.
+    """
+
+    def post(self, request, pk):
+        building = get_object_or_404(Building, pk=pk)
+        if building.georef_lat is None or not building.envelope.get('triangles'):
+            return Response({'detail': "Bâtiment sans maillage ou non géoréférencé."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).exists():
+            return Response({'detail': "Un calcul est déjà en cours pour le lab — réessayez plus tard."},
+                            status=status.HTTP_409_CONFLICT)
+        job = Job.objects.create(kind='analyse_facades', params={'building_id': building.pk})
+        tasks.analyse_facades.delay(job.id, building.pk)
+        return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+
+
+class FacadeTextureView(APIView):
+    """GET /api/batiments/<id>/facades/<group>/texture/ — texture redressée (JPEG)."""
+
+    def get(self, request, pk, group):
+        from django.http import HttpResponse
+        from . import facades
+        building = get_object_or_404(Building, pk=pk)
+        entry = (building.facades or {}).get('facades', {}).get(group)
+        if not entry or not entry.get('texture_key'):
+            return Response({'detail': "Pas de texture pour cette façade."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            data = facades.regenerate_texture(building.pk, entry, building.georef_north_offset_deg or 0.0)
+        except facades.FacadeError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        response = HttpResponse(data, content_type='image/jpeg')
+        response['Cache-Control'] = 'private, max-age=86400'
+        return response
+
+
+class FacadeApplyView(APIView):
+    """
+    POST /api/batiments/<id>/facades/appliquer/
+         {glazing_model_id, wall_model_id?, fallback_ratio?, use_detection?: {groupe: bool}}
+    Lot AK — intègre les VRAIS vitrages dans le maillage : baies détectées sur
+    les façades vues en photo, fenêtres régulières à `fallback_ratio` sinon.
+    Toujours à partir de l'enveloppe de base : on peut réappliquer autrement.
+    """
+
+    def post(self, request, pk):
+        from . import facades
+        building = get_object_or_404(Building, pk=pk)
+        data_f = building.facades or {}
+        base = data_f.get('base') or {
+            'vertices': building.envelope['vertices'],
+            'triangles': [{k: v for k, v in t.items() if k not in ('area', 'normal', 'tilt_deg', 'azimuth_deg')}
+                          for t in building.envelope['triangles']],
+        }
+        serializer = FacadeApplySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        vertices, triangles, report = facades.apply_openings(
+            base['vertices'], base['triangles'], data_f.get('facades', {}), d['glazing_model_id'].pk,
+            d['fallback_ratio'], d['use_detection'],
+            wall_model_id=d['wall_model_id'].pk if d['wall_model_id'] else None,
+        )
+        try:
+            computed = geometry.compute_envelope_geometry(vertices, triangles)
+        except geometry.GeometryError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        building.envelope = {'vertices': vertices, 'triangles': computed}
+        building.facades = {**data_f, 'base': base, 'applied': {
+            'report': report, 'glazing_model_id': d['glazing_model_id'].pk, 'fallback_ratio': d['fallback_ratio'],
+        }}
+        building.sun_visibility_stale = True
+        building.save(update_fields=['envelope', 'facades', 'sun_visibility_stale', 'updated_at'])
+        return Response({'building': BuildingSerializer(building).data, 'report': report})

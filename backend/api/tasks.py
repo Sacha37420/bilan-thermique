@@ -289,3 +289,47 @@ def _release_orphan_jobs(**_kwargs):
     Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).update(
         status=Job.ERROR, message="Interrompu : le worker a redémarré. Relancez l'opération.",
     )
+
+
+@shared_task(bind=True)
+def analyse_facades(self, job_id, building_id):
+    """Lot AK — photos de rue Panoramax → texture redressée et baies détectées
+    de chaque façade exposée (api.facades). Ne modifie PAS l'enveloppe :
+    l'insertion des vitrages est une étape séparée, après vérification."""
+    from . import facades, geodata, observed_env
+    job = Job.objects.get(pk=job_id)
+    job.celery_task_id = self.request.id
+    job.save(update_fields=['celery_task_id'])
+    try:
+        job.set_state(status=Job.RUNNING, progress=1, message="Préparation…")
+        building = Building.objects.get(pk=building_id)
+        env = building.environment
+        if building.georef_lat is None:
+            raise facades.FacadeError("Bâtiment non géoréférencé.")
+        frame = observed_env.LocalFrame(building.georef_lat, building.georef_lon,
+                                        building.georef_north_offset_deg or 0.0)
+        base = (building.facades or {}).get('base') or {
+            'vertices': building.envelope['vertices'],
+            'triangles': [{k: v for k, v in t.items() if k not in ('area', 'normal', 'tilt_deg', 'azimuth_deg')}
+                          for t in building.envelope['triangles']],
+        }
+        own = geodata.envelope_footprint_polygon({'vertices': base['vertices'], 'triangles': base['triangles']})
+        objects = list(env.scene_objects) if env is not None else []
+        if own is not None:
+            objects.append(observed_env.make_object(10 ** 9, 'building', 'etudie', 'bâtiment étudié',
+                                                    base['vertices'], base['triangles'], own))
+
+        def progress(msg, pct):
+            job.set_state(progress=pct, message=msg)
+
+        result = facades.analyse(building.pk, base['vertices'], base['triangles'], frame, objects, progress)
+        building.facades = {**result, 'base': base}
+        building.save(update_fields=['facades', 'updated_at'])
+        n = sum(1 for f in result['facades'].values() if f['status'] == 'analysee')
+        n_open = sum(len(f['openings']) for f in result['facades'].values())
+        job.result = {'n_facades': len(result['facades']), 'n_analysees': n, 'n_openings': n_open}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100,
+                      message=f"{n}/{len(result['facades'])} façade(s) vues sur photo, {n_open} baie(s) détectée(s).")
+    except Exception as exc:  # noqa: BLE001
+        job.set_state(status=Job.ERROR, message=str(exc))

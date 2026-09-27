@@ -56,6 +56,33 @@ export interface Envelope {
   triangles: Triangle[];
 }
 
+/** Lot AK — façade analysée sur une photo de rue Panoramax. */
+export interface FacadeOpening {
+  label: 'window' | 'door';
+  score: number | null;
+  s0: number; t0: number; s1: number; t1: number;
+  synthetic?: boolean;
+}
+
+export interface FacadeEntry {
+  group: string;
+  status: 'analysee' | 'masquee' | 'sans_photo';
+  plane: { origin: number[]; u: number[]; n: number[]; width: number; height: number };
+  area: number;
+  occlusion?: number;
+  texture_key?: string;
+  openings: FacadeOpening[];
+  pano?: { id: string; producer: string | null; license: string | null; datetime: string | null };
+  registration?: { score_gps: number; score: number };
+}
+
+export interface BuildingFacades {
+  facades?: Record<string, FacadeEntry>;
+  n_panoramas?: number;
+  applied?: { report: Record<string, { source: string; n_openings: number; glazed_ratio: number }>;
+              glazing_model_id: number; fallback_ratio: number };
+}
+
 export interface Building {
   id: number;
   name: string;
@@ -70,6 +97,7 @@ export interface Building {
   suggested_debit_vent_m3h: number | null;
   suggested_eta_recup_vent: number | null;
   sun_visibility_stale: boolean;
+  facades: BuildingFacades;
   created_at: string;
   updated_at: string;
 }

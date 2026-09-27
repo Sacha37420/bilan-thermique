@@ -30,8 +30,8 @@ const WALL_TINTS: Record<string, string> = {
       [vertices]="vertices"
       [triangles]="triangles"
       [colorForTriangle]="colorForTriangle"
-      [texture]="texture()"
-      [texturedTriangle]="texturedTriangle"
+      [textures]="textures()"
+      [textureIndexFor]="textureIndexFor"
       [tintForTexturedTriangle]="tintForTexturedTriangle"
       [pickable]="pickable"
       (triangleClick)="onTriangleClick($event)"
@@ -56,7 +56,7 @@ export class EnvSceneComponent implements OnChanges, OnDestroy {
   triangles: SceneTriangle[] = [];
   // Signal : l'orthophoto arrive dans un callback HTTP, et l'app est sans
   // zone.js — une simple affectation n'y déclencherait aucun rendu.
-  texture = signal<ViewerTexture | null>(null);
+  textures = signal<ViewerTexture[]>([]);
   private owner = new Int32Array(0);
   private isRoof = new Uint8Array(0);
   private signature = '';
@@ -119,7 +119,7 @@ export class EnvSceneComponent implements OnChanges, OnDestroy {
       this.clearTexture();
       return;
     }
-    if (this.textureEnvId === e.id && this.texture()) return;
+    if (this.textureEnvId === e.id && this.textures().length) return;
     const ortho = e.ortho;
     this.textureEnvId = e.id;
     this.api.getEnvironmentOrthophoto(e.id).subscribe({
@@ -127,10 +127,10 @@ export class EnvSceneComponent implements OnChanges, OnDestroy {
         if (this.env?.id !== e.id) return;
         if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
         this.objectUrl = URL.createObjectURL(blob);
-        this.texture.set({
+        this.textures.set([{
           url: this.objectUrl,
-          uv: (x, y) => [ortho.u[0] * x + ortho.u[1] * y + ortho.u[2], ortho.v[0] * x + ortho.v[1] * y + ortho.v[2]],
-        });
+          uv: (p) => [ortho.u[0] * p[0] + ortho.u[1] * p[1] + ortho.u[2], ortho.v[0] * p[0] + ortho.v[1] * p[1] + ortho.v[2]],
+        }]);
       },
       // Sans orthophoto, la scène reste lisible en couleurs unies.
       error: () => { this.textureEnvId = null; },
@@ -138,7 +138,7 @@ export class EnvSceneComponent implements OnChanges, OnDestroy {
   }
 
   private clearTexture(): void {
-    this.texture.set(null);
+    this.textures.set([]);
     this.textureEnvId = null;
   }
 
@@ -154,7 +154,7 @@ export class EnvSceneComponent implements OnChanges, OnDestroy {
     return null;
   }
 
-  texturedTriangle = (index: number): boolean => this.isRoof[index] === 1;
+  textureIndexFor = (index: number): number => (this.isRoof[index] === 1 ? 0 : -1);
 
   tintForTexturedTriangle = (index: number): string | null => {
     const obj = this.objectOf(index);

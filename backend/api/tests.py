@@ -4117,3 +4117,217 @@ class CosiaEssenceTest(SimpleTestCase):
                 return np.asarray(x), np.asarray(y)
         self.assertEqual(oe._essence(c, IdFrame(), [1, 2, 3], [5, 5, 5]), 'conifère')
         self.assertEqual(oe._essence(c, IdFrame(), [6, 7, 8, 1], [5, 5, 5, 5]), 'feuillu')
+
+
+# ── Lot AK — façades : projection, vitrages réels ─────────────────────────────
+
+def _box_building(w=10.0, d=8.0, h=6.0):
+    import shapely.geometry as sg
+    from . import observed_env as oe
+    v, t = oe.prism_solid(sg.box(0, 0, w, d), 0.0, h)
+    return v, t
+
+
+class FacadeGeometryTest(SimpleTestCase):
+    databases = []
+
+    def test_planes_face_outward_with_right_handed_axes(self):
+        from . import facades as fc
+        v, t = _box_building()
+        planes = fc.facade_planes(v, t)
+        self.assertEqual(len(planes), 4)
+        for pl in planes.values():
+            n, u = np.array(pl['n']), np.array(pl['u'])
+            # u = « vers la droite » vu de l'extérieur : n × z = −u.
+            self.assertTrue(np.allclose(np.cross(n, [0, 0, 1]), -u, atol=1e-9))
+            self.assertAlmostEqual(pl['height'], 6.0, places=6)
+
+    def test_projection_center_and_horizon(self):
+        """Un point droit devant la caméra (au cap de l'image), à hauteur
+        d'appareil, tombe au centre de la photo équirectangulaire ; un point à
+        l'est d'une caméra regardant le nord tombe au 3/4 de la largeur."""
+        from . import facades as fc
+        px, py = fc.project_to_pano([[0.0, 10.0, 2.0]], (0.0, 0.0, 2.0), 0.0, 0.0, 0.0, 4000, 2000)
+        self.assertAlmostEqual(float(px[0]), 2000.0, places=3)
+        self.assertAlmostEqual(float(py[0]), 1000.0, places=3)
+        px, py = fc.project_to_pano([[10.0, 0.0, 2.0]], (0.0, 0.0, 2.0), 0.0, 0.0, 0.0, 4000, 2000)
+        self.assertAlmostEqual(float(px[0]), 3000.0, places=3)
+        # Cap du bâtiment tourné de 90° : son +Y local regarde l'est vrai.
+        px, py = fc.project_to_pano([[0.0, 10.0, 2.0]], (0.0, 0.0, 2.0), 90.0, 0.0, 90.0, 4000, 2000)
+        self.assertAlmostEqual(float(px[0]), 2000.0, places=3)
+
+    def test_rectify_recovers_synthetic_facade(self):
+        """Panorama synthétique : moitié gauche de la façade rouge, droite bleue.
+        La texture redressée doit reproduire le partage au bon endroit."""
+        from . import facades as fc
+        v, t = _box_building()
+        planes = fc.facade_planes(v, t)
+        pl = next(p for p in planes.values() if np.allclose(p['n'], [0, -1, 0]))   # façade sud (y = 0)
+        W, H = 4096, 2048
+        pano = np.zeros((H, W, 3), dtype=np.uint8)
+        cam = (5.0, -12.0, 2.0)
+        yy, xx = np.mgrid[0:H, 0:W]
+        yaw = (xx + 0.5) / W * 2 * math.pi - math.pi          # cap 0 : centre = nord
+        pitch = math.pi / 2 - (yy + 0.5) / H * math.pi
+        # intersection du rayon avec le plan y = 0
+        dy = np.cos(yaw) * np.cos(pitch)
+        tpar = np.where(dy > 1e-6, 12.0 / np.maximum(dy, 1e-6), np.inf)
+        hit_x = cam[0] + tpar * np.sin(yaw) * np.cos(pitch)
+        pano[(hit_x < 5.0) & np.isfinite(tpar)] = (255, 0, 0)
+        pano[(hit_x >= 5.0) & np.isfinite(tpar)] = (0, 0, 255)
+        tex, scale = fc.rectify(pl, pano, cam, 0.0, 0.0, 0.0, m_per_px=0.05)
+        mid = tex.shape[0] // 2
+        # u vers la droite vu de l'extérieur (sud) = +x : s = x.
+        self.assertGreater(tex[mid, int(2.5 / scale), 0], 200)
+        self.assertGreater(tex[mid, int(7.5 / scale), 2], 200)
+
+    def test_insert_openings_keeps_solid_closed(self):
+        import trimesh
+        from . import facades as fc
+        v, t = _box_building()
+        planes = fc.facade_planes(v, t)
+        g, pl = next((g, p) for g, p in planes.items() if np.allclose(p['n'], [0, -1, 0]))
+        openings = [{'label': 'window', 's0': 1.0, 't0': 1.0, 's1': 2.2, 't1': 2.4},
+                    {'label': 'window', 's0': 4.0, 't0': 1.0, 's1': 5.2, 't1': 2.4},
+                    {'label': 'door', 's0': 7.0, 't0': 0.0, 's1': 8.0, 't1': 2.1}]   # porte : rognée au bas du mur
+        nv, nt, n = fc.insert_openings(v, t, g, pl, openings, glazing_model_id=99)
+        self.assertEqual(n, 3)
+        m = trimesh.Trimesh(nv, [x['v'] for x in nt], process=False)
+        self.assertTrue(m.is_watertight and m.is_winding_consistent)
+        self.assertAlmostEqual(m.volume, 10 * 8 * 6, places=3)
+        k = g.split('_')[1]
+        glass = [x for x in nt if x['group'] == f'vitrage_{k}']
+        self.assertEqual(len(glass), 4)
+        self.assertTrue(all(x['paroi_model_id'] == 99 for x in glass))
+        area = sum(0.5 * np.linalg.norm(np.cross(np.subtract(nv[x['v'][1]], nv[x['v'][0]]),
+                                                 np.subtract(nv[x['v'][2]], nv[x['v'][0]]))) for x in glass)
+        self.assertAlmostEqual(area, 2 * 1.2 * 1.4, places=3)
+        self.assertEqual(len([x for x in nt if x['group'] == f'porte_{k}']), 2)
+
+    def test_apply_with_fallback_ratio(self):
+        from . import facades as fc
+        v, t = _box_building(w=12.0, d=8.0, h=6.0)
+        vv, tt, report = fc.apply_openings(v, t, {}, glazing_model_id=5, fallback_ratio=0.15, use_detection={})
+        self.assertTrue(all(r['source'] == 'proportion' for r in report.values()))
+        self.assertTrue(any(tr['group'].startswith('vitrage_') for tr in tt))
+        for r in report.values():
+            self.assertLess(abs(r['glazed_ratio'] - 0.15), 0.08)
+
+    def test_nms_keeps_best(self):
+        from . import facades as fc
+        keep = fc._nms([(0, 0, 10, 10), (1, 1, 10, 10), (20, 20, 30, 30)], np.array([0.5, 0.9, 0.3]))
+        self.assertEqual(sorted(keep), [1, 2])
+
+
+class FacadeDetectionPostprocessTest(SimpleTestCase):
+    databases = []
+
+    def test_nested_and_split_boxes_merged(self):
+        from . import facades as fc
+        boxes = [(10, 10, 100, 120), (30, 30, 60, 60), (40, 40, 50, 50),     # emboîtés
+                 (200, 10, 240, 120), (243, 10, 285, 118),                    # deux vantaux
+                 (400, 10, 440, 150)]                                         # porte
+        b, sc, lab = fc._merge_boxes(boxes, [0.5, 0.3, 0.2, 0.6, 0.55, 0.7],
+                                     ['window'] * 5 + ['door'], gap_px=5)
+        self.assertEqual(len(b), 3)
+        self.assertIn((10, 10, 100, 120), b)
+        self.assertIn((200, 10, 285, 120), b)
+        self.assertEqual(lab[b.index((400, 10, 440, 150))], 'door')
+
+    def test_visibility_blocked_by_building(self):
+        import shapely.geometry as sg
+        from . import facades as fc
+        from . import observed_env as oe
+        v, t = _box_building()
+        planes = fc.facade_planes(v, t)
+        pl = next(p for p in planes.values() if np.allclose(p['n'], [0, -1, 0]))   # façade sud
+        pl['outline'] = pl['outline']
+        own = oe.make_object(1, 'building', 'x', 'x', v, t, sg.box(0, 0, 10, 8))
+        occ = fc._occluder([own])
+        self.assertGreater(fc.visible_fraction(pl, (5.0, -15.0, 2.0), occ), 0.95)
+        wv, wt = oe.prism_solid(sg.box(-5, -8, 15, -6), 0.0, 10.0)            # immeuble devant
+        wall = oe.make_object(2, 'building', 'x', 'x', wv, wt, sg.box(-5, -8, 15, -6))
+        occ2 = fc._occluder([own, wall])
+        self.assertLess(fc.visible_fraction(pl, (5.0, -15.0, 2.0), occ2), 0.1)
+        # Caméra derrière le bâtiment : la façade sud est cachée par le bâtiment lui-même.
+        self.assertLess(fc.visible_fraction(pl, (5.0, 20.0, 2.0), occ), 0.1)
+
+
+class FacadeApplyDefaultsTest(SimpleTestCase):
+    databases = []
+
+    def test_seen_blind_facade_stays_blind(self):
+        from . import facades as fc
+        v, t = _box_building(w=12.0, d=8.0, h=6.0)
+        planes = fc.facade_planes(v, t)
+        seen = {g: {'status': 'analysee', 'openings': []} for g in planes}
+        vv, tt, report = fc.apply_openings(v, t, seen, glazing_model_id=5, fallback_ratio=0.2, use_detection={})
+        self.assertFalse(any(x['group'].startswith('vitrage_') for x in tt))
+        self.assertTrue(all(r['source'] == 'détection' for r in report.values()))
+
+
+class RefineEnvelopeTest(SimpleTestCase):
+    """Raffinement local (Lot AK) : conforme, orienté, et sans propagation à
+    tout le maillage quand une petite zone est déjà finement triangulée."""
+
+    @staticmethod
+    def _box(lx, ly, lz):
+        V = [[0, 0, 0], [lx, 0, 0], [lx, ly, 0], [0, ly, 0],
+             [0, 0, lz], [lx, 0, lz], [lx, ly, lz], [0, ly, lz]]
+        F = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4],
+             [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
+        return V, [{'v': f, 'group': 'g'} for f in F]
+
+    @staticmethod
+    def _signed_volume(V, T):
+        V = np.asarray(V, float)
+        return sum(np.dot(V[t['v'][0]], np.cross(V[t['v'][1]], V[t['v'][2]])) for t in T) / 6.0
+
+    def _check_closed(self, T):
+        count = {}
+        for t in T:
+            v = t['v']
+            for i in range(3):
+                e = (v[i], v[(i + 1) % 3])
+                count[e] = count.get(e, 0) + 1
+        for (a, b), n in count.items():
+            self.assertEqual(n, 1)
+            self.assertEqual(count.get((b, a)), 1, 'arête sans jumelle orientée : fissure')
+
+    def test_refined_box_is_closed_oriented_and_below_threshold(self):
+        V, T = self._box(30.0, 8.0, 6.0)
+        V2, T2 = geometry.refine_envelope(V, T, 2.0)
+        self._check_closed(T2)
+        self.assertAlmostEqual(self._signed_volume(V2, T2), 30 * 8 * 6, places=6)
+        V2a = np.asarray(V2)
+        for t in T2:
+            for i in range(3):
+                self.assertLessEqual(np.linalg.norm(V2a[t['v'][i]] - V2a[t['v'][(i + 1) % 3]]), 2.0 + 1e-9)
+            self.assertEqual(t['group'], 'g')
+
+    def test_fine_patch_does_not_flood_mesh(self):
+        # Boîte dont une face est déjà très finement subdivisée (comme autour
+        # des baies) : l'ancien algorithme quadruplait tout le maillage à
+        # chaque itération jusqu'à dépasser la limite.
+        V, T = self._box(37.0, 4.0, 4.0)
+        V = [list(map(float, v)) for v in V]
+        # Zone fine conforme : insertion répétée de centroïdes dans une face
+        # (bords extérieurs inchangés), triangles effilés comme autour des baies.
+        fine = [T.pop(10)['v']]  # pignon x=0, 4 × 4 m : déjà sous le seuil
+        for _ in range(5):
+            nxt = []
+            for a, b, c in fine:
+                V.append([(V[a][k] + V[b][k] + V[c][k]) / 3 for k in range(3)])
+                m = len(V) - 1
+                nxt += [[a, b, m], [b, c, m], [c, a, m]]
+            fine = nxt
+        T += [{'v': f, 'group': 'g'} for f in fine]
+        self._check_closed(T)
+        n_fine = len(T)
+        V2, T2 = geometry.refine_envelope(V, T, 6.8)
+        self._check_closed(T2)
+        # Les triangles fins, déjà sous le seuil, restent intacts ; seules les
+        # longues faces sont subdivisées (ancien algorithme : > 20 000).
+        kept = {tuple(t['v']) for t in T2}
+        self.assertTrue(all(tuple(f) in kept for f in fine))
+        self.assertLess(len(T2), 2 * n_fine)

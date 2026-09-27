@@ -188,6 +188,11 @@ class Building(models.Model):
     suggested_debit_vent_m3h = models.FloatField(null=True, blank=True)
     suggested_eta_recup_vent = models.FloatField(null=True, blank=True)
 
+    # Lot AK — façades analysées sur les photos de rue Panoramax : par façade,
+    # prise de vue retenue (recalée), texture, baies détectées ; plus
+    # l'enveloppe de BASE (avant insertion des vitrages), pour réappliquer.
+    facades = models.JSONField(default=dict, blank=True)
+
     sun_visibility = models.JSONField(default=dict, blank=True)
     sun_visibility_stale = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

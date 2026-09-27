@@ -8,10 +8,12 @@ import { Building, BuildingCandidate, ShadingProfileId, TriangleBoundary, Workin
 import { SHADING_PROFILES } from '../../core/shading-profiles';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 import { BuildingSearchComponent } from '../../components/building-search/building-search.component';
+import { FacadePanelComponent } from '../../components/facade-panel/facade-panel.component';
 
 interface ParoiModelSummary {
   id: number;
   name: string;
+  is_glazing: boolean;
 }
 
 interface BuildingSummary {
@@ -29,7 +31,7 @@ const SERIES_COLOR_VARS = [
 @Component({
   selector: 'app-batiment',
   standalone: true,
-  imports: [FormsModule, RouterLink, MeshViewerComponent, BuildingSearchComponent],
+  imports: [FormsModule, RouterLink, MeshViewerComponent, BuildingSearchComponent, FacadePanelComponent],
   templateUrl: './batiment.component.html',
   styleUrl: './batiment.component.scss',
 })
@@ -41,10 +43,13 @@ export class BatimentComponent implements OnInit {
 
   // ── Bibliothèques ────────────────────────────────────────────────────
   paroiModels = signal<ParoiModelSummary[]>([]);
+  paroiModelsFull = this.paroiModels;
   buildings = signal<BuildingSummary[]>([]);
 
   // ── Bâtiment en cours d'édition ──────────────────────────────────────
   currentBuildingId = signal<number | null>(null);
+  // Lot AK — bâtiment tel que renvoyé par le serveur (panneau des façades).
+  currentBuilding = signal<Building | null>(null);
   buildingName = '';
   buildingDescription = '';
 
@@ -357,6 +362,7 @@ export class BatimentComponent implements OnInit {
       next: (res) => {
         const b = res as Building;
         this.currentBuildingId.set(b.id);
+        this.currentBuilding.set(b);
         this.vertices.set(b.envelope.vertices);
         this.triangles.set(b.envelope.triangles);
         this.saving.set(false);
@@ -379,6 +385,7 @@ export class BatimentComponent implements OnInit {
       next: (res) => {
         const b = res as Building;
         this.currentBuildingId.set(b.id);
+        this.currentBuilding.set(b);
         this.buildingName = b.name;
         this.buildingDescription = b.description;
         this.vertices.set(b.envelope.vertices);
@@ -405,6 +412,7 @@ export class BatimentComponent implements OnInit {
 
   newBuilding(): void {
     this.currentBuildingId.set(null);
+    this.currentBuilding.set(null);
     this.buildingName = '';
     this.buildingDescription = '';
     this.vertices.set([]);
@@ -422,6 +430,11 @@ export class BatimentComponent implements OnInit {
     this.surfaceRefM2 = null;
     this.error.set('');
     this.message.set('');
+  }
+
+  /** Lot AK — vitrages intégrés ou analyse terminée : on recharge tout. */
+  onFacadeBuildingChange(b: Building): void {
+    this.loadBuilding({ id: b.id });
   }
 
   // ── Raffinement du maillage ───────────────────────────────────────────

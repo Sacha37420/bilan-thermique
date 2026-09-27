@@ -1,10 +1,10 @@
-import { Component, OnInit, ViewChild, WritableSignal, inject, signal } from '@angular/core';
+import { Component, OnInit, WritableSignal, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { Building, EnvironmentMesh, EnvironmentObject, Triangle, WorkingTriangle } from '../../core/building.types';
-import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
+import { Building, EnvironmentMesh, EnvironmentObject, Triangle } from '../../core/building.types';
+import { FacadePanelComponent } from '../../components/facade-panel/facade-panel.component';
 import { EnvSceneComponent } from '../../components/env-scene/env-scene.component';
 import { VENTILATION_PROFILES, VentilationProfile } from '../../core/ventilation-profiles';
 import {
@@ -20,16 +20,6 @@ interface ParoiModelSummary {
   is_glazing: boolean;
 }
 
-interface GroupConfig {
-  opaqueModelId: number | null;
-  glazingModelId: number | null;
-  tauxVitragePct: number;
-}
-
-const GLAZING_COLOR = '--accent';
-const OPAQUE_COLOR = '--text-mute';
-const UNASSIGNED_COLOR = '--warning';
-
 /** Mode simplifié (Lot T) — point d'entrée pédagogique vers la méthode complète :
  * recherche d'un bâtiment réel (IGN/OSM, même mécanisme que la génération
  * d'environnement), configuration d'un taux de vitrage par paroi plutôt qu'un
@@ -43,14 +33,13 @@ const UNASSIGNED_COLOR = '--warning';
 @Component({
   selector: 'app-mode-simplifie',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, RouterLink, MeshViewerComponent, EnvSceneComponent],
+  imports: [FormsModule, DecimalPipe, RouterLink, FacadePanelComponent, EnvSceneComponent],
   templateUrl: './mode-simplifie.component.html',
   styleUrl: './mode-simplifie.component.scss',
 })
 export class ModeSimplifieComponent implements OnInit {
   private api = inject(ApiService);
 
-  @ViewChild(MeshViewerComponent) viewer?: MeshViewerComponent;
 
   step = signal<'quartier' | 'selection' | 'configuration' | 'environnement' | 'calcul' | 'termine'>('quartier');
 
@@ -189,10 +178,6 @@ export class ModeSimplifieComponent implements OnInit {
     return this.selectedVentProfile?.etaRecup ?? null;
   }
 
-  vertices = signal<number[][]>([]);
-  triangles = signal<WorkingTriangle[]>([]);
-  groups = signal<string[]>([]);
-  groupConfig: Record<string, GroupConfig> = {};
 
   paroiModels = signal<ParoiModelSummary[]>([]);
   get opaqueModels(): ParoiModelSummary[] {
@@ -228,7 +213,7 @@ export class ModeSimplifieComponent implements OnInit {
         this.buildingName = r.building.name;
         this.env.set(r.environment);
         this.materials.set(r.materials);
-        this.refineWithFallback(r.building.id, this.maxEdgeLength);
+        this.loadBuilding(r.building.id);
       },
       error: (err) => {
         this.creating.set(false);
@@ -237,28 +222,57 @@ export class ModeSimplifieComponent implements OnInit {
     });
   }
 
-  // Réglage commun à toutes les façades exposées (hors toiture, sol et murs
-  // mitoyens) : une fusion de bâtiments compte vite 30 parois et plus, les
-  // régler une à une était la principale difficulté de ce mode.
-  bulkWallModelId: number | null = null;
-  bulkGlazingId: number | null = null;
-  bulkTaux = 20;
-
-  get exposedWallGroups(): string[] {
-    return this.groups().filter(g => g.startsWith('mur_') && !g.endsWith('_mitoyen'));
-  }
-
-  applyToAllWalls(): void {
-    for (const g of this.exposedWallGroups) {
-      const cfg = this.groupConfig[g];
-      if (this.bulkWallModelId !== null) cfg.opaqueModelId = this.bulkWallModelId;
-      cfg.glazingModelId = this.bulkGlazingId;
-      cfg.tauxVitragePct = this.bulkTaux;
-    }
-    this.generateAssignment();
-  }
-
+  // ══ Étape 3 — Façades et vrais vitrages (Lot AK) ══════════════════════════
+  // Plus de « proportion de petits triangles » : les baies sont détectées sur
+  // les photos de rue (components/facade-panel) et insérées comme de vrais
+  // rectangles de vitrage ; le bâtiment n'est subdivisé qu'ENSUITE, pour la
+  // finesse de l'ombrage.
+  building = signal<Building | null>(null);
   refineNote = signal('');
+  continuing = signal(false);
+
+  private loadBuilding(id: number): void {
+    this.api.getBuilding(id).subscribe({
+      next: (res) => {
+        const b = res as Building;
+        this.building.set(b);
+        this.measureEnvelope(b.envelope.triangles, b.envelope.vertices);
+        // Suggestion de ventilation, désormais connue du volume réel.
+        if (this.suggestedDebitVentM3h !== null) {
+          this.api.updateBuilding(id, {
+            suggested_debit_vent_m3h: this.suggestedDebitVentM3h,
+            suggested_eta_recup_vent: this.suggestedEtaRecupVent,
+          }).subscribe({ error: () => {} });
+        }
+        this.creating.set(false);
+        this.step.set('configuration');
+      },
+      error: () => {
+        this.creating.set(false);
+        this.createError.set('Échec du chargement du bâtiment créé.');
+      },
+    });
+  }
+
+  onFacadeBuildingChange(b: Building): void {
+    this.building.set(b);
+  }
+
+  get hasGlazing(): boolean {
+    return (this.building()?.envelope.triangles ?? []).some(t => (t.group ?? '').startsWith('vitrage_'));
+  }
+
+  /** Subdivision (finesse de l'ombrage), surface de référence, puis étape 4. */
+  continueToShadow(): void {
+    const id = this.buildingId();
+    if (id === null || this.continuing()) return;
+    this.continuing.set(true);
+    this.createError.set('');
+    if (this.surfaceRefM2 !== null) {
+      this.api.updateBuilding(id, { surface_ref_m2: this.surfaceRefM2 }).subscribe({ error: () => {} });
+    }
+    this.refineWithFallback(id, this.maxEdgeLength);
+  }
 
   /** Subdivision à la maille demandée ; si le bâtiment est trop grand pour la
    * limite de triangles (un collectif de 70 m ne passe pas à 2 m), la maille
@@ -266,11 +280,12 @@ export class ModeSimplifieComponent implements OnInit {
    * l'utilisateur régler lui-même un paramètre qu'il ne connaît pas. */
   private refineWithFallback(id: number, edge: number): void {
     this.api.refineBuildingMesh(id, edge).subscribe({
-      next: () => {
+      next: (res) => {
         this.refineNote.set(edge > this.maxEdgeLength
           ? `Bâtiment trop grand pour une maille de ${this.maxEdgeLength} m : subdivisé à ${edge} m.` : '');
-        this.maxEdgeLength = edge;
-        this.loadRefinedBuilding(id);
+        this.building.set(res as Building);
+        this.continuing.set(false);
+        this.step.set('environnement');
       },
       error: (err) => {
         const next = Math.round(edge * 1.5 * 10) / 10;
@@ -278,17 +293,10 @@ export class ModeSimplifieComponent implements OnInit {
           this.refineWithFallback(id, next);
           return;
         }
-        this.creating.set(false);
+        this.continuing.set(false);
         this.createError.set(err?.error?.detail ?? 'Échec de la subdivision du maillage.');
       },
     });
-  }
-
-  /** Vitrage proposé par défaut sur les façades exposées : le double vitrage
-   * usuel du catalogue s'il existe — l'utilisateur ajuste ensuite. */
-  private defaultGlazingId(): number | null {
-    const glazing = this.glazingModels;
-    return (glazing.find(m => /double/i.test(m.name)) ?? glazing[0])?.id ?? null;
   }
 
   private measureEnvelope(tris: Triangle[], vertices: number[][]): void {
@@ -306,149 +314,6 @@ export class ModeSimplifieComponent implements OnInit {
     this.volumeM3.set(Math.round(volume));
   }
 
-  private loadRefinedBuilding(id: number): void {
-    this.api.getBuilding(id).subscribe({
-      next: (res) => {
-        const building = res as Building;
-        this.vertices.set(building.envelope.vertices);
-        this.triangles.set(building.envelope.triangles);
-        this.measureEnvelope(building.envelope.triangles, building.envelope.vertices);
-        const groupNames = [...new Set(building.envelope.triangles.map(t => t.group).filter((g): g is string => !!g))];
-        this.groups.set(groupNames);
-        this.groupConfig = {};
-        for (const g of groupNames) {
-          // Modèle pré-assigné d'après la BD TOPO (le plus fréquent du groupe),
-          // vitrage par défaut seulement sur les murs exposés : ni toiture, ni
-          // sol, ni mur mitoyen.
-          const counts = new Map<number, number>();
-          for (const t of building.envelope.triangles) {
-            if (t.group === g && t.paroi_model_id !== null) counts.set(t.paroi_model_id, (counts.get(t.paroi_model_id) ?? 0) + 1);
-          }
-          const preset = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-          const exposedWall = g.startsWith('mur_') && !g.endsWith('_mitoyen');
-          this.groupConfig[g] = {
-            opaqueModelId: preset,
-            glazingModelId: exposedWall ? this.defaultGlazingId() : null,
-            tauxVitragePct: exposedWall ? 20 : 0,
-          };
-        }
-        this.actualGlazingPct.set({});
-        const firstWall = this.exposedWallGroups[0];
-        this.bulkWallModelId = firstWall ? this.groupConfig[firstWall].opaqueModelId : null;
-        this.bulkGlazingId = this.defaultGlazingId();
-        this.bulkTaux = 20;
-        // Assignation générée d'emblée : tout est pré-rempli, l'utilisateur
-        // n'ajuste que s'il le souhaite.
-        if (this.allGroupsConfigured) this.generateAssignment();
-        // Suggestion de ventilation, désormais connue du volume réel.
-        if (this.suggestedDebitVentM3h !== null) {
-          this.api.updateBuilding(id, {
-            suggested_debit_vent_m3h: this.suggestedDebitVentM3h,
-            suggested_eta_recup_vent: this.suggestedEtaRecupVent,
-          }).subscribe({ error: () => {} });
-        }
-        this.creating.set(false);
-        this.step.set('configuration');
-      },
-      error: () => {
-        this.creating.set(false);
-        this.createError.set('Échec du rechargement du bâtiment subdivisé.');
-      },
-    });
-  }
-
-  // ── Étape 3 : configuration par paroi + assignation proportionnelle ─────
-  triangleCountForGroup(group: string): number {
-    return this.triangles().filter(t => t.group === group).length;
-  }
-
-  // Taux de vitrage RÉELLEMENT obtenu par paroi (%), calculé une fois par
-  // génération d'assignation plutôt qu'à chaque cycle de détection de
-  // changement. Mesuré en AIRE et non en nombre de triangles : c'est l'aire qui
-  // compte physiquement, et deux triangles d'un même groupe n'ont pas
-  // forcément la même aire (le raffinement, geometry.refine_envelope, ne
-  // descend pas partout au même niveau — cascade documentée au Lot T). Une
-  // paroi absente du dict = aucun vitrage demandé.
-  actualGlazingPct = signal<Record<string, number>>({});
-
-  generateAssignment(): void {
-    const updated = this.triangles().map(t => ({ ...t }));
-    for (const group of this.groups()) {
-      const cfg = this.groupConfig[group];
-      if (!cfg || cfg.opaqueModelId === null) continue;
-      const indices: number[] = [];
-      updated.forEach((t, i) => { if (t.group === group) indices.push(i); });
-
-      for (const i of indices) updated[i] = { ...updated[i], paroi_model_id: cfg.opaqueModelId };
-
-      if (cfg.glazingModelId !== null && cfg.tauxVitragePct > 0) {
-        const ratio = Math.min(cfg.tauxVitragePct, 95) / 100;
-        // Répartition par accumulateur (Bresenham) plutôt qu'un « un triangle
-        // sur N » avec N = round(1/ratio) entier : ce pas entier ne pouvait
-        // atteindre que les taux 1/N, et l'arrondi rendait deux consignes
-        // différentes indiscernables — 30 % et 40 % donnaient TOUS DEUX ≈ 33 %
-        // (1/0,4 vaut exactement 2,5, et Math.round arrondit au supérieur).
-        // Mesuré en navigateur au Lot W : 40 % demandés → 37,5 % obtenus sur
-        // une paroi de 16 triangles. L'accumulateur pose exactement
-        // ⌊n·ratio⌋ triangles, également répartis : c'est le plus proche
-        // atteignable pour un maillage donné, quel que soit le taux.
-        // `Math.round` et non `Math.floor` dans l'accumulateur : il pose
-        // round(n·ratio) triangles au lieu de ⌊n·ratio⌋, donc le comptage le
-        // PLUS PROCHE du taux demandé et non systématiquement celui du dessous
-        // (sur une paroi de 16 triangles, 10 % donne 2 triangles = 12,5 % et
-        // non 1 = 6,25 %). La répartition reste également espacée.
-        indices.forEach((triIdx, pos) => {
-          if (Math.round((pos + 1) * ratio) > Math.round(pos * ratio)) {
-            updated[triIdx] = { ...updated[triIdx], paroi_model_id: cfg.glazingModelId };
-          }
-        });
-      }
-    }
-    this.triangles.set(updated);
-    this.actualGlazingPct.set(this.measureGlazingPct(updated));
-    this.viewer?.repaint();
-  }
-
-  /** Même avec une répartition optimale (voir generateAssignment), un taux
-   * quelconque reste inatteignable sur un nombre FINI de triangles d'aires
-   * inégales : c'est la valeur mesurée ici qui entrera dans le calcul, pas le
-   * taux saisi. À afficher, donc, plutôt que de laisser croire à une consigne
-   * exacte — d'autant que l'écart grandit quand la paroi est peu maillée. */
-  private measureGlazingPct(triangles: WorkingTriangle[]): Record<string, number> {
-    const obtained: Record<string, number> = {};
-    for (const group of this.groups()) {
-      const glazingId = this.groupConfig[group]?.glazingModelId ?? null;
-      if (glazingId === null) continue;
-      let total = 0;
-      let glazed = 0;
-      for (const t of triangles) {
-        if (t.group !== group) continue;
-        const area = t.area ?? 0;
-        total += area;
-        if (t.paroi_model_id === glazingId) glazed += area;
-      }
-      if (total > 0) obtained[group] = (glazed / total) * 100;
-    }
-    return obtained;
-  }
-
-  colorForTriangle = (index: number): string => {
-    const t = this.triangles()[index];
-    if (!t || t.paroi_model_id === null) return UNASSIGNED_COLOR;
-    const model = this.paroiModels().find(m => m.id === t.paroi_model_id);
-    return model?.is_glazing ? GLAZING_COLOR : OPAQUE_COLOR;
-  };
-
-  get allGroupsConfigured(): boolean {
-    return this.groups().every(g => this.groupConfig[g]?.opaqueModelId !== null);
-  }
-
-  get assignedCount(): number {
-    return this.triangles().filter(t => t.paroi_model_id !== null).length;
-  }
-
-  saving = signal(false);
-  saveError = signal('');
 
   // ══ Étape 4 — Environnement voisin + ombrage ═══════════════════════════════
   // Le mode simplifié s'arrêtait au bâtiment et renvoyait sur Calcul 3D pour
@@ -651,33 +516,5 @@ export class ModeSimplifieComponent implements OnInit {
   get coolingPerM2(): number | null {
     const r = this.result(); const s = this.surfaceRefM2;
     return r && s ? Math.round(r.cooling_kwh / s) : null;
-  }
-
-  save(): void {
-    const id = this.buildingId();
-    if (id === null || this.assignedCount === 0) return;
-    this.saving.set(true);
-    this.saveError.set('');
-    // alpha_ext (Lot AI) et shading_profile_id doivent survivre à cet
-    // enregistrement : un PATCH de triangles REMPLACE toute la liste.
-    const triangles = this.triangles().map(t => ({
-      v: t.v, group: t.group, paroi_model_id: t.paroi_model_id, boundary: t.boundary,
-      shading_profile_id: t.shading_profile_id ?? null, alpha_ext: t.alpha_ext ?? null,
-    }));
-    this.api.updateBuilding(id, { triangles }).subscribe({
-      next: () => {
-        this.saving.set(false);
-        // Surface de référence renseignée automatiquement : l'empreinte réelle
-        // est connue, et sans elle les résultats en kWh/m² restent indisponibles.
-        if (this.surfaceRefM2 !== null) {
-          this.api.updateBuilding(id, { surface_ref_m2: this.surfaceRefM2 }).subscribe({ error: () => {} });
-        }
-        this.step.set('environnement');
-      },
-      error: (err) => {
-        this.saving.set(false);
-        this.saveError.set(err?.error?.detail ?? "Échec de l'enregistrement.");
-      },
-    });
   }
 }

@@ -11,11 +11,12 @@ export interface ViewerTriangle {
   v: [number, number, number];
 }
 
-/** Lot AI — texture drapée (orthophoto) : image déjà chargée côté appelant
- * (URL d'objet), et projection d'un point (x, y) du repère vers (u, v). */
+/** Texture drapée : image déjà chargée côté appelant (URL d'objet), et
+ * projection d'un point 3D du repère vers (u, v). Lot AI : orthophoto (seuls
+ * x, y comptent) ; Lot AK : façade redressée (la hauteur compte). */
 export interface ViewerTexture {
   url: string;
-  uv: (x: number, y: number) => [number, number];
+  uv: (p: number[]) => [number, number];
 }
 
 function resolveColor(varNameOrHex: string): THREE.Color {
@@ -70,11 +71,12 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
   /** Retourne une couleur (hex "#rrggbb" ou nom de variable CSS "--xxx") pour un triangle. */
   @Input() colorForTriangle: (index: number) => string = () => '--border';
   @Input() pickable = false;
-  /** Lot AI — texture optionnelle, appliquée aux triangles pour lesquels
-   * `texturedTriangle` est vrai ; leur couleur vient alors de `tintForTexturedTriangle`
-   * (null = texture telle quelle), qui la multiplie (surlignage d'une sélection). */
-  @Input() texture: ViewerTexture | null = null;
-  @Input() texturedTriangle: (index: number) => boolean = () => false;
+  /** Textures optionnelles : `textureIndexFor(i)` donne celle du triangle i
+   * (−1 = aucune, couleur unie). La couleur d'un triangle texturé vient de
+   * `tintForTexturedTriangle` (null = texture telle quelle), qui la multiplie
+   * (surlignage d'une sélection). */
+  @Input() textures: ViewerTexture[] = [];
+  @Input() textureIndexFor: (index: number) => number = () => -1;
   @Input() tintForTexturedTriangle: (index: number) => string | null = () => null;
 
   @Output() triangleClick = new EventEmitter<number>();
@@ -86,7 +88,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
   private camera?: THREE.PerspectiveCamera;
   private controls?: OrbitControls;
   private parts: Part[] = [];
-  private map?: THREE.Texture;
+  private maps = new Map<string, THREE.Texture>();
   private resizeObserver?: ResizeObserver;
   private raycaster = new THREE.Raycaster();
   private frameHandle = 0;
@@ -107,7 +109,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     if (!this.scene) return;
     if (changes['vertices'] || changes['triangles']) {
       this.buildGeometry(true);
-    } else if (changes['texture']) {
+    } else if (changes['textures']) {
       // Texture arrivée après la géométrie (chargement asynchrone) : on
       // reconstruit sans toucher à la caméra.
       this.buildGeometry(false);
@@ -121,7 +123,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.hostRef.nativeElement.removeEventListener('pointerup', this.onPointerUp);
     this.controls?.dispose();
     this.disposeParts();
-    this.map?.dispose();
+    this.maps.forEach(m => m.dispose());
     this.renderer?.dispose();
   }
 
@@ -184,19 +186,23 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.parts = [];
   }
 
-  private loadMap(): THREE.Texture | undefined {
-    if (!this.texture) {
-      this.map?.dispose();
-      this.map = undefined;
-      return undefined;
+  /** Charge (ou reprend) la texture de chaque URL ; libère celles qui ne
+   * servent plus. */
+  private loadMaps(): (THREE.Texture | undefined)[] {
+    const wanted = new Set(this.textures.map(t => t.url));
+    for (const [url, m] of this.maps) {
+      if (!wanted.has(url)) { m.dispose(); this.maps.delete(url); }
     }
-    if (this.map && this.map.userData['url'] === this.texture.url) return this.map;
-    this.map?.dispose();
-    this.map = new THREE.TextureLoader().load(this.texture.url);
-    this.map.userData['url'] = this.texture.url;
-    this.map.colorSpace = THREE.SRGBColorSpace;
-    this.map.anisotropy = 4;
-    return this.map;
+    return this.textures.map(t => {
+      let m = this.maps.get(t.url);
+      if (!m) {
+        m = new THREE.TextureLoader().load(t.url);
+        m.colorSpace = THREE.SRGBColorSpace;
+        m.anisotropy = 4;
+        this.maps.set(t.url, m);
+      }
+      return m;
+    });
   }
 
   private buildGeometry(reframe: boolean): void {
@@ -204,14 +210,20 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.disposeParts();
     if (!this.triangles.length || !this.vertices.length) return;
 
-    const map = this.loadMap();
-    const plain: number[] = [];
-    const textured: number[] = [];
-    this.triangles.forEach((_t, i) => (map && this.texturedTriangle(i) ? textured : plain).push(i));
+    const maps = this.loadMaps();
+    // Un paquet de triangles par texture (clé = indice), −1 = sans texture.
+    const buckets = new Map<number, number[]>();
+    this.triangles.forEach((_t, i) => {
+      const k = this.textureIndexFor(i);
+      const key = k >= 0 && k < maps.length ? k : -1;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(i);
+    });
 
     const color = colorResolver();
-    for (const [list, isTextured] of [[plain, false], [textured, true]] as [number[], boolean][]) {
-      if (!list.length) continue;
+    for (const [key, list] of buckets) {
+      const isTextured = key >= 0;
+      const tex = isTextured ? this.textures[key] : null;
       const positions = new Float32Array(list.length * 9);
       const colors = new Float32Array(list.length * 9);
       const uvs = isTextured ? new Float32Array(list.length * 6) : null;
@@ -221,7 +233,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
           const p = this.vertices[this.triangles[tri].v[k]];
           positions.set([p[0], p[1], p[2]], f * 9 + k * 3);
           colors.set([c.r, c.g, c.b], f * 9 + k * 3);
-          if (uvs && this.texture) uvs.set(this.texture.uv(p[0], p[1]), f * 6 + k * 2);
+          if (uvs && tex) uvs.set(tex.uv(p), f * 6 + k * 2);
         }
       });
       const geometry = new THREE.BufferGeometry();
@@ -230,7 +242,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
       if (uvs) geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
       geometry.computeVertexNormals();
       const material = new THREE.MeshLambertMaterial({
-        vertexColors: true, side: THREE.DoubleSide, map: isTextured ? map : null,
+        vertexColors: true, side: THREE.DoubleSide, map: isTextured ? maps[key] ?? null : null,
       });
       const mesh = new THREE.Mesh(geometry, material);
       this.scene.add(mesh);

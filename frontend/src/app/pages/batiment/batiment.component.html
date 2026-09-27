@@ -178,6 +178,19 @@
       <button type="button" class="btn-secondary" (click)="generateBox()">Générer la boîte</button>
     </div>
 
+    @if (currentBuilding(); as cb) {
+      @if (cb.georef_lat !== null) {
+        <div class="shadow-block" id="section-facades">
+          <h3>Façades et vitrages (photos de rue)</h3>
+          <p class="hint">
+            À faire AVANT de raffiner : les vitrages sont insérés dans les murs d'origine, et
+            « Réintégrer » repart toujours du maillage avant insertion.
+          </p>
+          <app-facade-panel [building]="cb" [paroiModels]="paroiModelsFull()" (buildingChange)="onFacadeBuildingChange($event)" />
+        </div>
+      }
+    }
+
     @if (currentBuildingId() !== null) {
       <div class="shadow-block">
         <h3>Raffiner le maillage</h3>

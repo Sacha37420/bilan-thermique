@@ -317,8 +317,15 @@ class BuildingSerializer(serializers.Serializer):
     suggested_eta_recup_vent = serializers.FloatField(required=False, allow_null=True, default=None,
                                                         min_value=0.0, max_value=0.95)
     sun_visibility_stale = serializers.BooleanField(read_only=True)
+    facades = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+    def get_facades(self, obj):
+        """Lot AK — analyse des façades, sans l'enveloppe de base (réservée à la
+        réapplication côté serveur, et qui doublerait le poids de la réponse)."""
+        data = obj.facades or {}
+        return {k: v for k, v in data.items() if k != 'base'}
 
     def validate_name(self, value):
         qs = Building.objects.filter(name=value)
@@ -388,10 +395,24 @@ class BuildingSerializer(serializers.Serializer):
             instance.sun_visibility_stale = True
         if envelope is not None:
             instance.envelope = envelope
+            if 'vertices' in getattr(self, 'initial_data', {}):
+                # Nouveau maillage : l'analyse des façades (plans, baies) ne lui
+                # correspond plus.
+                instance.facades = {}
         for field, value in validated_data.items():
             setattr(instance, field, value)
         instance.save()
         return instance
+
+
+class FacadeApplySerializer(serializers.Serializer):
+    """POST /api/batiments/<id>/facades/appliquer/ (Lot AK)."""
+
+    glazing_model_id = serializers.PrimaryKeyRelatedField(queryset=ParoiModel.objects.filter(is_glazing=True))
+    wall_model_id = serializers.PrimaryKeyRelatedField(queryset=ParoiModel.objects.filter(is_glazing=False),
+                                                       required=False, allow_null=True, default=None)
+    fallback_ratio = serializers.FloatField(min_value=0.0, max_value=0.6, required=False, default=0.2)
+    use_detection = serializers.DictField(child=serializers.BooleanField(), required=False, default=dict)
 
 
 class RefineMeshRequestSerializer(serializers.Serializer):

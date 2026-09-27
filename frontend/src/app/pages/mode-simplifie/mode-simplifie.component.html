@@ -15,9 +15,10 @@
     <p>
       Le quartier est reconstruit depuis le relevé LiDAR HD de l'IGN (toitures, hauteurs, arbres et
       relief réels) croisé avec la BD TOPO, et les parois sont pré-assignées d'après les matériaux et
-      l'année de construction connus. Ce qui reste simplifié : les fenêtres ne sont qu'une
-      proportion de petits triangles répartis régulièrement sur chaque façade, sans cadre, et les
-      parois pré-assignées sont des ordres de grandeur par époque. Pour un résultat plus fin,
+      l'année de construction connus. Les fenêtres sont repérées sur les photos de rue et insérées
+      comme de vrais vitrages. Ce qui reste simplifié : la détection est automatique (à vérifier
+      dans la vue 3D), sans cadre de fenêtre, et les parois pré-assignées sont des ordres de
+      grandeur par époque. Pour un résultat plus fin,
       continuez ensuite sur la page Bâtiment.
     </p>
   </div>
@@ -123,9 +124,7 @@
         @if (createError()) { <p class="field-error">{{ createError() }}</p> }
       } @else {
         <p class="hint">
-          « {{ buildingName }} » créé — {{ triangles().length }} triangles après subdivision,
-          emprise {{ footprintM2() }} m², volume {{ volumeM3() }} m³.
-          @if (refineNote()) { {{ refineNote() }} }
+          « {{ buildingName }} » créé — emprise {{ footprintM2() }} m², volume {{ volumeM3() }} m³.
         </p>
         @if (materials(); as m) {
           <p class="hint">
@@ -138,116 +137,28 @@
     </section>
   }
 
-  <!-- ── Étape 3 : configuration par paroi ───────────────────────────── -->
-  @if (step() === 'configuration' || step() === 'termine') {
-    <section class="form-card" [class.done]="step() === 'termine'">
-      <h2>3. Taux de vitrage par paroi</h2>
+  <!-- ── Étape 3 : façades et vrais vitrages ─────────────────────────── -->
+  @if ((step() === 'configuration' || step() === 'environnement' || step() === 'calcul' || step() === 'termine') && building(); as b) {
+    <section class="form-card" [class.done]="step() !== 'configuration'">
+      <h2>3. Façades et vitrages</h2>
       <p class="hint">
-        Méthode complète équivalente : dessiner ou importer la vraie forme et position de chaque
-        fenêtre. Ici, pour chaque paroi, on choisit un modèle opaque, un modèle de vitrage et une
-        proportion — les petits triangles sont répartis régulièrement pour approcher cette
-        proportion, sans représenter de vraies fenêtres ni leur cadre (voir le Lot I pour le cadre,
-        applicable ensuite via la page Bibliothèque de parois si le modèle de vitrage en a un).
+        Méthode complète équivalente : dessiner chaque fenêtre dans un modeleur 3D. Ici, les baies
+        sont repérées sur les photos de rue et insérées comme de vrais vitrages dans les murs.
       </p>
       @if (step() === 'configuration') {
-        <div class="bulk-config">
-          <h3>Toutes les façades exposées ({{ exposedWallGroups.length }})</h3>
-          <div class="field-grid">
-            <label>
-              <span>Mur</span>
-              <select [(ngModel)]="bulkWallModelId" name="bulkWallModelId">
-                <option [ngValue]="null">— garder la pré-assignation —</option>
-                @for (m of opaqueModels; track m.id) { <option [ngValue]="m.id">{{ m.name }}</option> }
-              </select>
-            </label>
-            <label>
-              <span>Vitrage</span>
-              <select [(ngModel)]="bulkGlazingId" name="bulkGlazingId">
-                <option [ngValue]="null">— aucun —</option>
-                @for (m of glazingModels; track m.id) { <option [ngValue]="m.id">{{ m.name }}</option> }
-              </select>
-            </label>
-            <label>
-              <span>Taux de vitrage (%)</span>
-              <input type="number" step="5" min="0" max="95" [(ngModel)]="bulkTaux" name="bulkTaux" />
-            </label>
-          </div>
-          <button type="button" class="btn-secondary" (click)="applyToAllWalls()">Appliquer à toutes les façades</button>
-          <p class="hint">
-            Toitures, plancher et murs mitoyens gardent leur pré-assignation, sans vitrage. Le détail
-            paroi par paroi reste réglable ci-dessous.
-          </p>
-        </div>
-        <details class="group-details">
-          <summary>Réglage paroi par paroi ({{ groups().length }} parois)</summary>
-        <div class="group-config-list">
-          @for (g of groups(); track g) {
-            <div class="group-config-row">
-              <h3>{{ g }} <span class="hint">({{ triangleCountForGroup(g) }} triangle(s))</span></h3>
-              <div class="field-grid">
-                <label>
-                  <span>Modèle opaque</span>
-                  <select [(ngModel)]="groupConfig[g].opaqueModelId" name="opaque_{{g}}">
-                    <option [ngValue]="null">— choisir —</option>
-                    @for (m of opaqueModels; track m.id) {
-                      <option [ngValue]="m.id">{{ m.name }}</option>
-                    }
-                  </select>
-                </label>
-                @if (g !== 'sol') {
-                  <label>
-                    <span>Modèle de vitrage</span>
-                    <select [(ngModel)]="groupConfig[g].glazingModelId" name="glazing_{{g}}">
-                      <option [ngValue]="null">— aucun —</option>
-                      @for (m of glazingModels; track m.id) {
-                        <option [ngValue]="m.id">{{ m.name }}</option>
-                      }
-                    </select>
-                  </label>
-                  <label>
-                    <span>Taux de vitrage (%)</span>
-                    <input type="number" step="5" min="0" max="95" [(ngModel)]="groupConfig[g].tauxVitragePct" name="taux_{{g}}" />
-                  </label>
-                }
-              </div>
-              @if (actualGlazingPct()[g] !== undefined) {
-                <p class="hint">
-                  Obtenu : <strong>{{ actualGlazingPct()[g] | number:'1.0-1' }} %</strong> de l'aire de
-                  cette paroi, pour {{ groupConfig[g].tauxVitragePct }} % demandé(s).
-                </p>
-              }
-            </div>
-          }
-        </div>
-        </details>
-        <button type="button" class="btn-secondary" [disabled]="!allGroupsConfigured" (click)="generateAssignment()">
-          Générer l'assignation
-        </button>
-        @if (!allGroupsConfigured) {
-          <p class="hint">Choisissez un modèle opaque pour chaque paroi avant de générer l'assignation.</p>
-        }
-        <p class="hint">
-          Le vitrage est réparti régulièrement sur les petits triangles de chaque paroi : le taux
-          demandé n'est donc jamais atteint exactement, seulement approché au plus près de ce que le
-          maillage permet. L'écart est d'autant plus grand que la paroi compte peu de triangles —
-          revenez à l'étape 2 avec une subdivision plus fine s'il vous gêne. Le taux réellement
-          obtenu, mesuré en aire, s'affiche sous chaque paroi après génération : c'est celui-là qui
-          sera calculé.
-        </p>
-
-        @if (vertices().length > 0) {
-          <h3>Aperçu — <span class="hint" style="color: var(--accent)">vitrage</span> / <span class="hint">opaque</span> / <span class="hint" style="color: var(--warning)">non assigné</span></h3>
-          <div class="viewer-wrap">
-            <app-mesh-viewer [vertices]="vertices()" [triangles]="triangles()" [colorForTriangle]="colorForTriangle" [pickable]="false" />
-          </div>
-
-          <button type="button" class="btn-primary" [disabled]="saving() || assignedCount === 0" (click)="save()">
-            {{ saving() ? 'Enregistrement…' : 'Enregistrer et terminer' }}
+        <app-facade-panel [building]="b" [paroiModels]="paroiModels()" (buildingChange)="onFacadeBuildingChange($event)" />
+        <div class="editor-actions">
+          <button type="button" class="btn-primary" [disabled]="!hasGlazing || continuing()" (click)="continueToShadow()">
+            {{ continuing() ? 'Subdivision…' : 'Continuer vers l’ombrage' }}
           </button>
-          @if (saveError()) {
-            <p class="field-error">{{ saveError() }}</p>
-          }
-        }
+          @if (!hasGlazing) { <span class="hint">Intégrez d'abord les vitrages.</span> }
+        </div>
+        @if (createError()) { <p class="field-error">{{ createError() }}</p> }
+      } @else {
+        <p class="hint">
+          Vitrages intégrés — {{ b.envelope.triangles.length }} triangles après subdivision.
+          @if (refineNote()) { {{ refineNote() }} }
+        </p>
       }
     </section>
   }

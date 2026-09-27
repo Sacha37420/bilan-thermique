@@ -93,15 +93,22 @@ def refine_envelope(vertices, triangles, max_edge_length):
     préservant la qualité (pas de triangles très allongés) et la conformité
     du maillage (pas de fissure entre triangles voisins).
 
-    Principe : dès qu'UN côté d'un triangle est trop long, ses TROIS côtés
-    sont marqués à diviser (propagés par voisinage jusqu'à un point fixe),
-    puis chaque triangle marqué subit une division "rouge" classique en 4
-    sous-triangles semblables (mêmes proportions que le parent, à l'échelle
-    1/2) via les milieux de ses 3 côtés. Répété jusqu'à ce qu'aucun côté ne
-    dépasse le seuil. Toujours une division complète (jamais de division
-    "verte" partielle à 2 ou 3 triangles) : plus de triangles que le strict
-    minimum dans certains cas, mais aucun risque de créer un triangle très
-    étiré — exactement ce qu'on cherche à éviter.
+    Principe (raffinement « rouge-vert-bleu » par le plus long côté) : les
+    côtés trop longs sont marqués ; tout triangle qui a un côté marqué voit
+    aussi son PLUS LONG côté marqué (propagé aux voisins jusqu'à un point
+    fixe). Chaque triangle est alors coupé selon le nombre de côtés marqués :
+    1 (forcément le plus long) → 2 enfants par son milieu, 2 → 3 enfants,
+    3 → 4 enfants semblables via les milieux. Couper toujours par le plus long
+    côté borne la dégradation des angles, et un milieu partagé par les deux
+    triangles voisins d'un côté garantit l'absence de fissure. Répété jusqu'à
+    ce qu'aucun côté ne dépasse le seuil.
+
+    Le raffinement reste LOCAL : l'ancienne version marquait les trois côtés
+    de tout triangle touché, ce qui se propageait de proche en proche à tout
+    le maillage à chaque itération — un mur percé de petites fenêtres
+    (triangulation fine autour des baies, Lot AK) et d'un côté de 37 m
+    faisait alors quadrupler l'ensemble jusqu'à dépasser la limite de
+    triangles, même à 7 m de maille.
 
     triangles : liste de dicts avec au moins 'v' — les autres clés (group,
     paroi_model_id) sont copiées telles quelles sur chaque enfant, PAS les
@@ -128,26 +135,28 @@ def refine_envelope(vertices, triangles, max_edge_length):
         if not seed_long:
             break
 
-        # Propagation par largeur : un triangle avec un côté marqué a ses
-        # TROIS côtés marqués — répercuté aux voisins jusqu'à stabilité.
+        def longest(tri):
+            v = tri['v']
+            edges = (_canonical_edge(v[0], v[1]), _canonical_edge(v[1], v[2]), _canonical_edge(v[2], v[0]))
+            return max(edges, key=lambda e: (_edge_length(vertices, e), e))
+
         to_split = set(seed_long)
         queue = list(seed_long)
-        triangle_processed = set()
         qi = 0
         while qi < len(queue):
             e = queue[qi]
             qi += 1
             for ti in edge_to_triangles[e]:
-                if ti in triangle_processed:
-                    continue
-                triangle_processed.add(ti)
-                v = triangles[ti]['v']
-                for e2 in (_canonical_edge(v[0], v[1]), _canonical_edge(v[1], v[2]), _canonical_edge(v[2], v[0])):
-                    if e2 not in to_split:
-                        to_split.add(e2)
-                        queue.append(e2)
+                le = longest(triangles[ti])
+                if le not in to_split:
+                    to_split.add(le)
+                    queue.append(le)
 
-        if len(vertices) + len(to_split) > MAX_VERTICES or len(triangles) * 4 > MAX_TRIANGLES:
+        n_new = 0
+        for tri in triangles:
+            v = tri['v']
+            n_new += 1 + sum(_canonical_edge(v[i], v[(i + 1) % 3]) in to_split for i in range(3))
+        if len(vertices) + len(to_split) > MAX_VERTICES or n_new > MAX_TRIANGLES:
             raise GeometryError(
                 f"Le raffinement à {max_edge_length} m dépasserait la limite de {MAX_TRIANGLES} triangles — "
                 "augmenter la taille maximale."
@@ -162,16 +171,36 @@ def refine_envelope(vertices, triangles, max_edge_length):
         new_triangles = []
         for tri in triangles:
             v = tri['v']
-            e01, e12, e20 = _canonical_edge(v[0], v[1]), _canonical_edge(v[1], v[2]), _canonical_edge(v[2], v[0])
-            if e01 not in to_split:
+            marked = [_canonical_edge(v[i], v[(i + 1) % 3]) in to_split for i in range(3)]
+            if not any(marked):
                 new_triangles.append(tri)
                 continue
-            m01, m12, m20 = midpoint_of[e01], midpoint_of[e12], midpoint_of[e20]
             extra = {k: val for k, val in tri.items() if k != 'v'}
-            new_triangles.append({'v': [v[0], m01, m20], **extra})
-            new_triangles.append({'v': [v[1], m12, m01], **extra})
-            new_triangles.append({'v': [v[2], m20, m12], **extra})
-            new_triangles.append({'v': [m01, m12, m20], **extra})
+            if all(marked):
+                m01 = midpoint_of[_canonical_edge(v[0], v[1])]
+                m12 = midpoint_of[_canonical_edge(v[1], v[2])]
+                m20 = midpoint_of[_canonical_edge(v[2], v[0])]
+                children = [[v[0], m01, m20], [v[1], m12, m01], [v[2], m20, m12], [m01, m12, m20]]
+            else:
+                # Rotation (orientation conservée) pour que le plus long côté,
+                # toujours marqué ici, soit a→b.
+                le = longest(tri)
+                r = next(i for i in range(3) if _canonical_edge(v[i], v[(i + 1) % 3]) == le)
+                a, b, c = v[r], v[(r + 1) % 3], v[(r + 2) % 3]
+                m = midpoint_of[le]
+                bc, ca = _canonical_edge(b, c), _canonical_edge(c, a)
+                children = []
+                if bc in to_split:
+                    n = midpoint_of[bc]
+                    children += [[m, b, n], [m, n, c]]
+                else:
+                    children.append([m, b, c])
+                if ca in to_split:
+                    p = midpoint_of[ca]
+                    children += [[a, m, p], [p, m, c]]
+                else:
+                    children.append([a, m, c])
+            new_triangles.extend({'v': ch, **extra} for ch in children)
 
         triangles = new_triangles
     else:

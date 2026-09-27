@@ -8,6 +8,7 @@ from .views import (
     EnvironmentOrthophotoView,
     JobDetailView, PrecomputeShadowsView, BuildingCalculView, BuildingRefineView,
     FetchWeatherView, SearchNearbyBuildingsView, GroundAltitudeView,
+    FacadeAnalyseView, FacadeTextureView, FacadeApplyView,
 )
 
 urlpatterns = [
@@ -23,6 +24,9 @@ urlpatterns = [
     path('batiments/<int:pk>/precalcul-ombrage/', PrecomputeShadowsView.as_view()),
     path('batiments/<int:pk>/calcul-3d/', BuildingCalculView.as_view()),
     path('batiments/<int:pk>/affiner-maillage/', BuildingRefineView.as_view()),
+    path('batiments/<int:pk>/facades/analyser/', FacadeAnalyseView.as_view()),
+    path('batiments/<int:pk>/facades/appliquer/', FacadeApplyView.as_view()),
+    path('batiments/<int:pk>/facades/<str:group>/texture/', FacadeTextureView.as_view()),
     path('environnements/',   EnvironmentListCreateView.as_view()),
     path('environnements/generer/', GenerateEnvironmentView.as_view()),
     path('environnements/<int:pk>/', EnvironmentDetailView.as_view()),

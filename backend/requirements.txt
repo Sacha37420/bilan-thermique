@@ -37,3 +37,7 @@ pillow>=10.0
 # ~500 fois plus rapide que l'implémentation numpy, résultats identiques
 # (mesuré). Repli automatique sur numpy s'il manque (voir shadow._ray_intersector).
 embreex>=2.17
+# Façades (Lot AK) : détection des baies par OWLv2 (Google, Apache 2.0), exécuté
+# en ONNX quantifié — onnxruntime pour l'inférence, tokenizers pour les requêtes.
+onnxruntime>=1.17
+tokenizers>=0.15

@@ -136,6 +136,22 @@ export class ApiService {
     return this.http.post(`${this.base}/api/environnements/${envId}/etudier/`, { ids, name });
   }
 
+  /** Lot AK — façades : analyse sur photos de rue, texture, vrais vitrages. */
+  analyseFacades(buildingId: number): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/${buildingId}/facades/analyser/`, {});
+  }
+
+  getFacadeTexture(buildingId: number, group: string): Observable<Blob> {
+    return this.http.get(`${this.base}/api/batiments/${buildingId}/facades/${group}/texture/`, { responseType: 'blob' });
+  }
+
+  applyFacades(buildingId: number, payload: {
+    glazing_model_id: number; wall_model_id?: number | null; fallback_ratio?: number;
+    use_detection?: Record<string, boolean>;
+  }): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/${buildingId}/facades/appliquer/`, payload);
+  }
+
   /** Lot AI — orthophoto IGN de l'environnement, pour la texture de la vue 3D. */
   getEnvironmentOrthophoto(envId: number): Observable<Blob> {
     return this.http.get(`${this.base}/api/environnements/${envId}/orthophoto/`, { responseType: 'blob' });
