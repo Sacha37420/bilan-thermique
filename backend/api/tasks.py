@@ -170,6 +170,7 @@ def generate_environment(self, job_id, params):
         'vegetation': "Arbres et massifs…",
         'terrain': "Maillage du terrain…",
         'ortho': "Orthophotos : albédo du sol et couleur des toits…",
+        'cosia': "CoSIA : essences des arbres (conifères, feuillus)…",
         'legacy-buildings': "Bâtiments (BD TOPO / OpenStreetMap)…",
         'legacy-vegetation': "Végétation (BD TOPO / OpenStreetMap)…",
         'legacy-terrain': "Altitude du terrain…",

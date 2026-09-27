@@ -61,6 +61,39 @@ ORTHO_RGB_LAYER = 'ORTHOIMAGERY.ORTHOPHOTOS'
 # l'énergie solaire), et un indice de végétation (NDVI).
 ORTHO_IRC_LAYER = 'ORTHOIMAGERY.ORTHOPHOTOS.IRC'
 ORTHO_MAX_PX = 2048
+# CoSIA (couverture du sol par IA), par millésime — rendu en couleurs de légende.
+COSIA_LAYERS = [((2017, 2020), 'IGNF_COSIA_2017-2020'), ((2021, 2023), 'IGNF_COSIA_2021-2023'),
+                ((2024, 2026), 'IGNF_COSIA_2024-2026')]
+
+
+def cosia_layer_for(year):
+    """Millésime CoSIA le plus proche de l'année du relevé LiDAR."""
+    if year is None:
+        return COSIA_LAYERS[1][1]
+    for (a, b), name in COSIA_LAYERS:
+        if a <= year <= b:
+            return name
+    return COSIA_LAYERS[-1][1] if year > 2026 else COSIA_LAYERS[0][1]
+
+
+def fetch_cosia(bbox_l93, year, px_per_m=2.0):
+    """Raster CoSIA (PNG RGBA décodé) de l'emprise ; lève GeodataError."""
+    from PIL import Image
+    xmin, ymin, xmax, ymax = bbox_l93
+    width = max(16, min(ORTHO_MAX_PX, int(round((xmax - xmin) * px_per_m))))
+    height = max(16, min(ORTHO_MAX_PX, int(round((ymax - ymin) * px_per_m))))
+    params = {
+        'SERVICE': 'WMS', 'VERSION': '1.3.0', 'REQUEST': 'GetMap', 'LAYERS': cosia_layer_for(year),
+        'FORMAT': 'image/png', 'STYLES': '', 'CRS': 'EPSG:2154',
+        'BBOX': f'{xmin},{ymin},{xmax},{ymax}', 'WIDTH': str(width), 'HEIGHT': str(height),
+    }
+    try:
+        resp = _throttled_get(WMS_R_URL, params=params)
+    except requests.RequestException as exc:
+        raise GeodataError(f"CoSIA injoignable ({exc}).") from exc
+    if not resp.headers.get('content-type', '').startswith('image/'):
+        raise GeodataError(f"CoSIA : réponse inattendue ({resp.text[:200]}).")
+    return np.asarray(Image.open(io.BytesIO(resp.content)).convert('RGBA'))
 
 
 class LidarUnavailable(GeodataError):

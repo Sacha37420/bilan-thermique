@@ -166,7 +166,11 @@ export class EnvSceneComponent implements OnChanges, OnDestroy {
     if (!obj) return '--text-mute';
     const tint = this.statusTint(obj);
     if (tint) return tint;
-    if (obj.kind === 'vegetation') return '--success';
+    if (obj.kind === 'vegetation') {
+      // Essence CoSIA (Lot AJ) : conifère plus sombre ; inconnue = teinte générique.
+      const essence = obj.info?.['essence'];
+      return essence === 'conifère' ? '--veg-conifere' : essence === 'feuillu' ? '--veg-feuillu' : '--success';
+    }
     if (obj.kind === 'terrain') return '--success-tint';
     const code = String(obj.info?.['mat_murs'] ?? '').trim();
     const first = [...code].find(ch => ch !== '0');

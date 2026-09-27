@@ -4060,3 +4060,60 @@ class HourlySetpointNoCoolingTest(SimpleTestCase):
                  't_min': 7.0, 't_max': 100.0}
         s = serializers.BuildingWeatherPointSerializer(data=point)
         self.assertTrue(s.is_valid(), s.errors)
+
+
+class CrownSolidTest(SimpleTestCase):
+    """Lot AJ — houppier reconstruit sur ses propres points LiDAR."""
+
+    databases = []
+
+    def _cone(self, n=4000, r0=3.0, z0=4.0, z1=14.0, seed=2):
+        rng = np.random.default_rng(seed)
+        z = rng.uniform(z0, z1, n)
+        rmax = r0 * (z1 - z) / (z1 - z0)          # conifère : cône, pointe en haut
+        a = rng.uniform(-math.pi, math.pi, n)
+        rr = rmax * np.sqrt(rng.uniform(0, 1, n))
+        return np.column_stack([10 + rr * np.cos(a), 5 + rr * np.sin(a), z])
+
+    def test_cone_closed_and_tapered(self):
+        import trimesh
+        from . import observed_env as oe
+        pts = self._cone()
+        verts, tris = oe.crown_solid(pts, 4.0, 14.0, (10.0, 5.0))
+        m = trimesh.Trimesh(verts, [t['v'] for t in tris], process=False)
+        self.assertTrue(m.is_watertight and m.is_winding_consistent and m.volume > 0)
+        V = np.array(verts)
+        self.assertAlmostEqual(V[:, 2].max(), 14.0, places=3)
+        low = V[(V[:, 2] > 4.5) & (V[:, 2] < 6.5)]
+        high = V[(V[:, 2] > 11.0) & (V[:, 2] < 13.9)]
+        r_low = np.hypot(low[:, 0] - 10, low[:, 1] - 5).mean()
+        r_high = np.hypot(high[:, 0] - 10, high[:, 1] - 5).mean()
+        self.assertGreater(r_low, 2 * r_high)            # la forme suit les points
+        # Volume du même ordre que le cône (π r² h / 3 ≈ 94 m³), bien loin du
+        # prisme équivalent (π r² h ≈ 283 m³).
+        self.assertLess(m.volume, 180.0)
+        self.assertGreater(m.volume, 50.0)
+
+    def test_too_few_points_falls_back(self):
+        from . import observed_env as oe
+        self.assertIsNone(oe.crown_solid(self._cone(n=10), 4.0, 14.0, (10.0, 5.0)))
+
+
+class CosiaEssenceTest(SimpleTestCase):
+    databases = []
+
+    def test_decode_palette_and_essence(self):
+        from . import observed_env as oe
+        img = np.zeros((10, 10, 4), dtype=np.uint8)
+        img[..., 3] = 255
+        img[:, :5, :3] = oe.COSIA_PALETTE['conifère']
+        img[:, 5:, :3] = (77, 144, 40)                       # feuillu, à l'antialiasing près
+        c = oe.CosiaImage(img, (0.0, 0.0, 10.0, 10.0))
+        self.assertEqual(oe.COSIA_CLASSES[c.classes_at(2.0, 5.0)], 'conifère')
+        self.assertEqual(oe.COSIA_CLASSES[c.classes_at(8.0, 5.0)], 'feuillu')
+
+        class IdFrame:
+            def to_l93(self, x, y):
+                return np.asarray(x), np.asarray(y)
+        self.assertEqual(oe._essence(c, IdFrame(), [1, 2, 3], [5, 5, 5]), 'conifère')
+        self.assertEqual(oe._essence(c, IdFrame(), [6, 7, 8, 1], [5, 5, 5, 5]), 'feuillu')

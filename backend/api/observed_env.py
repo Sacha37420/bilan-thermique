@@ -366,6 +366,9 @@ def build_rasters(x, y, z, cls, half_m, ground_z=None):
     veg = cls == CLASS_VEG_HIGH
     r.veg_top = _reduce_max(g1, x[veg], y[veg], zr[veg])
     r.veg_low = _reduce_min(g1, x[veg], y[veg], zr[veg])
+    # Lot AJ : points bruts de végétation haute, pour reconstruire la
+    # silhouette 3D de chaque houppier (et non plus un prisme extrudé).
+    r.veg_pts = np.column_stack([x[veg], y[veg], zr[veg]])
 
     above_classes = ~np.isin(cls, (CLASS_GROUND, CLASS_VEG_LOW, CLASS_VEG_MID))
     above = _reduce_max(g05, x[above_classes], y[above_classes], zr[above_classes])
@@ -1056,7 +1059,8 @@ def prism_solid(poly, z0, z1, group_prefix='mur'):
 
 # ── Végétation ─────────────────────────────────────────────────────────────────
 
-def tree_objects(rasters, building_polys, acquisition_months, max_objects=MAX_VEGETATION_OBJECTS):
+def tree_objects(rasters, building_polys, acquisition_months, max_objects=MAX_VEGETATION_OBJECTS,
+                 cosia=None, frame=None):
     """Arbres et massifs à partir de la végétation haute (classe 5).
 
     Segmentation couronne par couronne : hauteur de canopée lissée, maxima
@@ -1102,6 +1106,18 @@ def tree_objects(rasters, building_polys, acquisition_months, max_objects=MAX_VE
     X, Y = g.centers()
     objs = []
     slices = ndimage.find_objects(seg)
+
+    # Points de végétation haute rangés par segment (couronne).
+    vp = getattr(rasters, 'veg_pts', np.zeros((0, 3)))
+    pi_, pj_, pvalid = g.index(vp[:, 0], vp[:, 1]) if len(vp) else (np.zeros(0, int), np.zeros(0, int), np.zeros(0, bool))
+    plabel = np.zeros(len(vp), dtype=np.int64)
+    plabel[pvalid] = seg[pj_[pvalid], pi_[pvalid]]
+    order = np.argsort(plabel, kind='stable')
+    sorted_labels = plabel[order]
+    starts = np.searchsorted(sorted_labels, np.arange(len(slices) + 2))
+
+    def points_of(label):
+        return vp[order[starts[label]:starts[label + 1]]]
     for label, sl in enumerate(slices, start=1):
         if sl is None:
             continue
@@ -1137,14 +1153,169 @@ def tree_objects(rasters, building_polys, acquisition_months, max_objects=MAX_VE
         if crown.is_empty or crown.area < 2.0:
             continue
         cx, cy = crown.centroid.x, crown.centroid.y
+        essence = _essence(cosia, frame, xs, ys) if cosia is not None and frame is not None else None
+        # Transparence (Lot AJ) : un CONIFÈRE garde ses aiguilles l'hiver — la
+        # trouée mesurée par un vol hivernal vaut pour lui toute l'année. Pour
+        # un feuillu (ou une essence inconnue), elle ne vaut que pour l'hiver :
+        # valeur « en feuilles » par défaut, mesure conservée dans k_bare.
+        if leaf_on or essence == 'conifère':
+            k_applied, k_bare = k_obs, None
+        else:
+            k_applied, k_bare = DEFAULT_K_LEAF, k_obs
+        star_shaped = crown.area <= 1.4 * n_cells * g.cell ** 2
         objs.append({
             'crown': crown, 'z0': ground + base_rel, 'z1': ground + h_top,
             'height_m': round(h_top, 1), 'crown_base_m': round(base_rel, 1),
-            'k': k_obs if leaf_on else DEFAULT_K_LEAF, 'k_bare': None if leaf_on else k_obs,
+            'k': k_applied, 'k_bare': k_bare, 'essence': essence,
             'k_measured': k_obs, 'dist': math.hypot(cx, cy), 'area_m2': round(crown.area, 1),
+            'points': points_of(label) if star_shaped else None, 'center': (cx, cy),
         })
     objs.sort(key=lambda o: o['dist'])
     return objs[:max_objects], {'trees_detected': len(objs), 'leaf_on': leaf_on}
+
+
+CROWN_SECTORS = 8
+
+
+def crown_solid(pts, z0, z1, center, sectors=CROWN_SECTORS):
+    """Houppier reconstruit sur ses propres points LiDAR (Lot AJ), au lieu d'un
+    prisme extrudé : le houppier est découpé en tranches de ~1,5 m, et dans
+    chaque tranche on mesure le rayon (90ᵉ centile) dans `sectors` directions
+    autour de l'axe de l'arbre. Les anneaux ainsi obtenus sont reliés entre eux
+    (loft), fermés par un plancher au bas du houppier et une pointe au sommet
+    réel. Un conifère en ressort naturellement conique, un feuillu arrondi ;
+    un houppier dissymétrique (arbre en lisière, taillé) garde sa dissymétrie.
+
+    pts : (N, 3) points de végétation haute du segment (repère local).
+    Retourne (vertices, triangles) fermé et orienté, ou None si les points ne
+    suffisent pas (l'appelant retombe alors sur le prisme)."""
+    import trimesh
+
+    if pts is None or len(pts) < 30 or z1 - z0 < 1.0:
+        return None
+    cx, cy = center
+    h = z1 - z0
+    n_lev = int(min(max(round(h / 1.5), 2), 5))
+    edges = np.linspace(z0, z1, n_lev + 1)
+    dx, dy = pts[:, 0] - cx, pts[:, 1] - cy
+    r = np.hypot(dx, dy)
+    sector = (((np.arctan2(dy, dx) + math.pi) / (2 * math.pi)) * sectors).astype(int) % sectors
+    theta = -math.pi + (np.arange(sectors) + 0.5) * 2 * math.pi / sectors
+
+    rings = []
+    previous = None
+    for b in range(n_lev):
+        upper = edges[b + 1] + (1e-6 if b == n_lev - 1 else 0.0)
+        band = (pts[:, 2] >= edges[b]) & (pts[:, 2] < upper)
+        radii = np.full(sectors, np.nan)
+        for s_ in range(sectors):
+            rs = r[band & (sector == s_)]
+            if len(rs) >= 2:
+                radii[s_] = float(np.percentile(rs, 90)) + 0.25
+        if np.isnan(radii).all():
+            if previous is None:
+                continue
+            radii = previous * 0.8
+        else:
+            # Secteur sans point : moyenne circulaire des voisins renseignés.
+            for s_ in np.nonzero(np.isnan(radii))[0]:
+                for step in range(1, sectors):
+                    near = [radii[(s_ - step) % sectors], radii[(s_ + step) % sectors]]
+                    near = [v for v in near if not np.isnan(v)]
+                    if near:
+                        radii[s_] = float(np.mean(near))
+                        break
+        radii = np.clip(radii, 0.3, 15.0)
+        rings.append((0.5 * (edges[b] + edges[b + 1]), radii))
+        previous = radii
+    if len(rings) < 1:
+        return None
+
+    vertices = [[cx, cy, z0]]
+    ring_idx = []
+    # anneau de base (sous-face du houppier), resserré
+    base = rings[0][1] * 0.6
+    stack = [(z0 + 0.15 * h / n_lev, base)] + rings
+    for z, radii in stack:
+        ring_idx.append(list(range(len(vertices), len(vertices) + sectors)))
+        for t_, rr in zip(theta, radii):
+            vertices.append([cx + rr * math.cos(t_), cy + rr * math.sin(t_), float(z)])
+    top_pt = pts[np.argmax(pts[:, 2])]
+    # la pointe suit le point le plus haut, sans sortir de l'anneau supérieur
+    off = np.array([top_pt[0] - cx, top_pt[1] - cy])
+    lim = 0.5 * float(np.mean(rings[-1][1]))
+    if np.linalg.norm(off) > lim:
+        off = off / np.linalg.norm(off) * lim
+    apex = len(vertices)
+    vertices.append([cx + off[0], cy + off[1], z1])
+
+    faces = []
+    for k in range(sectors):
+        faces.append([0, ring_idx[0][(k + 1) % sectors], ring_idx[0][k]])
+    for a_ring, b_ring in zip(ring_idx[:-1], ring_idx[1:]):
+        for k in range(sectors):
+            a, b = a_ring[k], a_ring[(k + 1) % sectors]
+            c, d = b_ring[(k + 1) % sectors], b_ring[k]
+            faces.append([a, b, c])
+            faces.append([a, c, d])
+    for k in range(sectors):
+        faces.append([ring_idx[-1][k], ring_idx[-1][(k + 1) % sectors], apex])
+
+    m = trimesh.Trimesh(np.asarray(vertices), np.asarray(faces), process=False)
+    if not m.is_watertight:
+        return None
+    if m.volume < 0:
+        faces = [[f[0], f[2], f[1]] for f in faces]
+    return [[round(c, 3) for c in v] for v in vertices], [{'v': list(map(int, f))} for f in faces]
+
+
+# ── CoSIA (couverture du sol par IA, IGN) ──────────────────────────────────────
+# Rendu WMS en couleurs de légende : on décode la classe par la couleur la plus
+# proche (palette relevée sur la légende officielle, 2026-09-27).
+COSIA_PALETTE = {
+    'bâtiment': (206, 112, 121), 'zone perméable': (152, 119, 82), 'zone imperméable': (166, 170, 183),
+    'piscine': (98, 208, 255), 'sol nu': (187, 176, 150), 'eau': (51, 117, 161),
+    'neige': (233, 239, 254), 'conifère': (18, 100, 33), 'feuillu': (76, 145, 41),
+    'broussaille': (181, 195, 53), 'vigne': (176, 130, 144), 'pelouse': (140, 215, 106),
+    'culture': (222, 207, 85), 'terre labourée': (208, 163, 73), 'serre': (185, 226, 212),
+    'coupe': (223, 139, 82), 'autre': (30, 30, 30),
+}
+COSIA_CLASSES = list(COSIA_PALETTE)
+
+
+class CosiaImage:
+    """Classes CoSIA d'une emprise Lambert 93 : index de classe par pixel
+    (-1 = transparent / hors couverture, ou couleur trop éloignée de la palette)."""
+
+    def __init__(self, rgba, bbox_l93, tolerance=20.0):
+        self.bbox = bbox_l93
+        self.h, self.w = rgba.shape[:2]
+        rgb = rgba[..., :3].astype(np.float32)
+        pal = np.asarray([COSIA_PALETTE[c] for c in COSIA_CLASSES], dtype=np.float32)
+        d = np.linalg.norm(rgb[:, :, None, :] - pal[None, None, :, :], axis=3)
+        idx = d.argmin(axis=2)
+        idx[d.min(axis=2) > tolerance] = -1
+        if rgba.shape[2] == 4:
+            idx[rgba[..., 3] < 128] = -1
+        self.cls = idx
+
+    def classes_at(self, e, n):
+        xmin, ymin, xmax, ymax = self.bbox
+        col = np.clip(((np.asarray(e) - xmin) / (xmax - xmin) * self.w).astype(int), 0, self.w - 1)
+        row = np.clip(((ymax - np.asarray(n)) / (ymax - ymin) * self.h).astype(int), 0, self.h - 1)
+        return self.cls[row, col]
+
+
+def _essence(cosia, frame, xs, ys):
+    """Essence dominante d'une couronne : conifère ou feuillu, d'après CoSIA
+    sous ses mailles. None si CoSIA n'y voit ni l'un ni l'autre."""
+    e, n = frame.to_l93(np.asarray(xs), np.asarray(ys))
+    cls = cosia.classes_at(e, n)
+    con = int(np.count_nonzero(cls == COSIA_CLASSES.index('conifère')))
+    feu = int(np.count_nonzero(cls == COSIA_CLASSES.index('feuillu')))
+    if con + feu == 0:
+        return None
+    return 'conifère' if con > feu else 'feuillu'
 
 
 def _limit_vertices(poly, max_vertices):
@@ -1490,7 +1661,8 @@ def _fallback_height(fp):
 
 
 def build_objects(frame, half_m, points, bdtopo, acquisition_months, include_vegetation=True,
-                  include_terrain=True, self_polygon=None, progress_cb=None, return_rasters=False):
+                  include_terrain=True, self_polygon=None, progress_cb=None, return_rasters=False,
+                  cosia=None):
     """Chaîne complète, sans réseau. points = (e, n, z, cls) en Lambert 93 ;
     bdtopo = sortie de lidar_source.fetch_bdtopo_buildings_l93.
 
@@ -1609,25 +1781,40 @@ def build_objects(frame, half_m, points, bdtopo, acquisition_months, include_veg
     n_trees = 0
     if include_vegetation:
         report('vegetation', 75)
-        trees, tree_stats = tree_objects(rasters, building_polys, acquisition_months)
+        trees, tree_stats = tree_objects(rasters, building_polys, acquisition_months, cosia=cosia, frame=frame)
         stats.update(tree_stats)
+        n_lofted = 0
         for t in trees:
             if not t['crown'].intersects(square):
                 continue
-            try:
-                verts, tris = prism_solid(t['crown'], t['z0'], t['z1'], group_prefix='couronne')
-            except ObservedEnvError:
-                continue
-            info = {k: t[k] for k in ('height_m', 'crown_base_m', 'k_measured', 'k_bare', 'area_m2')}
+            mesh = None
+            if t['points'] is not None:
+                mesh = crown_solid(t['points'], t['z0'], t['z1'], t['center'])
+            shape = 'houppier relevé'
+            if mesh is None:
+                shape = 'massif (prisme)'
+                try:
+                    mesh = prism_solid(t['crown'], t['z0'], t['z1'], group_prefix='couronne')
+                except ObservedEnvError:
+                    continue
+            else:
+                n_lofted += 1
+            verts, tris = mesh
+            info = {k: t[k] for k in ('height_m', 'crown_base_m', 'k_measured', 'k_bare', 'area_m2', 'essence')}
             info['distance_m'] = round(t['dist'], 1)
-            objects.append(make_object(new_id(), 'vegetation', 'lidar', 'Arbre / massif',
+            info['forme'] = shape
+            label = {'conifère': 'Conifère', 'feuillu': 'Feuillu'}.get(t['essence'], 'Arbre / massif')
+            objects.append(make_object(new_id(), 'vegetation', 'lidar', label,
                                        verts, [{'v': tri['v']} for tri in tris], t['crown'], info, k=t['k']))
             n_trees += 1
+        stats['trees_lofted'] = n_lofted
+        if cosia is not None:
+            stats['trees_conifers'] = sum(1 for t in trees if t['essence'] == 'conifère')
         if trees and not tree_stats.get('leaf_on'):
             warnings.append(
-                "LiDAR acquis hors saison de feuillage : la transparence mesurée des arbres vaut pour "
-                "l'hiver. La valeur « en feuilles » par défaut (20 %) est appliquée toute l'année ; "
-                "la mesure est conservée par arbre."
+                "LiDAR acquis hors saison de feuillage : la transparence mesurée vaut pour l'hiver. Elle "
+                "est appliquée aux conifères (persistants, reconnus par CoSIA) ; pour les feuillus, la "
+                "valeur « en feuilles » par défaut (20 %) s'applique et la mesure est conservée."
             )
 
     if include_terrain:

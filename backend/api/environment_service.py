@@ -323,10 +323,21 @@ def generate(params, building=None, progress_cb=None):
             )
         months = sorted({int(t['acq_end'][5:7]) for t in tiles if len(t['acq_end']) >= 7}
                         | {int(t['acq_start'][5:7]) for t in tiles if len(t['acq_start']) >= 7})
+        # Lot AJ : CoSIA (conifère / feuillu) pour la forme et la transparence des arbres.
+        cosia = None
+        if include_veg:
+            report('cosia', 34)
+            years = [int(t['acq_end'][:4]) for t in tiles if len(t['acq_end']) >= 4]
+            cbbox = frame.l93_bbox(half + observed_env.RASTER_MARGIN_M)
+            try:
+                cosia = observed_env.CosiaImage(
+                    lidar_source.fetch_cosia(cbbox, max(years) if years else None), cbbox)
+            except (geodata.GeodataError, OSError, ValueError) as exc:
+                warnings_pre.append(f"CoSIA indisponible ({exc}) : essence des arbres inconnue.")
         objects, ground_z, stats, warnings, rasters = observed_env.build_objects(
             frame, half, points, bdtopo, months, include_vegetation=include_veg,
             include_terrain=include_terrain, self_polygon=self_polygon, progress_cb=report,
-            return_rasters=True,
+            return_rasters=True, cosia=cosia,
         )
         warnings = warnings_pre + warnings
         # Lot AI : orthophotos RVB + infrarouge → albédo du sol (réflexion vers

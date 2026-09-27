@@ -220,6 +220,8 @@
               @if (info(obj, 'bdtopo_id')) { <dt>Identifiant BD TOPO</dt><dd class="mono">{{ info(obj, 'bdtopo_id') }}</dd> }
             }
             @if (obj.kind === 'vegetation') {
+              <dt>Essence (CoSIA)</dt><dd>{{ info(obj, 'essence') ?? 'inconnue' }}</dd>
+              @if (info(obj, 'forme')) { <dt>Forme</dt><dd>{{ info(obj, 'forme') }}</dd> }
               @if (num(obj, 'height_m') !== null) { <dt>Hauteur</dt><dd>{{ num(obj, 'height_m') | number:'1.1-1' }} m</dd> }
               @if (num(obj, 'crown_base_m') !== null) { <dt>Bas du houppier</dt><dd>{{ num(obj, 'crown_base_m') | number:'1.1-1' }} m</dd> }
               <dt>Transparence appliquée</dt><dd>{{ (obj.k ?? 0) * 100 | number:'1.0-0' }} %</dd>
@@ -228,6 +230,7 @@
                 <dd>
                   {{ num(obj, 'k_measured')! * 100 | number:'1.0-0' }} %
                   @if (num(obj, 'k_bare') !== null) { — relevé hors feuillage, valeur « en feuilles » appliquée }
+                  @if (info(obj, 'essence') === 'conifère' && num(obj, 'k_bare') === null) { — persistant : la mesure vaut toute l'année }
                 </dd>
               }
             }
