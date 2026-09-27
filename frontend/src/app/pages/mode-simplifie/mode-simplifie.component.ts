@@ -340,7 +340,7 @@ export class ModeSimplifieComponent implements OnInit {
   // bâtiment neuf a son ombrage marqué périmé, donc le calcul y était REFUSÉ.
   // Le parcours va désormais jusqu'au résultat, en simplifié.
   includeNeighbours = true;
-  includeVegetation = false;
+  includeVegetation = true;
   envRadius = 150;
   envBusy = signal(false);
   envStatus = signal('');
@@ -379,10 +379,11 @@ export class ModeSimplifieComponent implements OnInit {
       return;
     }
 
-    this.envStatus.set('Recherche des bâtiments voisins…');
+    this.envStatus.set('Reconstruction du voisinage (LiDAR HD)…');
     this.api.generateEnvironment({
       lat: c.lat, lon: c.lon, radius_m: this.envRadius,
-      include_vegetation: this.includeVegetation, building_id: id,
+      include_vegetation: this.includeVegetation, include_terrain: true, building_id: id,
+      name: `Voisinage — ${this.buildingName}`,
     }).subscribe({
       next: (res) => this.poll((res as Job).id,
         (job) => this.saveAndLinkEnvironment(id, job),
@@ -391,27 +392,22 @@ export class ModeSimplifieComponent implements OnInit {
     });
   }
 
+  /** Lot AH : le job enregistre lui-même l'environnement (voisins, arbres et
+   * relief issus du LiDAR HD) — il ne reste qu'à le lier au bâtiment. Le
+   * bâtiment lui-même y est reconnu et marqué « étudié », pas obstacle. */
   private saveAndLinkEnvironment(buildingId: number, job: Job): void {
-    const r = job.result as unknown as { vertices: number[][]; triangles: unknown[]; warnings: string[] };
+    const r = job.result as unknown as { environment_id: number; warnings: string[]; n_triangles: number };
     this.envWarnings.set(r.warnings ?? []);
-    if (!r.triangles?.length) {
-      // Aucun voisin trouvé : ce n'est pas une erreur, on passe à l'ombrage.
-      this.envStatus.set('Aucun bâtiment voisin trouvé — ombrage sur le bâtiment seul.');
+    if (!r.n_triangles) {
+      // Aucun obstacle : ce n'est pas une erreur, on passe à l'ombrage.
+      this.envStatus.set('Aucun obstacle trouvé — ombrage sur le bâtiment seul.');
       this.launchPrecompute(buildingId);
       return;
     }
-    this.envStatus.set('Enregistrement des obstacles…');
-    this.api.createEnvironment({
-      name: `Voisinage — ${this.buildingName} — ${new Date().toISOString().slice(0, 16)}`,
-      vertices: r.vertices, triangles: r.triangles,
-    }).subscribe({
-      next: (env) => {
-        this.api.updateBuilding(buildingId, { environment_id: (env as { id: number }).id }).subscribe({
-          next: () => this.launchPrecompute(buildingId),
-          error: () => { this.envBusy.set(false); this.envError.set("Échec de l'association des obstacles."); },
-        });
-      },
-      error: () => { this.envBusy.set(false); this.envError.set("Échec de l'enregistrement des obstacles."); },
+    this.envStatus.set('Association des obstacles…');
+    this.api.updateBuilding(buildingId, { environment_id: r.environment_id }).subscribe({
+      next: () => this.launchPrecompute(buildingId),
+      error: () => { this.envBusy.set(false); this.envError.set("Échec de l'association des obstacles."); },
     });
   }
 

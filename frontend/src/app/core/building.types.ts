@@ -81,11 +81,49 @@ export interface SimpleEnvelope {
   triangles: SimpleTriangle[];
 }
 
+/** Lot AH — objet d'un environnement généré : bâtiment, arbre/massif ou
+ * terrain, avec son propre maillage (repère de l'environnement). */
+export type EnvObjectKind = 'building' | 'vegetation' | 'terrain';
+export type EnvObjectStatus = 'active' | 'removed' | 'studied';
+
+export interface EnvironmentObject {
+  id: number;
+  kind: EnvObjectKind;
+  status: EnvObjectStatus;
+  /** 'bdtopo+lidar' | 'bdtopo' | 'lidar' | 'osm' | … */
+  origin: string;
+  label: string;
+  reason: string | null;
+  building_id: number | null;
+  info: Record<string, unknown>;
+  footprint: number[][][] | null;
+  vertices: number[][];
+  triangles: { v: [number, number, number]; group?: string; boundary?: string }[];
+  k: number | null;
+}
+
+export interface EnvironmentGeneration {
+  source?: 'lidar' | 'legacy';
+  radius_m?: number;
+  lidar?: { tiles?: string[]; acquisition?: string[]; classification?: string[] };
+  stats?: Record<string, unknown>;
+  warnings?: string[];
+  generated_at?: string;
+}
+
 export interface EnvironmentMesh {
   id: number;
   name: string;
   description: string;
   envelope: SimpleEnvelope;
+  georef_lat: number | null;
+  georef_lon: number | null;
+  georef_north_offset_deg: number;
+  georef_ground_z: number | null;
+  objects: EnvironmentObject[];
+  generation: EnvironmentGeneration;
+  /** id d'objet → bâtiment étudié qui en est issu (null s'il a été supprimé). */
+  studied_buildings: Record<string, { id: number; name: string } | null>;
   created_at: string;
   updated_at: string;
 }

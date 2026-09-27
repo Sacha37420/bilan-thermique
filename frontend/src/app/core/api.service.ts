@@ -111,14 +111,36 @@ export class ApiService {
     return this.http.delete(`${this.base}/api/environnements/${id}/`);
   }
 
-  /** Générateur d'obstacles UNIQUE (Lot AD). `building_id` : bâtiment de
-   * référence optionnel — aligne sur son repère, écarte le bâtiment étudié et
-   * rogne les obstacles qui l'empiètent. */
+  /** Générateur d'environnement UNIQUE (Lot AD, refondu au Lot AH) : LiDAR HD
+   * IGN × BD TOPO, repli BD TOPO / OpenStreetMap hors couverture. Le job
+   * ENREGISTRE l'environnement : `job.result.environment_id`. `building_id` :
+   * bâtiment de référence optionnel — son repère est repris et l'objet qui lui
+   * correspond est marqué « bâtiment étudié » au lieu d'être un obstacle. */
   generateEnvironment(payload: {
     lat: number; lon: number; radius_m: number;
-    include_vegetation?: boolean; terrain_spacing_m?: number | null; building_id?: number | null;
+    include_vegetation?: boolean; include_terrain?: boolean;
+    terrain_spacing_m?: number | null; building_id?: number | null; name?: string;
   }): Observable<unknown> {
     return this.http.post(`${this.base}/api/environnements/generer/`, payload);
+  }
+
+  /** Lot AH — retirer / restaurer des objets d'un environnement. */
+  setEnvironmentObjectsStatus(envId: number, ids: number[], status: 'active' | 'removed'): Observable<unknown> {
+    return this.http.patch(`${this.base}/api/environnements/${envId}/objets/`, { ids, status });
+  }
+
+  /** Lot AH — un bâtiment de l'environnement devient LE bâtiment étudié. */
+  studyEnvironmentObject(envId: number, objId: number, name: string): Observable<unknown> {
+    return this.http.post(`${this.base}/api/environnements/${envId}/objets/${objId}/etudier/`, { name });
+  }
+
+  /** Lot AH — remplace un bâtiment de l'environnement par un modèle importé,
+   * placé automatiquement sur son emprise. */
+  replaceEnvironmentObject(envId: number, objId: number, payload: {
+    vertices: number[][]; triangles: { v: [number, number, number]; group: string | null }[];
+    name?: string; up_axis?: 'auto' | 'z' | 'y'; scale?: 'auto' | '1' | '0.01' | '0.001' | '0.0254';
+  }): Observable<unknown> {
+    return this.http.post(`${this.base}/api/environnements/${envId}/objets/${objId}/remplacer/`, payload);
   }
 
   runBuildingCalcul(buildingId: number, payload: unknown): Observable<unknown> {

@@ -6,7 +6,9 @@ from rest_framework.response import Response
 from .models import Department, UserRecord, ParoiModel, Building, Environment, Job
 from .serializers import (
     DepartmentSerializer, UserRecordSerializer, CalculRequestSerializer, ParoiModelSerializer,
-    BuildingSerializer, EnvironmentSerializer, JobSerializer, BuildingCalculRequestSerializer,
+    BuildingSerializer, EnvironmentSerializer, EnvironmentSummarySerializer,
+    EnvironmentObjectsStatusSerializer, StudyObjectSerializer, ReplaceObjectSerializer,
+    JobSerializer, BuildingCalculRequestSerializer,
     RefineMeshRequestSerializer, GenerateEnvironmentRequestSerializer,
     WeatherFetchRequestSerializer,
     SearchNearbyBuildingsRequestSerializer, GroundAltitudeRequestSerializer,
@@ -17,6 +19,7 @@ from . import building_solver
 from . import geometry
 from . import geodata
 from . import elevation
+from . import environment_service
 
 
 class MeView(APIView):
@@ -139,10 +142,14 @@ class GroundAltitudeView(APIView):
 
 
 class EnvironmentListCreateView(generics.ListCreateAPIView):
-    """GET/POST /api/environnements/ — maillages d'environnement (obstacles)."""
+    """GET/POST /api/environnements/ — maillages d'environnement (obstacles).
+    La liste est un résumé sans maillage (Lot AH : un environnement observé pèse
+    plusieurs Mo) ; le détail complet est sur /api/environnements/<id>/."""
 
     queryset         = Environment.objects.all()
-    serializer_class = EnvironmentSerializer
+
+    def get_serializer_class(self):
+        return EnvironmentSummarySerializer if self.request.method == 'GET' else EnvironmentSerializer
 
 
 class EnvironmentDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -152,12 +159,84 @@ class EnvironmentDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = EnvironmentSerializer
 
 
+class EnvironmentObjectsView(APIView):
+    """
+    PATCH /api/environnements/<id>/objets/  {ids: [..], status: 'active'|'removed'}
+    Lot AH — retire ou restaure des objets (bâtiments, arbres, terrain). Rien
+    n'est jamais supprimé : un objet retiré reste restaurable. L'enveloppe
+    d'occlusion est recomposée et l'ombrage des bâtiments liés périmé.
+    """
+
+    def patch(self, request, pk):
+        env = get_object_or_404(Environment, pk=pk)
+        if not env.scene_objects:
+            return Response({'detail': "Cet environnement n'est pas décomposé en objets "
+                                       "(maillage importé d'un seul tenant)."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        serializer = EnvironmentObjectsStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            environment_service.set_status(env, serializer.validated_data['ids'],
+                                           serializer.validated_data['status'])
+        except environment_service.EnvironmentServiceError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(EnvironmentSerializer(env).data)
+
+
+class EnvironmentStudyObjectView(APIView):
+    """
+    POST /api/environnements/<id>/objets/<obj_id>/etudier/  {name?}
+    Lot AH — fait d'un bâtiment de l'environnement LE bâtiment étudié : crée un
+    Building dans le même repère (aligné par construction), lié à cet
+    environnement, et retire l'objet des obstacles.
+    """
+
+    def post(self, request, pk, obj_id):
+        env = get_object_or_404(Environment, pk=pk)
+        serializer = StudyObjectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            building, env = environment_service.study_object(env, obj_id, serializer.validated_data['name'])
+        except environment_service.EnvironmentServiceError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'building': BuildingSerializer(building).data,
+                         'environment': EnvironmentSerializer(env).data},
+                        status=status.HTTP_201_CREATED)
+
+
+class EnvironmentReplaceObjectView(APIView):
+    """
+    POST /api/environnements/<id>/objets/<obj_id>/remplacer/
+         {vertices, triangles, name?, up_axis?, scale?}
+    Lot AH — remplace un bâtiment de l'environnement par un modèle 3D importé
+    (OBJ/STL), placé automatiquement sur son emprise : rotation, position,
+    axe vertical (Y-up / Z-up) et unité (m / cm / mm) ajustés au mieux.
+    """
+
+    def post(self, request, pk, obj_id):
+        env = get_object_or_404(Environment, pk=pk)
+        serializer = ReplaceObjectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            building, env, report = environment_service.replace_object(
+                env, obj_id, data['vertices'], [dict(t) for t in data['triangles']],
+                name=data['name'], up_axis=data['up_axis'], scale=data['scale'],
+            )
+        except environment_service.EnvironmentServiceError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'building': BuildingSerializer(building).data,
+                         'environment': EnvironmentSerializer(env).data, 'fit': report},
+                        status=status.HTTP_201_CREATED)
+
+
 class GenerateEnvironmentView(APIView):
     """
-    POST /api/environnements/generer/  {lat, lon, radius_m}
-    Génère en tâche de fond un maillage d'obstacles depuis l'IGN (BD TOPO, France)
-    avec repli OpenStreetMap (api.geodata), à réviser puis enregistrer via le flux
-    d'upload existant — ne crée pas d'Environment directement.
+    POST /api/environnements/generer/
+         {lat, lon, radius_m, include_vegetation?, include_terrain?, building_id?, name?}
+    Lot AH — génère en tâche de fond un environnement « observé » (LiDAR HD IGN
+    croisé avec la BD TOPO, repli BD TOPO / OpenStreetMap hors couverture) et
+    l'ENREGISTRE : job.result.environment_id désigne l'environnement créé.
     """
 
     def post(self, request):

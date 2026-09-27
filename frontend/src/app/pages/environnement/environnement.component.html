@@ -4,86 +4,47 @@
     <p class="eyebrow"><span class="dot"></span> Ombrage</p>
     <h1>Environnement</h1>
     <p class="subtitle">
-      Obstacles alentour (bâtiments voisins, relief) utilisés pour le calcul de visibilité
-      solaire d'un <a routerLink="/batiment">bâtiment</a>. Géométrie seule — pas d'assignation
-      de paroi ici. L'enveloppe du bâtiment lui-même s'ajoute automatiquement au calcul
-      (auto-ombrage), inutile de la dupliquer dans un environnement.
+      Bâtiments voisins, arbres et relief qui masquent le soleil d'un
+      <a routerLink="/batiment">bâtiment</a>, reconstruits automatiquement à partir du relevé
+      LiDAR HD de l'IGN croisé avec la BD TOPO. Chaque élément reste modifiable : retirez ce qui
+      n'existe plus, et choisissez le bâtiment étudié directement dans la scène.
     </p>
   </div>
 
+  <!-- ── Génération ─────────────────────────────────────────────────── -->
   <section class="form-card">
-    <h2>Environnements enregistrés</h2>
-    @if (environments().length === 0) {
-      <p class="hint">Aucun environnement enregistré — importez un fichier ci-dessous (optionnel : un bâtiment peut n'avoir aucun environnement, seulement son auto-ombrage).</p>
-    } @else {
-      <div class="env-list">
-        @for (e of environments(); track e.id) {
-          <div class="env-row" [class.active]="currentId() === e.id">
-            <span class="env-name">{{ e.name }}</span>
-            <div class="env-actions">
-              <button type="button" class="btn-secondary" (click)="load(e)">Charger</button>
-              <button type="button" class="btn-secondary danger" (click)="remove(e)">Supprimer</button>
-            </div>
-          </div>
-        }
-      </div>
-    }
-    <button type="button" class="btn-secondary" (click)="newEnvironment()">+ Nouvel environnement</button>
-  </section>
-
-  <section class="form-card">
-    <h2>{{ currentId() === null ? 'Nouvel environnement' : 'Modifier « ' + name + ' »' }}</h2>
+    <h2>Générer un environnement</h2>
+    <p class="hint">
+      Le nuage de points LiDAR HD (≈ 18 points/m², classé sol / végétation / bâtiment) donne la
+      position réelle des toits, des arbres et du terrain. Les emprises BD TOPO y sont
+      <strong>recalées</strong>, puis chaque bâtiment reçoit sa toiture relevée (pans, faîtages,
+      ressauts). Les bâtiments absents de la BD TOPO sont ajoutés, ceux que le LiDAR ne voit plus
+      sont retirés d'office (restaurables). Chaque arbre a sa hauteur et sa transparence mesurées.
+      Hors couverture LiDAR, repli sur la BD TOPO / OpenStreetMap (hauteurs forfaitaires, toits plats).
+    </p>
 
     <div class="field-grid">
       <label>
-        <span>Nom</span>
-        <input type="text" [(ngModel)]="name" name="envName" />
-      </label>
-      <label>
-        <span>Description</span>
-        <input type="text" [(ngModel)]="description" name="envDescription" />
+        <span>Autour d'un bâtiment existant</span>
+        <select [(ngModel)]="genBuildingId" name="genBuildingId">
+          <option [ngValue]="null">— non : choisir le bâtiment dans la scène ensuite —</option>
+          @for (b of buildings(); track b.id) {
+            <option [ngValue]="b.id">{{ b.name }}</option>
+          }
+        </select>
+        <small>
+          @if (genBuildingId === null) {
+            La scène est centrée sur les coordonnées ci-dessous ; vous y désignerez ensuite le
+            bâtiment étudié, ou le remplacerez par votre propre modèle 3D.
+          } @else {
+            Position, cap et altitude repris de ce bâtiment (il doit être géoréférencé). Il est
+            reconnu dans la scène et marqué comme bâtiment étudié au lieu d'être un obstacle.
+          }
+        </small>
       </label>
     </div>
-
-    <label class="file-label">
-      <span>Importer un maillage (.obj ou .stl)</span>
-      <input type="file" accept=".obj,.stl" (change)="onFileSelected($event)" />
-    </label>
-
-    <div class="generate-block">
-      <h3>Ou générer depuis des coordonnées</h3>
-      <p class="hint">
-        Bâtiments voisins extrudés automatiquement depuis l'IGN (BD TOPO, France) — repli sur
-        OpenStreetMap hors de France ou si l'IGN est indisponible. Terrain supposé plat.
-      </p>
-      <p class="hint">
-        Bâtiments voisins extrudés depuis l'IGN (BD TOPO, France) ou OpenStreetMap, avec
-        éventuellement le relief du terrain et la végétation. Choisissez un bâtiment de référence
-        ci-dessous pour que tout soit placé dans <strong>son</strong> repère — sinon la génération
-        reste exploratoire et n'est alignée sur rien.
-      </p>
-      <div class="field-grid">
-        <label>
-          <span>Aligner sur le bâtiment</span>
-          <select [(ngModel)]="genBuildingId" name="genBuildingId">
-            <option [ngValue]="null">— aucun (exploration libre) —</option>
-            @for (b of buildings(); track b.id) {
-              <option [ngValue]="b.id">{{ b.name }}</option>
-            }
-          </select>
-          <small>
-            @if (genBuildingId === null) {
-              Sans bâtiment de référence : pas d'alignement (position, rotation, altitude), et
-              surtout <strong>le bâtiment étudié se retrouvera en double</strong> dans les obstacles
-              — il figure lui-même dans IGN/OpenStreetMap. À réserver à l'exploration.
-            } @else {
-              Position, rotation et altitude alignées sur ce bâtiment. Il sera écarté des obstacles,
-              et tout obstacle qui empiète sur son enveloppe sera rogné plutôt que perdu.
-            }
-          </small>
-        </label>
-      </div>
-      <div class="field-grid">
+    <div class="field-grid">
+      @if (genBuildingId === null) {
         <label>
           <span>Latitude</span>
           <input type="number" step="0.0001" min="-90" max="90" [(ngModel)]="genLat" name="genLat" />
@@ -92,84 +53,309 @@
           <span>Longitude</span>
           <input type="number" step="0.0001" min="-180" max="180" [(ngModel)]="genLon" name="genLon" />
         </label>
-        <label>
-          <span>Rayon (m)</span>
-          <input type="number" step="10" min="10" max="400" [(ngModel)]="genRadius" name="genRadius" />
-        </label>
+      }
+      <label>
+        <span>Rayon (m)</span>
+        <input type="number" step="10" min="10" max="250" [(ngModel)]="genRadius" name="genRadius" />
+        <small>250 m au plus : au-delà, un voisin de 20 m sous-tend moins de 5°.</small>
+      </label>
+      <label>
+        <span>Nom (facultatif)</span>
+        <input type="text" [(ngModel)]="genName" name="genName" placeholder="Nom automatique" />
+      </label>
+    </div>
+    <label class="inline-check">
+      <input type="checkbox" [(ngModel)]="genVegetation" name="genVegetation" />
+      <span>Arbres et massifs (transparence mesurée)</span>
+    </label>
+    <label class="inline-check">
+      <input type="checkbox" [(ngModel)]="genTerrain" name="genTerrain" />
+      <span>Relief du terrain</span>
+    </label>
+
+    <button type="button" class="btn-primary" (click)="generate()" [disabled]="generating()">
+      {{ generating() ? 'Génération…' : 'Générer' }}
+    </button>
+
+    @if (generateJob(); as job) {
+      <div class="job-status" [class]="job.status.toLowerCase()">
+        <span class="job-label">{{ job.status }}</span>
+        <span class="job-progress">{{ job.progress }}%</span>
+        <span class="job-message">{{ job.message }}</span>
       </div>
-      <label class="inline-check">
-        <input type="checkbox" [(ngModel)]="genVegetation" name="genVegetation" />
-        <span>Inclure la végétation (arbres, haies, bois)</span>
-      </label>
-      <label class="inline-check">
-        <input type="checkbox" [(ngModel)]="genTerrain" name="genTerrain" />
-        <span>Inclure le relief du terrain</span>
-      </label>
-      @if (genTerrain) {
-        <div class="field-grid">
-          <label>
-            <span>Pas de la grille (m)</span>
-            <input type="number" step="1" min="2" max="100" [(ngModel)]="genTerrainSpacing" name="genTerrainSpacing" />
-            <small>
-              Un relief amont masque le soleil rasant, ce qu'aucun bâtiment voisin ne reproduit.
-              C'est de loin le plus gros contributeur en triangles (deux par maille) : au pas de
-              10 m sur 150 m de rayon, environ 1 800.
-            </small>
-          </label>
+    }
+  </section>
+
+  @if (message()) { <p class="feedback ok">{{ message() }}</p> }
+  @if (error()) { <p class="feedback error">{{ error() }}</p> }
+
+  <!-- ── Environnement ouvert ───────────────────────────────────────── -->
+  @if (env(); as e) {
+    <section class="form-card">
+      <div class="card-head">
+        <h2>{{ e.name }}</h2>
+        <button type="button" class="btn-secondary" (click)="closeEnvironment()">Fermer</button>
+      </div>
+
+      @if (e.generation.source) {
+        <div class="report">
+          <span class="badge" [class.badge-lidar]="e.generation.source === 'lidar'">
+            {{ e.generation.source === 'lidar' ? 'LiDAR HD × BD TOPO' : 'Repli BD TOPO / OpenStreetMap' }}
+          </span>
+          @if (e.generation.lidar?.acquisition?.length) {
+            <span class="report-item">Relevé LiDAR du {{ e.generation.lidar!.acquisition!.join(', ') }}</span>
+          }
+          @if (e.georef_lat !== null) {
+            <span class="report-item mono">{{ e.georef_lat | number:'1.5-5' }}, {{ e.georef_lon | number:'1.5-5' }}</span>
+          }
+          @if (e.georef_ground_z !== null) {
+            <span class="report-item">z = 0 à {{ e.georef_ground_z | number:'1.1-1' }} m NGF</span>
+          }
         </div>
       }
-      @if (genVegetation) {
+
+      @if (hasObjects) {
+        <ul class="legend">
+          <li><span class="swatch sw-built"></span>BD TOPO recalée <strong>{{ count('building', 'active', 'bdtopo+lidar') }}</strong></li>
+          <li><span class="swatch sw-lidar"></span>LiDAR seul <strong>{{ count('building', 'active', 'lidar') }}</strong></li>
+          <li><span class="swatch sw-flat"></span>Toit non observé <strong>{{ count('building', 'active', 'bdtopo') + count('building', 'active', 'osm') }}</strong></li>
+          <li><span class="swatch sw-veg"></span>Arbres <strong>{{ count('vegetation', 'active') }}</strong></li>
+          <li><span class="swatch sw-terrain"></span>Terrain <strong>{{ count('terrain', 'active') }}</strong></li>
+          <li><span class="swatch sw-removed"></span>Retirés <strong>{{ removedObjects.length }}</strong></li>
+          <li><span class="swatch sw-studied"></span>Bâtiment étudié <strong>{{ studiedObjects.length }}</strong></li>
+        </ul>
+        <p class="hint">Cliquez un élément dans la vue pour le sélectionner (un glisser fait tourner la vue).</p>
+      } @else {
         <p class="hint">
-          Zones boisées et haies depuis l'IGN, arbres isolés depuis OpenStreetMap — seule source à
-          les connaître individuellement. La végétation <strong>n'arrête pas le soleil, elle
-          l'atténue</strong> : elle apparaît en vert dans l'aperçu ci-dessous, les bâtiments restant
-          en gris. Deux réserves : la hauteur est déduite du type (aucune source n'en donne de
-          fiable) et la transmittance ne varie pas dans l'année, ce qui surestime l'ombrage hivernal.
+          Environnement d'un seul tenant (maillage importé, ou généré avant la décomposition en
+          objets) : il sert tel quel à l'ombrage, mais ses éléments ne se sélectionnent pas.
+          Regénérez-le pour pouvoir retirer des objets ou y choisir le bâtiment étudié.
         </p>
       }
-      <button type="button" class="btn-secondary" (click)="generateFromCoordinates()" [disabled]="generating()">
-        {{ generating() ? 'Génération…' : 'Générer' }}
-      </button>
-
-      @if (generateWarnings().length > 0) {
-        <ul class="env-warnings">
-          @for (w of generateWarnings(); track $index) { <li>{{ w }}</li> }
-        </ul>
-      }
-      @if (generateJob(); as job) {
-        <div class="job-status" [class]="job.status.toLowerCase()">
-          <span class="job-label">{{ job.status }}</span>
-          <span class="job-progress">{{ job.progress }}%</span>
-          <span class="job-message">{{ job.message }}</span>
-        </div>
-      }
-    </div>
-
-    @if (message()) { <p class="feedback ok">{{ message() }}</p> }
-    @if (error()) { <p class="feedback error">{{ error() }}</p> }
-
-    @if (triangles().length > 0) {
-      <p class="summary">
-        <strong>{{ vertices().length }}</strong> sommets, <strong>{{ triangles().length }}</strong> triangles.
-        @if (vegetationTriangleCount > 0) {
-          — dont <strong>{{ vegetationTriangleCount }}</strong> de végétation
-          <span class="legend-veg">vert</span>, le reste en bâti
-          <span class="legend-built">gris</span>.
-        }
-      </p>
 
       <div class="viewer-wrap">
         <app-mesh-viewer
           [vertices]="vertices()"
           [triangles]="triangles()"
           [colorForTriangle]="colorForTriangle"
-          [pickable]="false"
+          [pickable]="hasObjects"
+          (triangleClick)="onTriangleClick($event)"
         />
       </div>
 
-      <button type="button" class="btn-primary" (click)="save()" [disabled]="saving() || !name.trim()">
-        {{ saving() ? 'Enregistrement…' : 'Enregistrer l’environnement' }}
+      @if (selected; as obj) {
+        <div class="object-panel">
+          <div class="card-head">
+            <h3>
+              @switch (obj.kind) {
+                @case ('building') { {{ obj.label }} }
+                @case ('vegetation') { Arbre / massif }
+                @case ('terrain') { Terrain }
+              }
+              <span class="status" [class]="'st-' + obj.status">
+                {{ obj.status === 'active' ? 'obstacle' : obj.status === 'removed' ? 'retiré' : 'bâtiment étudié' }}
+              </span>
+            </h3>
+            <button type="button" class="btn-secondary" (click)="clearSelection()">Désélectionner</button>
+          </div>
+
+          <dl class="facts">
+            <dt>Provenance</dt><dd>{{ originLabel(obj.origin) }}</dd>
+            @if (obj.reason) { <dt>Remarque</dt><dd>{{ obj.reason }}</dd> }
+            @if (obj.kind === 'building') {
+              @if (num(obj, 'height_m') !== null) { <dt>Hauteur</dt><dd>{{ num(obj, 'height_m') | number:'1.1-1' }} m</dd> }
+              @if (info(obj, 'roof')) { <dt>Toiture</dt><dd>{{ info(obj, 'roof') }}</dd> }
+              @if (info(obj, 'shift_m')) { <dt>Recalage BD TOPO</dt><dd>{{ shiftLabel(obj) }}</dd> }
+              @if (num(obj, 'lidar_cover') !== null) {
+                <dt>Emprise couverte par le toit LiDAR</dt>
+                <dd>
+                  {{ (num(obj, 'lidar_cover')! * 100) | number:'1.0-0' }} %
+                  @if (num(obj, 'lidar_cover_before') !== null) {
+                    (avant recalage : {{ (num(obj, 'lidar_cover_before')! * 100) | number:'1.0-0' }} %)
+                  }
+                </dd>
+              }
+              @if (info(obj, 'usage')) { <dt>Usage BD TOPO</dt><dd>{{ info(obj, 'usage') }}</dd> }
+              @if (info(obj, 'bdtopo_id')) { <dt>Identifiant BD TOPO</dt><dd class="mono">{{ info(obj, 'bdtopo_id') }}</dd> }
+            }
+            @if (obj.kind === 'vegetation') {
+              @if (num(obj, 'height_m') !== null) { <dt>Hauteur</dt><dd>{{ num(obj, 'height_m') | number:'1.1-1' }} m</dd> }
+              @if (num(obj, 'crown_base_m') !== null) { <dt>Bas du houppier</dt><dd>{{ num(obj, 'crown_base_m') | number:'1.1-1' }} m</dd> }
+              <dt>Transparence appliquée</dt><dd>{{ (obj.k ?? 0) * 100 | number:'1.0-0' }} %</dd>
+              @if (num(obj, 'k_measured') !== null) {
+                <dt>Transparence mesurée</dt>
+                <dd>
+                  {{ num(obj, 'k_measured')! * 100 | number:'1.0-0' }} %
+                  @if (num(obj, 'k_bare') !== null) { — relevé hors feuillage, valeur « en feuilles » appliquée }
+                </dd>
+              }
+            }
+            @if (num(obj, 'distance_m') !== null) { <dt>Distance au centre</dt><dd>{{ num(obj, 'distance_m') | number:'1.0-0' }} m</dd> }
+          </dl>
+
+          <div class="actions">
+            @if (obj.status === 'active') {
+              <button type="button" class="btn-secondary" (click)="setStatus([obj.id], 'removed')" [disabled]="busy()">
+                Retirer des obstacles
+              </button>
+            }
+            @if (obj.status === 'removed') {
+              <button type="button" class="btn-secondary" (click)="setStatus([obj.id], 'active')" [disabled]="busy()">
+                Restaurer
+              </button>
+            }
+            @if (obj.status === 'studied') {
+              @if (studiedBuilding(obj); as b) {
+                <a class="btn-primary" routerLink="/batiment" [queryParams]="{ id: b.id }">Ouvrir « {{ b.name }} »</a>
+              } @else {
+                <span class="hint">Le bâtiment étudié issu de cet objet a été supprimé.</span>
+              }
+              <button type="button" class="btn-secondary" (click)="setStatus([obj.id], 'active')" [disabled]="busy()">
+                Réintégrer comme obstacle
+              </button>
+            }
+          </div>
+
+          @if (obj.kind === 'building' && obj.status !== 'studied') {
+            <div class="study-block">
+              <h4>En faire le bâtiment étudié</h4>
+              <p class="hint">
+                Deux façons : reprendre ce volume tel quel (murs par façade, pans de toiture, plancher
+                au sol, murs mitoyens signalés), ou le remplacer par votre propre modèle 3D, placé
+                automatiquement sur cette emprise (orientation, position, axe vertical et unité
+                ajustés). Dans les deux cas le bâtiment est créé dans le repère de l'environnement,
+                donc parfaitement aligné sur ses voisins, et lié à cet environnement.
+              </p>
+              <label>
+                <span>Nom du bâtiment étudié</span>
+                <input type="text" [(ngModel)]="studyName" name="studyName" placeholder="Nom automatique" />
+              </label>
+              <div class="actions">
+                <button type="button" class="btn-primary" (click)="studySelected()" [disabled]="busy()">
+                  Utiliser ce volume
+                </button>
+              </div>
+              <div class="field-grid replace-grid">
+                <label>
+                  <span>Axe vertical du fichier</span>
+                  <select [(ngModel)]="replaceUpAxis" name="replaceUpAxis">
+                    <option value="auto">Détection automatique</option>
+                    <option value="z">Z vers le haut</option>
+                    <option value="y">Y vers le haut (Blender, glTF…)</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Unité du fichier</span>
+                  <select [(ngModel)]="replaceScale" name="replaceScale">
+                    <option value="auto">Détection automatique</option>
+                    <option value="1">mètres</option>
+                    <option value="0.01">centimètres</option>
+                    <option value="0.001">millimètres</option>
+                    <option value="0.0254">pouces</option>
+                  </select>
+                </label>
+                <label class="file-label">
+                  <span>Remplacer par un modèle (.obj, .stl)</span>
+                  <input type="file" accept=".obj,.stl" (change)="replaceSelected($event)" [disabled]="busy()" />
+                </label>
+              </div>
+            </div>
+          }
+
+          @if (fitReport(); as fit) {
+            <p class="hint" [class.fit-poor]="fit.iou < 0.6">
+              Ajustement : emprises superposées à {{ fit.iou * 100 | number:'1.0-0' }} %,
+              axe vertical {{ fit.up_axis | uppercase }}, échelle ×{{ fit.scale }},
+              rotation {{ fit.rotation_deg | number:'1.1-1' }}°.
+              @if (fit.degenerate_removed) { {{ fit.degenerate_removed }} triangle(s) dégénéré(s) écarté(s). }
+              @if (fit.iou < 0.6) {
+                <strong>Recouvrement faible : le modèle ne ressemble pas à l'emprise observée — vérifiez-le.</strong>
+              }
+            </p>
+          }
+          @if (createdBuilding(); as b) {
+            <p class="feedback ok">
+              <a routerLink="/batiment" [queryParams]="{ id: b.id }">Ouvrir « {{ b.name }} » sur la page Bâtiment</a>
+              pour assigner ses parois, puis lancer l'ombrage et le calcul.
+            </p>
+          }
+        </div>
+      }
+
+      @if (removedObjects.length > 0) {
+        <details class="removed-list">
+          <summary>Objets retirés ({{ removedObjects.length }})</summary>
+          <ul>
+            @for (o of removedObjects; track o.id) {
+              <li>
+                <button type="button" class="link-btn" (click)="select(o)">
+                  {{ o.kind === 'building' ? o.label : o.kind === 'vegetation' ? 'Arbre' : 'Terrain' }} #{{ o.id }}
+                </button>
+                @if (o.reason) { <span class="hint">— {{ o.reason }}</span> }
+                <button type="button" class="btn-secondary" (click)="setStatus([o.id], 'active')" [disabled]="busy()">Restaurer</button>
+              </li>
+            }
+          </ul>
+        </details>
+      }
+
+      @if (e.generation.warnings?.length) {
+        <details class="removed-list">
+          <summary>Compte rendu de génération ({{ e.generation.warnings!.length }} remarque(s))</summary>
+          <ul class="env-warnings">
+            @for (w of e.generation.warnings!; track $index) { <li>{{ w }}</li> }
+          </ul>
+        </details>
+      }
+
+      <div class="field-grid meta-grid">
+        <label>
+          <span>Nom</span>
+          <input type="text" [(ngModel)]="name" name="envName" />
+        </label>
+        <label>
+          <span>Description</span>
+          <input type="text" [(ngModel)]="description" name="envDescription" />
+        </label>
+      </div>
+      <button type="button" class="btn-secondary" (click)="saveMeta()" [disabled]="saving() || !name.trim()">
+        Enregistrer le nom
       </button>
+    </section>
+  }
+
+  <!-- ── Environnements enregistrés ──────────────────────────────────── -->
+  <section class="form-card">
+    <h2>Environnements enregistrés</h2>
+    @if (environments().length === 0) {
+      <p class="hint">Aucun environnement enregistré — générez-en un ci-dessus.</p>
+    } @else {
+      <div class="env-list">
+        @for (s of environments(); track s.id) {
+          <div class="env-row" [class.active]="env()?.id === s.id">
+            <span class="env-name">
+              {{ s.name }}
+              @if (s.n_objects) { <span class="hint">— {{ s.n_objects }} objets</span> }
+            </span>
+            <div class="env-actions">
+              <button type="button" class="btn-secondary" (click)="load(s.id)" [disabled]="loading()">Ouvrir</button>
+              <button type="button" class="btn-secondary danger" (click)="remove(s)">Supprimer</button>
+            </div>
+          </div>
+        }
+      </div>
     }
+
+    <details class="removed-list">
+      <summary>Importer un maillage d'obstacles d'un seul tenant (.obj, .stl)</summary>
+      <p class="hint">
+        Usage avancé : un maillage importé sert tel quel à l'ombrage, sans décomposition en objets.
+        Il doit déjà être modélisé dans le repère du bâtiment (mètres, Z vers le haut).
+      </p>
+      <label class="file-label">
+        <span>Fichier</span>
+        <input type="file" accept=".obj,.stl" (change)="importMeshFile($event)" />
+      </label>
+    </details>
   </section>
 </main>

@@ -95,6 +95,26 @@ class Environment(models.Model):
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True)
     envelope = models.JSONField(default=dict, blank=True)
+
+    # Lot AH — environnement « observé » (LiDAR HD × BD TOPO, api.observed_env).
+    # Un environnement généré a désormais SON PROPRE repère géoréférencé : c'est
+    # lui qui s'impose au bâtiment étudié qu'on en tire (même origine, même cap,
+    # même z = 0), et non plus l'inverse. Vide pour un maillage importé à la main.
+    georef_lat = models.FloatField(null=True, blank=True)
+    georef_lon = models.FloatField(null=True, blank=True)
+    georef_north_offset_deg = models.FloatField(default=0.0)
+    georef_ground_z = models.FloatField(null=True, blank=True)
+    # Objets individuels (bâtiments, arbres, terrain), chacun avec son maillage
+    # et un statut active/removed/studied — voir observed_env.make_object.
+    # `envelope` n'est plus qu'une vue dérivée (observed_env.compose_envelope),
+    # recalculée à chaque changement de statut : seul format lu par api.shadow.
+    # Nommé scene_objects et non `objects`, réservé au gestionnaire Django ;
+    # l'API l'expose sous le nom `objects`.
+    scene_objects = models.JSONField(default=list, blank=True)
+    # Compte rendu de génération : source (lidar / repli BD TOPO-OSM), dalles et
+    # dates d'acquisition LiDAR, statistiques, avertissements.
+    generation = models.JSONField(default=dict, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

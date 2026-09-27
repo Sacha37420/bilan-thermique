@@ -5,9 +5,7 @@ from .models import Job, Building, Environment, ParoiModel
 from . import shadow
 from . import building_solver
 from . import geodata
-from . import geometry
 from . import weather_source
-from . import elevation
 
 
 @shared_task(bind=True)
@@ -120,120 +118,67 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
 
 @shared_task(bind=True)
 def generate_environment(self, job_id, params):
-    """Génère un maillage d'obstacles et le renvoie via `job.result` pour
-    relecture avant enregistrement (page Environnement).
+    """Génère ET enregistre un environnement (Lot AH) : bâtiments, arbres et
+    terrain reconstruits depuis le LiDAR HD croisé avec la BD TOPO, avec repli
+    BD TOPO / OpenStreetMap hors couverture. Voir api.environment_service.
 
-    Lot AD — générateur UNIQUE du lab. `building_id` (optionnel) apporte tout ce
-    que faisait l'ancienne variante attachée à un bâtiment : alignement sur son
-    repère local, mise à l'écart du bâtiment étudié lui-même et rognage des
-    obstacles qui l'empiètent, altitude de référence. Sans lui, comportement
-    exploratoire d'origine — non aligné, sans filtrage.
-    """
+    `job.result` porte `environment_id` : l'environnement n'est plus renvoyé
+    brut pour relecture puis réenvoyé par le navigateur (plusieurs Mo pour une
+    zone réelle) — il est enregistré directement, puis se relit et s'édite
+    objet par objet.
+
+    `building_id` (optionnel) : repère du bâtiment de référence, qui est
+    reconnu parmi les objets et marqué comme bâtiment étudié au lieu d'être un
+    obstacle (successeur du filtrage du Lot X)."""
+    from . import environment_service
+
     job = Job.objects.get(pk=job_id)
     job.celery_task_id = self.request.id
     job.save(update_fields=['celery_task_id'])
 
     stage_messages = {
-        'bbox': "Préparation de la zone…",
-        'ign': "Interrogation de l'IGN (BD TOPO)…",
-        'osm': "Repli sur OpenStreetMap…",
-        'extrude': "Extrusion des bâtiments…",
-        'done': "Assemblage du maillage…",
+        'lidar-index': "Recherche des dalles LiDAR HD…",
+        'lidar-read': "Lecture du nuage de points LiDAR HD…",
+        'bdtopo': "Emprises des bâtiments (BD TOPO)…",
+        'rasters': "Terrain et hauteurs (MNT, toits, végétation)…",
+        'registration': "Recalage des emprises BD TOPO sur le LiDAR…",
+        'buildings': "Reconstruction des bâtiments et toitures…",
+        'lidar-only': "Bâtiments absents de la BD TOPO…",
+        'vegetation': "Arbres et massifs…",
+        'terrain': "Maillage du terrain…",
+        'legacy-buildings': "Bâtiments (BD TOPO / OpenStreetMap)…",
+        'legacy-vegetation': "Végétation (BD TOPO / OpenStreetMap)…",
+        'legacy-terrain': "Altitude du terrain…",
+        'save': "Enregistrement…",
+        'done': "Assemblage…",
     }
 
     def progress_cb(stage, pct):
-        job.set_state(status=Job.RUNNING, progress=pct, message=stage_messages.get(stage, ''))
+        job.set_state(status=Job.RUNNING, progress=min(int(pct), 99),
+                      message=stage_messages.get(stage, stage))
 
     try:
-        job.set_state(status=Job.RUNNING, progress=0, message=stage_messages['bbox'])
-
+        job.set_state(status=Job.RUNNING, progress=0, message="Préparation de la zone…")
         building = None
         if params.get('building_id'):
             building = Building.objects.filter(pk=params['building_id']).first()
+        env, summary = environment_service.generate(params, building=building, progress_cb=progress_cb)
 
-        north_offset_deg = building.georef_north_offset_deg if building else 0.0
-        ground_z_ref = building.georef_ground_z if building else None
-        self_envelope = building.envelope if building else None
-
-        def elevation_lookup(points):
-            return elevation.fetch_elevations(points)[0]
-
-        result = geodata.generate_environment_mesh(
-            params['lat'], params['lon'], params['radius_m'], progress_cb=progress_cb,
-            north_offset_deg=north_offset_deg, ground_z_ref=ground_z_ref,
-            self_envelope=self_envelope, elevation_lookup=elevation_lookup,
-        )
-
-        self_footprint = geodata.envelope_footprint_polygon(self_envelope)
-
-        n_vegetation = 0
-        if params.get('include_vegetation'):
-            try:
-                job.set_state(progress=62, message="Végétation (IGN / OpenStreetMap)…")
-                veg = geodata.generate_vegetation_mesh(
-                    params['lat'], params['lon'], params['radius_m'],
-                    north_offset_deg=north_offset_deg, ground_z_ref=ground_z_ref,
-                    self_footprint=self_footprint, elevation_lookup=elevation_lookup,
-                )
-                result['warnings'].extend(veg['warnings'])
-                result['stats'].update(veg['stats'])
-                n_vegetation = veg['stats']['vegetation_used']
-                if (len(result['vertices']) + len(veg['vertices']) > geometry.MAX_VERTICES
-                        or len(result['triangles']) + len(veg['triangles']) > geometry.MAX_TRIANGLES):
-                    result['warnings'].append("Végétation abandonnée : limite de maillage atteinte.")
-                    n_vegetation = 0
-                else:
-                    offset = len(result['vertices'])
-                    result['vertices'].extend(veg['vertices'])
-                    result['triangles'].extend(
-                        {'v': [i + offset for i in t['v']], 'k': t['k'], 'obj': t['obj']}
-                        for t in veg['triangles']
-                    )
-            except geodata.GeodataError as exc:
-                result['warnings'].append(f"Végétation non chargée ({exc}).")
-
-        n_terrain = 0
-        if params.get('terrain_spacing_m'):
-            try:
-                job.set_state(progress=75, message="Altitude du terrain…")
-                terrain_mesh, terrain_source, n_terrain = elevation.build_terrain_for_building(
-                    params['lat'], params['lon'], params['radius_m'], params['terrain_spacing_m'],
-                    north_offset_deg=north_offset_deg, ground_z_ref=ground_z_ref,
-                    footprint_polygon=self_footprint,
-                )
-                if (len(result['vertices']) + len(terrain_mesh['vertices']) > geometry.MAX_VERTICES
-                        or len(result['triangles']) + len(terrain_mesh['triangles']) > geometry.MAX_TRIANGLES):
-                    result['warnings'].append(
-                        "Terrain abandonné : le maillage atteindrait la limite. Augmentez le pas."
-                    )
-                    n_terrain = 0
-                else:
-                    offset = len(result['vertices'])
-                    result['vertices'].extend(terrain_mesh['vertices'])
-                    result['triangles'].extend(
-                        {'v': [i + offset for i in t['v']]} for t in terrain_mesh['triangles']
-                    )
-                    result['stats']['terrain_source'] = terrain_source
-                    result['stats']['terrain_points'] = n_terrain
-            except elevation.ElevationError as exc:
-                result['warnings'].append(f"Terrain non chargé ({exc}) — obstacles bâtis conservés.")
-                n_terrain = 0
-
-        job.result = result
+        job.result = summary
         job.save(update_fields=['result'])
-        stats = result['stats']
+        stats = summary['stats']
+        if summary['source'] == 'lidar':
+            n_buildings = sum(stats.get(k, 0) for k in (
+                'buildings_confirmed', 'buildings_lidar_only', 'buildings_masked', 'buildings_uncovered'))
+            detail = f"{n_buildings} bâtiment(s), {stats.get('trees', 0)} arbre(s)"
+        else:
+            detail = f"{stats.get('buildings', 0)} bâtiment(s), {stats.get('trees', 0)} élément(s) de végétation"
         job.set_state(
             status=Job.DONE, progress=100,
-            message=f"{stats['buildings_used']} bâtiment(s), {len(result['triangles'])} triangles "
-                    f"(IGN : {stats['buildings_ign']}, OSM : {stats['buildings_osm']})."
-                    + (f" {stats['buildings_self']} écarté(s) : bâtiment étudié."
-                       if stats.get('buildings_self') else "")
-                    + (f" {stats['buildings_clipped']} rogné(s)."
-                       if stats.get('buildings_clipped') else "")
-                    + (f" Végétation : {n_vegetation}." if n_vegetation else "")
-                    + (f" Terrain : {n_terrain} points." if n_terrain else ""),
+            message=f"« {env.name} » : {detail}, {summary['n_triangles']} triangles"
+                    + (" (LiDAR HD)." if summary['source'] == 'lidar' else " (repli BD TOPO / OSM)."),
         )
-    except geodata.GeodataError as exc:
+    except (geodata.GeodataError, environment_service.EnvironmentServiceError) as exc:
         job.set_state(status=Job.ERROR, message=str(exc))
     except Exception as exc:
         job.set_state(status=Job.ERROR, message=str(exc))

@@ -3384,3 +3384,402 @@ class ClosedPlanningSerializerTest(SimpleTestCase):
         s = serializers.BuildingCalculRequestSerializer(data=self._payload())
         self.assertTrue(s.is_valid(), s.errors)
         self.assertIsNone(s.validated_data['weather'][0]['occupied'])
+
+
+# ── Lot AH — environnement observé (LiDAR HD × BD TOPO) ──────────────────────
+#
+# Scène synthétique dont la vérité est connue par construction : les points
+# sont générés depuis une géométrie décrite ici, jamais depuis le code testé.
+# Le repère local est celui d'un LocalFrame réel (pyproj) ; les points et les
+# emprises BD TOPO sont exprimés en Lambert 93, exactement comme le réseau les
+# fournit.
+
+SCENE_LAT, SCENE_LON = 47.3445, 0.6613
+SCENE_GROUND_Z = 100.0
+SCENE_SLOPE_X = 0.02                   # terrain : +2 cm par mètre vers l'est
+BDTOPO_OFFSET = (1.5, -1.0)            # décalage volontaire des emprises BD TOPO
+
+HOUSE = {'x0': -5.0, 'x1': 5.0, 'y0': -4.0, 'y1': 4.0, 'eave': 6.0, 'ridge': 9.0}   # faîtage selon x
+FLAT = {'x0': 16.0, 'x1': 24.0, 'y0': 11.0, 'y1': 19.0, 'h': 12.0}
+SHED = {'x0': -23.0, 'x1': -17.0, 'y0': -21.0, 'y1': -15.0, 'h': 4.0}            # absent de la BD TOPO
+GONE = {'x0': 17.0, 'x1': 23.0, 'y0': -23.0, 'y1': -17.0}                         # démoli
+TREE = {'x': -20.0, 'y': 20.0, 'r': 3.0, 'base': 3.0, 'top': 10.0}
+
+
+def _scene_ground(x):
+    return SCENE_GROUND_Z + SCENE_SLOPE_X * x
+
+
+def _scene_points(half=40.0, density=16.0, seed=1):
+    """Nuage (e, n, z, classe) Lambert 93 de la scène, avec des points de FAÇADE
+    classés bâtiment, comme le fait réellement le LiDAR HD."""
+    import numpy as np
+    from . import observed_env as oe
+
+    rng = np.random.default_rng(seed)
+    ext = half + oe.RASTER_MARGIN_M
+    n = int((2 * ext) ** 2 * density)
+    x = rng.uniform(-ext, ext, n)
+    y = rng.uniform(-ext, ext, n)
+    z = _scene_ground(x)
+    cls = np.full(n, 2, dtype=np.uint8)
+
+    def inside(b):
+        return (x >= b['x0']) & (x <= b['x1']) & (y >= b['y0']) & (y <= b['y1'])
+
+    h = inside(HOUSE)
+    half_w = (HOUSE['y1'] - HOUSE['y0']) / 2.0
+    cy = (HOUSE['y1'] + HOUSE['y0']) / 2.0
+    z[h] = _scene_ground(0.0) + HOUSE['ridge'] - (HOUSE['ridge'] - HOUSE['eave']) * np.abs(y[h] - cy) / half_w
+    cls[h] = 6
+    f = inside(FLAT)
+    z[f] = _scene_ground(20.0) + FLAT['h']
+    cls[f] = 6
+    s = inside(SHED)
+    z[s] = _scene_ground(-20.0) + SHED['h']
+    cls[s] = 6
+
+    # Arbre : houppier conique, avec 25 % de trouées qui laissent voir le sol.
+    d = np.hypot(x - TREE['x'], y - TREE['y'])
+    t = d <= TREE['r']
+    crown = t & (rng.uniform(size=n) > 0.25)
+    frac = 1.0 - d[crown] / TREE['r']
+    z[crown] = _scene_ground(TREE['x']) + TREE['base'] + (TREE['top'] - TREE['base']) * frac * rng.uniform(0.7, 1.0, crown.sum())
+    cls[crown] = 5
+
+    # Points de façade : sur les murs de la maison et de l'immeuble, à toute hauteur.
+    fx, fy, fz = [], [], []
+    for b, top in ((HOUSE, HOUSE['eave']), (FLAT, FLAT['h'])):
+        for _ in range(400):
+            side = rng.integers(4)
+            u = rng.uniform()
+            px = b['x0'] + u * (b['x1'] - b['x0']) if side < 2 else (b['x0'] if side == 2 else b['x1'])
+            py = (b['y0'] if side == 0 else b['y1']) if side < 2 else b['y0'] + u * (b['y1'] - b['y0'])
+            fx.append(px + rng.normal(0, 0.05))
+            fy.append(py + rng.normal(0, 0.05))
+            fz.append(_scene_ground(px) + rng.uniform(0.5, top))
+    x = np.concatenate([x, fx])
+    y = np.concatenate([y, fy])
+    z = np.concatenate([z, fz])
+    cls = np.concatenate([cls, np.full(len(fx), 6, dtype=np.uint8)])
+
+    frame = oe.LocalFrame(SCENE_LAT, SCENE_LON)
+    e, nn = frame.to_l93(x, y)
+    return frame, (e, nn, z, cls)
+
+
+def _scene_bdtopo(frame):
+    dx, dy = BDTOPO_OFFSET
+    out = []
+    for key, b in (('A', HOUSE), ('B', FLAT), ('D', GONE)):
+        ring = [(b['x0'] + dx, b['y0'] + dy), (b['x1'] + dx, b['y0'] + dy),
+                (b['x1'] + dx, b['y1'] + dy), (b['x0'] + dx, b['y1'] + dy), (b['x0'] + dx, b['y0'] + dy)]
+        e, n = frame.to_l93([p[0] for p in ring], [p[1] for p in ring])
+        out.append({'id': key, 'rings': [list(zip(e.tolist(), n.tolist()))],
+                    'hauteur': 7.0, 'etages': None, 'z_sol': None, 'z_toit_max': None,
+                    'nature': 'Indifférenciée', 'usage': 'Résidentiel'})
+    return out
+
+
+def _closed_and_outward(obj):
+    import trimesh
+    m = trimesh.Trimesh(obj['vertices'], [t['v'] for t in obj['triangles']], process=False)
+    return m.is_watertight and m.is_winding_consistent and m.volume > 0
+
+
+class LocalFrameTest(SimpleTestCase):
+    databases = []
+
+    def test_round_trip_and_no_convergence_on_central_meridian(self):
+        from . import observed_env as oe
+        frame = oe.LocalFrame(46.5, 3.0)
+        self.assertAlmostEqual(math.degrees(frame.convergence_rad), 0.0, places=3)
+        f2 = oe.LocalFrame(48.11, -1.68, north_offset_deg=17.0)
+        e, n = f2.to_l93([12.3, -80.0], [45.6, 3.0])
+        x, y = f2.to_local(e, n)
+        self.assertAlmostEqual(float(x[0]), 12.3, places=6)
+        self.assertAlmostEqual(float(y[1]), 3.0, places=6)
+
+    def test_true_north_maps_to_plus_y(self):
+        """Un point plein nord (même longitude) doit tomber sur l'axe +Y local —
+        oracle indépendant de la formule de convergence : pyproj direct."""
+        from pyproj import Transformer
+        from . import observed_env as oe
+        frame = oe.LocalFrame(48.11, -1.68)       # convergence ≈ 3,4° en Bretagne
+        e, n = Transformer.from_crs('EPSG:4326', 'EPSG:2154', always_xy=True).transform(-1.68, 48.112)
+        x, y = frame.to_local(e, n)
+        self.assertLess(abs(float(x)), 0.02)
+        self.assertAlmostEqual(float(y), 222.4, delta=0.5)   # 0,002° de latitude ≈ 222,4 m
+
+
+class ObservedEnvironmentSceneTest(SimpleTestCase):
+    databases = []
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from . import observed_env as oe
+        frame, points = _scene_points()
+        cls.frame = frame
+        cls.objects, cls.ground_z, cls.stats, cls.warnings = oe.build_objects(
+            frame, 40.0, points, _scene_bdtopo(frame), acquisition_months=[2],
+        )
+
+    def _by(self, **kw):
+        return [o for o in self.objects if all(o.get(k) == v for k, v in kw.items())]
+
+    def test_ground_reference_is_terrain_at_origin(self):
+        self.assertAlmostEqual(self.ground_z, SCENE_GROUND_Z, delta=0.1)
+
+    def test_global_offset_recovered(self):
+        dx, dy = self.stats['global_shift_m']
+        self.assertAlmostEqual(dx, -BDTOPO_OFFSET[0], delta=0.3)
+        self.assertAlmostEqual(dy, -BDTOPO_OFFSET[1], delta=0.3)
+
+    def test_gable_house_heights(self):
+        from . import observed_env as oe
+        house = next(o for o in self._by(kind='building')
+                     if o['info'].get('bdtopo_id') == 'A')
+        self.assertEqual(house['origin'], 'bdtopo+lidar')
+        self.assertTrue(_closed_and_outward(house))
+        top = max(v[2] for v in house['vertices'])
+        self.assertAlmostEqual(top, HOUSE['ridge'], delta=0.4)
+        # Égout : les sommets de mur aux coins, sous la toiture, pas les points de façade.
+        poly = oe.rings_to_poly(house['footprint'])
+        corners = [v for v in house['vertices'] if v[2] > 1.0
+                   and min(math.dist(v[:2], c) for c in poly.exterior.coords) < 0.3]
+        self.assertTrue(corners)
+        for v in corners:
+            self.assertAlmostEqual(v[2], HOUSE['eave'], delta=0.6)
+
+    def test_flat_building_not_dragged_down_by_facade_points(self):
+        flat = next(o for o in self._by(kind='building') if o['info'].get('bdtopo_id') == 'B')
+        roof = [v[2] for v in flat['vertices'] if v[2] > 2.0]
+        expected = FLAT['h'] + SCENE_SLOPE_X * 20.0
+        self.assertTrue(all(abs(z - expected) < 0.4 for z in roof), roof)
+
+    def test_demolished_building_removed_by_default(self):
+        gone = next(o for o in self.objects if o['info'].get('bdtopo_id') == 'D')
+        self.assertEqual(gone['status'], 'removed')
+        self.assertIn('LiDAR', gone['reason'])
+
+    def test_building_missing_from_bdtopo_found(self):
+        from . import observed_env as oe
+        shed = self._by(kind='building', origin='lidar')
+        self.assertEqual(len(shed), 1)
+        c = oe.rings_to_poly(shed[0]['footprint']).centroid
+        self.assertAlmostEqual(c.x, -20.0, delta=0.6)
+        self.assertAlmostEqual(c.y, -18.0, delta=0.6)
+
+    def test_tree_height_and_measured_gap(self):
+        trees = self._by(kind='vegetation')
+        self.assertGreaterEqual(len(trees), 1)
+        tree = max(trees, key=lambda o: o['info']['height_m'])
+        self.assertAlmostEqual(tree['info']['height_m'], TREE['top'], delta=1.0)
+        # Vol en février : la trouée mesurée (≈ 25 %) est conservée, mais la
+        # valeur « en feuilles » par défaut est appliquée.
+        self.assertAlmostEqual(tree['info']['k_measured'], 0.25, delta=0.08)
+        self.assertEqual(tree['k'], 0.20)
+        self.assertTrue(_closed_and_outward(tree))
+
+    def test_terrain_follows_slope_with_few_triangles(self):
+        terrain = self._by(kind='terrain')[0]
+        self.assertLess(len(terrain['triangles']), 200)
+        for x, _y, z in terrain['vertices']:
+            self.assertAlmostEqual(z, SCENE_SLOPE_X * x, delta=0.35)
+
+    def test_composed_envelope_only_active_objects(self):
+        from . import observed_env as oe
+        env = oe.compose_envelope(self.objects)
+        active = {o['id'] for o in self.objects if o['status'] == 'active'}
+        self.assertEqual({t['obj'] for t in env['triangles']}, active)
+        veg_ids = {o['id'] for o in self._by(kind='vegetation')}
+        self.assertTrue(all(('k' in t) == (t['obj'] in veg_ids) for t in env['triangles']))
+
+
+class RegistrationTest(SimpleTestCase):
+    databases = []
+
+    def test_footprint_centered_in_wider_roof(self):
+        """Un toit plus large que l'emprise d'un seul côté (emprise décalée,
+        entièrement contenue dans le toit) : le recouvrement seul ne voit rien
+        à corriger, la pondération par profondeur doit recentrer."""
+        import numpy as np
+        from . import observed_env as oe
+        roof = np.zeros((80, 80), dtype=bool)
+        roof[20:60, 20:44] = True          # toit de 24 mailles de large
+        fp = np.zeros_like(roof)
+        fp[22:58, 20:40] = True            # emprise collée au bord gauche
+        dx, dy, _b, _z = oe.best_offset(fp, oe.depth_weights(roof, 6), 8)
+        self.assertAlmostEqual(dx, 2.0, delta=0.6)
+        self.assertAlmostEqual(dy, 0.0, delta=0.6)
+
+
+class ObjectToBuildingTest(SimpleTestCase):
+    databases = []
+
+    def test_groups_and_party_wall(self):
+        import shapely.geometry as sg
+        from . import observed_env as oe
+        a = sg.box(0, 0, 10, 8)
+        b = sg.box(10, 0, 18, 8)          # mitoyen sur l'arête x = 10
+        va, ta = oe.prism_solid(a, 0.0, 6.0)
+        vb, tb = oe.prism_solid(b, 0.0, 6.0)
+        oa = oe.make_object(1, 'building', 'bdtopo+lidar', 'A', va, ta, a)
+        ob = oe.make_object(2, 'building', 'bdtopo+lidar', 'B', vb, tb, b)
+        vertices, triangles = oe.building_envelope_from_object(oa, [oa, ob])
+        groups = {t['group'] for t in triangles}
+        self.assertIn('toiture_plate', groups)
+        self.assertIn('sol', groups)
+        party = [g for g in groups if g.endswith('_mitoyen')]
+        self.assertEqual(len(party), 1)
+        # Le mur mitoyen est bien celui de l'arête x = 10.
+        xs = {round(vertices[i][0], 3) for t in triangles if t['group'] == party[0] for i in t['v']}
+        self.assertEqual(xs, {10.0})
+        self.assertTrue(all(t['boundary'] == 'ground' for t in triangles if t['group'] == 'sol'))
+
+
+class FitImportTest(SimpleTestCase):
+    databases = []
+
+    def test_y_up_millimetre_model_rotated(self):
+        """Boîte de 10 × 6 × 5 m exportée en Y-up et en millimètres (cas Blender →
+        STL typique), cible tournée de 30° : axe, unité, rotation et position
+        doivent être retrouvés."""
+        import shapely.affinity
+        import shapely.geometry as sg
+        import trimesh
+        from . import observed_env as oe
+        box = trimesh.creation.box(extents=[10.0, 5.0, 6.0])     # x, y(hauteur), z
+        V = box.vertices * 1000.0
+        V[:, 1] -= V[:, 1].min()
+        triangles = [{'v': [int(i) for i in f]} for f in box.faces]
+        target = shapely.affinity.rotate(sg.box(40, 20, 50, 26), 30, origin='centroid')
+        verts, kept, report = oe.fit_import(V.tolist(), triangles, target, base_z=1.5)
+        self.assertEqual(report['up_axis'], 'y')
+        self.assertEqual(report['scale'], 0.001)
+        self.assertGreater(report['iou'], 0.95)
+        self.assertAlmostEqual(min(v[2] for v in verts), 1.5, places=3)
+        self.assertAlmostEqual(max(v[2] for v in verts), 6.5, places=2)
+        self.assertEqual(len(kept), len(triangles))
+
+
+class EnvironmentServiceTest(TestCase):
+    """Actions sur les objets d'un environnement : statut, bâtiment étudié,
+    remplacement par un modèle importé — avec la base de données."""
+
+    def _env(self):
+        import shapely.geometry as sg
+        from . import observed_env as oe
+        objs = []
+        for k, box in enumerate([sg.box(0, 0, 10, 8), sg.box(20, 0, 28, 8)], start=1):
+            v, t = oe.prism_solid(box, 0.0, 6.0)
+            objs.append(oe.make_object(k, 'building', 'bdtopo+lidar', f'B{k}', v, t, box,
+                                       info={'base_z': 0.0}))
+        tv, tt = oe.prism_solid(sg.box(-5, -5, -3, -3), 2.0, 8.0)
+        objs.append(oe.make_object(3, 'vegetation', 'lidar', 'Arbre', tv, [{'v': x['v']} for x in tt],
+                                   sg.box(-5, -5, -3, -3), k=0.2))
+        return Environment.objects.create(
+            name='obs', georef_lat=47.0, georef_lon=0.7, georef_ground_z=90.0,
+            scene_objects=objs, envelope=oe.compose_envelope(objs),
+        )
+
+    def test_remove_restore_recomposes_and_stales(self):
+        from . import environment_service as svc
+        env = self._env()
+        linked = Building.objects.create(name='lié', environment=env, sun_visibility_stale=False)
+        n0 = len(env.envelope['triangles'])
+        svc.set_status(env, [3], 'removed')
+        env.refresh_from_db()
+        linked.refresh_from_db()
+        self.assertTrue(linked.sun_visibility_stale)
+        self.assertNotIn(3, {t['obj'] for t in env.envelope['triangles']})
+        self.assertLess(len(env.envelope['triangles']), n0)
+        svc.set_status(env, [3], 'active')
+        env.refresh_from_db()
+        self.assertEqual(len(env.envelope['triangles']), n0)
+
+    def test_study_object_creates_aligned_building(self):
+        from . import environment_service as svc
+        env = self._env()
+        building, env = svc.study_object(env, 1, 'Ma maison')
+        self.assertEqual(building.name, 'Ma maison')
+        self.assertEqual(building.environment_id, env.pk)
+        self.assertEqual((building.georef_lat, building.georef_lon, building.georef_ground_z), (47.0, 0.7, 90.0))
+        obj = next(o for o in env.scene_objects if o['id'] == 1)
+        self.assertEqual((obj['status'], obj['building_id']), ('studied', building.pk))
+        self.assertNotIn(1, {t['obj'] for t in env.envelope['triangles']})
+        # Enveloppe prête pour le solveur : géométrie calculée, sol marqué.
+        tris = building.envelope['triangles']
+        self.assertTrue(all('area' in t for t in tris))
+        self.assertTrue(any(t['boundary'] == 'ground' for t in tris))
+        with self.assertRaises(svc.EnvironmentServiceError):
+            svc.study_object(env, 1)
+        with self.assertRaises(svc.EnvironmentServiceError):
+            svc.study_object(env, 3)      # un arbre
+
+    def test_replace_object_with_import(self):
+        import trimesh
+        from . import environment_service as svc
+        env = self._env()
+        box = trimesh.creation.box(extents=[8.0, 8.0, 6.0])      # 8 × 8 au lieu de 8 × 8 : même emprise
+        box.apply_translation([100.0, 100.0, 50.0])              # repère quelconque
+        building, env, fit = svc.replace_object(
+            env, 2, box.vertices.tolist(), [{'v': [int(i) for i in f]} for f in box.faces],
+        )
+        self.assertGreater(fit['iou'], 0.95)
+        xs = [v[0] for v in building.envelope['vertices']]
+        self.assertAlmostEqual(min(xs), 20.0, delta=0.3)
+        self.assertAlmostEqual(min(v[2] for v in building.envelope['vertices']), 0.0, places=3)
+        obj = next(o for o in env.scene_objects if o['id'] == 2)
+        self.assertEqual(obj['status'], 'studied')
+
+    def test_objects_view(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from .views import EnvironmentObjectsView
+        env = self._env()
+        req = APIRequestFactory().patch(f'/api/environnements/{env.pk}/objets/',
+                                        {'ids': [1, 2], 'status': 'removed'}, format='json')
+        force_authenticate(req, user=mock.Mock(is_authenticated=True))
+        resp = EnvironmentObjectsView.as_view()(req, pk=env.pk)
+        self.assertEqual(resp.status_code, 200)
+        statuses = {o['id']: o['status'] for o in resp.data['objects']}
+        self.assertEqual(statuses, {1: 'removed', 2: 'removed', 3: 'active'})
+
+    def test_generate_with_mocked_network(self):
+        """Chaîne complète jusqu'à l'Environment enregistré, réseau remplacé
+        par la scène synthétique."""
+        from . import environment_service as svc
+        from . import lidar_source
+        frame, points = _scene_points(half=40.0)
+        tiles = [{'url': 'x', 'name': 't.copc.laz', 'acq_start': '2023-02-08', 'acq_end': '2023-02-08',
+                  'classification': 'IGN_AUTO_V5'}]
+        with mock.patch.object(lidar_source, 'fetch_lidar_tiles', return_value=tiles), \
+                mock.patch.object(lidar_source, 'read_points',
+                                  return_value=(points, {'requests': 1, 'bytes': 10, 'points_read': 1})), \
+                mock.patch.object(lidar_source, 'fetch_bdtopo_buildings_l93', return_value=_scene_bdtopo(frame)):
+            env, summary = svc.generate({'lat': SCENE_LAT, 'lon': SCENE_LON, 'radius_m': 40.0})
+        self.assertEqual(summary['source'], 'lidar')
+        self.assertEqual(env.generation['lidar']['acquisition'], ['2023-02-08'])
+        self.assertAlmostEqual(env.georef_ground_z, SCENE_GROUND_Z, delta=0.1)
+        kinds = {o['kind'] for o in env.scene_objects}
+        self.assertEqual(kinds, {'building', 'vegetation', 'terrain'})
+        self.assertEqual(len(env.envelope['triangles']), summary['n_triangles'])
+
+    def test_generate_falls_back_outside_lidar_coverage(self):
+        from . import environment_service as svc
+        from . import lidar_source
+        footprint = [[47.00000, 0.70000], [47.00000, 0.70010], [47.00007, 0.70010], [47.00007, 0.70000]]
+        with mock.patch.object(lidar_source, 'fetch_lidar_tiles', return_value=[]), \
+                mock.patch.object(elevation, 'ground_altitude', return_value=(90.0, 'ign')), \
+                mock.patch.object(geodata, 'fetch_ign_buildings', return_value=[
+                    {'footprint_latlon': footprint, 'height_m': 9.0, 'approx_height': False,
+                     'base_z': 91.0, 'source': 'ign'}]):
+            env, summary = svc.generate({'lat': 47.0, 'lon': 0.7, 'radius_m': 50.0,
+                                         'include_vegetation': False, 'include_terrain': False})
+        self.assertEqual(summary['source'], 'legacy')
+        self.assertIn('LiDAR HD indisponible', summary['warnings'][0])
+        b = env.scene_objects[0]
+        # z relatif au sol d'origine (90 m), pas l'altitude NGF absolue.
+        self.assertAlmostEqual(min(v[2] for v in b['vertices']), 1.0, places=2)
+        self.assertAlmostEqual(max(v[2] for v in b['vertices']), 10.0, places=2)

@@ -4,6 +4,7 @@ from .views import (
     ParoiModelListCreateView, ParoiModelDetailView,
     BuildingListCreateView, BuildingDetailView,
     EnvironmentListCreateView, EnvironmentDetailView, GenerateEnvironmentView,
+    EnvironmentObjectsView, EnvironmentStudyObjectView, EnvironmentReplaceObjectView,
     JobDetailView, PrecomputeShadowsView, BuildingCalculView, BuildingRefineView,
     FetchWeatherView, SearchNearbyBuildingsView, GroundAltitudeView,
 )
@@ -24,6 +25,9 @@ urlpatterns = [
     path('environnements/',   EnvironmentListCreateView.as_view()),
     path('environnements/generer/', GenerateEnvironmentView.as_view()),
     path('environnements/<int:pk>/', EnvironmentDetailView.as_view()),
+    path('environnements/<int:pk>/objets/', EnvironmentObjectsView.as_view()),
+    path('environnements/<int:pk>/objets/<int:obj_id>/etudier/', EnvironmentStudyObjectView.as_view()),
+    path('environnements/<int:pk>/objets/<int:obj_id>/remplacer/', EnvironmentReplaceObjectView.as_view()),
     path('meteo/recuperer/',  FetchWeatherView.as_view()),
     path('altitude/',         GroundAltitudeView.as_view()),
     path('jobs/<int:pk>/',    JobDetailView.as_view()),

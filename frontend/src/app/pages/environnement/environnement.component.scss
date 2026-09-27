@@ -81,16 +81,6 @@ input[type="text"], input[type="number"] {
   &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 
-.generate-block {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
-  margin-bottom: var(--space-4);
-  background: var(--bg);
-
-  h3 { font-size: var(--text-base); margin: 0 0 var(--space-2); }
-}
-
 .job-status {
   display: flex;
   align-items: center;
@@ -125,8 +115,6 @@ input[type="text"], input[type="number"] {
   &.ok { color: var(--success); }
   &.error { color: var(--danger); }
 }
-
-.summary { font-size: var(--text-sm); margin: 0 0 var(--space-4); strong { font-family: var(--font-mono); } }
 
 .btn-primary, .btn-secondary {
   display: inline-flex;
@@ -167,8 +155,6 @@ input[type="text"], input[type="number"] {
   background: var(--bg);
 }
 
-// Lot Z — distinguer visuellement végétation et bâti dans l'aperçu : les
-// afficher de la même couleur les rendait indiscernables.
 .inline-check {
   display: flex;
   flex-direction: row;
@@ -178,16 +164,6 @@ input[type="text"], input[type="number"] {
   font-weight: 400;
   cursor: pointer;
 }
-
-.legend-veg, .legend-built {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  padding: 2px var(--space-2);
-  border-radius: var(--radius-sm);
-}
-
-.legend-veg { color: var(--success); background: var(--success-tint); }
-.legend-built { color: var(--text-mute); background: var(--border); }
 
 .env-warnings {
   list-style: none;
@@ -205,4 +181,168 @@ input[type="text"], input[type="number"] {
     font-size: var(--text-sm);
     color: var(--text);
   }
+}
+
+// ── Lot AH — environnement décomposé en objets ─────────────────────────────
+
+select {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
+
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
+
+label small { font-weight: 400; color: var(--text-mute); font-size: var(--text-xs); }
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+
+  h2, h3 { margin: 0; }
+  h3 { font-size: var(--text-base); display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+}
+
+.mono { font-family: var(--font-mono); }
+
+.report {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-mute);
+  margin-bottom: var(--space-4);
+}
+
+.badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--warning);
+  background: var(--warning-tint);
+
+  &.badge-lidar { color: var(--success); background: var(--success-tint); }
+}
+
+.legend {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+
+  li { display: flex; align-items: center; gap: var(--space-2); }
+  strong { font-family: var(--font-mono); }
+}
+
+// Mêmes variables que EnvironnementComponent.colorForTriangle.
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  display: inline-block;
+
+  &.sw-built { background: var(--text-mute); }
+  &.sw-lidar { background: var(--text); }
+  &.sw-flat { background: var(--warning); }
+  &.sw-veg { background: var(--success); }
+  &.sw-terrain { background: var(--success-tint); }
+  &.sw-removed { background: var(--border); }
+  &.sw-studied { background: var(--accent); }
+}
+
+.object-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  background: var(--bg);
+}
+
+.status {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+
+  &.st-active { color: var(--text-mute); background: var(--border); }
+  &.st-removed { color: var(--danger); background: var(--danger-tint); }
+  &.st-studied { color: var(--accent); background: var(--accent-tint); }
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-4);
+
+  dt { color: var(--text-mute); }
+  dd { margin: 0; }
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+
+  a.btn-primary { text-decoration: none; }
+}
+
+.study-block {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-4);
+  margin-top: var(--space-2);
+
+  h4 { margin: 0 0 var(--space-2); font-size: var(--text-sm); }
+  > label { margin-bottom: var(--space-3); }
+}
+
+.replace-grid { margin-top: var(--space-3); }
+
+.fit-poor { color: var(--danger); }
+
+.removed-list {
+  margin: var(--space-3) 0;
+  font-size: var(--text-sm);
+
+  summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+  ul:not(.env-warnings) { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+  li { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0 var(--space-1);
+  min-height: 44px;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.meta-grid { margin-top: var(--space-4); }
+
+@media (max-width: 600px) {
+  .facts { grid-template-columns: 1fr; dt { margin-top: var(--space-2); } }
 }

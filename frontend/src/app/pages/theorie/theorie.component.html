@@ -128,7 +128,8 @@
             <li><strong>Obstacles parfaitement noirs</strong> — un bâtiment voisin retire sa part de ciel sans rien réémettre ni réfléchir. Combiné à l'albédo absent, les apports diffus sont <strong>sous-estimés en milieu dense</strong> — précisément le cas d'usage de la génération automatique d'environnement.</li>
             <li><strong>Ombrage précalculé discrétisé à 15°</strong> en azimut et en élévation : un obstacle fin fait basculer une heure entière de « ombré » à « ensoleillé », et tout soleil sous 7,5° d'élévation est évalué à 0°, donc presque toujours bloqué. Le mode « temps réel » relance un vrai lancer de rayons à l'angle exact de chaque heure — à utiliser dès que l'ombrage est déterminant.</li>
             <li><strong>Sol : source à température constante</strong> — <span class="sym">t_ground</span> ne varie pas dans l'année et la terre n'a aucune inertie. Sa résistance <span class="sym">r_ground</span> est un paramètre saisi, pas un calcul de géométrie (ISO 13370).</li>
-            <li><strong>Végétation à transmittance constante</strong> — un arbre à feuilles caduques est modélisé en feuilles toute l'année, ce qui <strong>surestime l'ombrage hivernal</strong>. Sa hauteur est déduite de son type : aucune des sources cartographiques n'en fournit de fiable.</li>
+            <li><strong>Végétation à transmittance constante</strong> — un arbre à feuilles caduques est modélisé en feuilles toute l'année, ce qui <strong>surestime l'ombrage hivernal</strong>. Sa hauteur et son houppier sont relevés par le LiDAR HD ; sa transparence aussi, mais un relevé fait feuilles tombées ne renseigne que l'hiver — c'est alors une valeur « en feuilles » par défaut qui s'applique.</li>
+            <li><strong>Environnement figé à la date du relevé LiDAR</strong> — un bâtiment construit ou démoli depuis n'y est pas (ou y reste) tant qu'on ne le retire ou ne le remplace pas à la main. Hors couverture LiDAR, le repli BD TOPO / OpenStreetMap revient aux toits plats et aux hauteurs forfaitaires.</li>
           </ul>
 
           <p class="callout-heading">3. Extensions identifiées — chiffrables, pas encore faites</p>
@@ -880,17 +881,17 @@
               <tr>
                 <td><strong>Ombrage et environnement</strong></td>
                 <td>Fraction de <span class="sym">E_dir</span> reçue par triangle, et facteur de vue du ciel corrigé de l'occlusion réelle</td>
-                <td>Obstacles noirs ; grille à 15° en mode précalculé ; le bâtiment étudié est écarté de ses propres obstacles</td>
+                <td>Obstacles noirs ; grille à 15° en mode précalculé ; bâtiments reconstruits depuis le LiDAR HD (emprises BD TOPO recalées, toitures relevées) ; le bâtiment étudié est retiré de ses propres obstacles</td>
               </tr>
               <tr>
                 <td><strong>Végétation</strong></td>
                 <td>Occulteur qui <em>atténue</em> : la fraction transmise multiplie <span class="sym">E_dir</span> et le poids de chaque direction du ciel</td>
-                <td>Transmittance constante dans l'année ; hauteur déduite du type ; couronne approchée par un prisme</td>
+                <td>Transmittance constante dans l'année ; hauteur et bas du houppier relevés ; couronne approchée par un prisme</td>
               </tr>
               <tr>
                 <td><strong>Relief du terrain</strong></td>
                 <td>Maillage d'obstacles supplémentaire, traité exactement comme un bâtiment</td>
-                <td>Occultation seulement — n'apporte <strong>pas</strong> la réflexion solaire du sol ; aplani sous l'emprise du bâtiment</td>
+                <td>Occultation seulement — n'apporte <strong>pas</strong> la réflexion solaire du sol ; percé sous l'emprise du bâtiment étudié ; relief au-delà du rayon généré ignoré</td>
               </tr>
               <tr>
                 <td><strong>Chauffage / climatisation</strong></td>

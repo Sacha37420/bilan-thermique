@@ -197,9 +197,9 @@
       <p class="hint">
         Méthode complète équivalente : construire un maillage d'obstacles sur la page Environnement,
         l'associer au bâtiment, puis lancer le précalcul d'ombrage (page Calcul 3D). Ici tout
-        s'enchaîne : les bâtiments voisins sont récupérés autour du vôtre et alignés sur son repère,
-        <strong>votre bâtiment est écarté</strong> (il figure lui-même dans les données) et tout
-        obstacle qui empiète sur son enveloppe est rogné.
+        s'enchaîne : voisins, arbres et relief sont reconstruits autour du vôtre depuis le relevé
+        LiDAR HD de l'IGN (toitures et hauteurs réelles), dans son repère, et
+        <strong>votre bâtiment y est reconnu</strong> pour ne pas se masquer lui-même en double.
       </p>
       @if (step() === 'environnement') {
         <label class="inline-check">
@@ -210,12 +210,12 @@
           <div class="field-grid">
             <label>
               <span>Rayon de recherche (m)</span>
-              <input type="number" step="10" min="10" max="400" [(ngModel)]="envRadius" name="envRadius" />
+              <input type="number" step="10" min="10" max="250" [(ngModel)]="envRadius" name="envRadius" />
             </label>
           </div>
           <label class="inline-check">
             <input type="checkbox" [(ngModel)]="includeVegetation" name="includeVegetation" />
-            <span>Inclure la végétation (arbres, haies, bois)</span>
+            <span>Inclure les arbres (hauteur et transparence mesurées)</span>
           </label>
         } @else {
           <p class="hint">

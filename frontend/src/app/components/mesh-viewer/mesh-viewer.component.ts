@@ -19,6 +19,26 @@ function resolveColor(varNameOrHex: string): THREE.Color {
   return new THREE.Color(varNameOrHex);
 }
 
+/** Un environnement observé compte jusqu'à 60 000 triangles pour une poignée de
+ * couleurs distinctes : résoudre chaque variable CSS une seule fois par
+ * construction/repeinte (getComputedStyle par triangle coûtait des secondes).
+ * Recréé à chaque passe pour suivre un changement de thème. */
+function colorResolver(): (key: string) => THREE.Color {
+  const cache = new Map<string, THREE.Color>();
+  return (key: string) => {
+    let c = cache.get(key);
+    if (!c) {
+      c = resolveColor(key);
+      cache.set(key, c);
+    }
+    return c;
+  };
+}
+
+/** Au-delà de ce déplacement (px) entre appui et relâchement, le geste est une
+ * rotation de caméra, pas un clic de sélection. */
+const CLICK_TOLERANCE_PX = 5;
+
 @Component({
   selector: 'app-mesh-viewer',
   standalone: true,
@@ -56,6 +76,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.resizeObserver.observe(this.hostRef.nativeElement);
 
     this.hostRef.nativeElement.addEventListener('pointerdown', this.onPointerDown);
+    this.hostRef.nativeElement.addEventListener('pointerup', this.onPointerUp);
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -69,6 +90,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     cancelAnimationFrame(this.frameHandle);
     this.resizeObserver?.disconnect();
     this.hostRef.nativeElement.removeEventListener('pointerdown', this.onPointerDown);
+    this.hostRef.nativeElement.removeEventListener('pointerup', this.onPointerUp);
     this.controls?.dispose();
     this.geometry?.dispose();
     (this.mesh?.material as THREE.Material | undefined)?.dispose();
@@ -79,8 +101,9 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
   repaint(): void {
     if (!this.geometry || !this.triangles.length) return;
     const colorAttr = this.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const color = colorResolver();
     for (let i = 0; i < this.triangles.length; i++) {
-      const c = resolveColor(this.colorForTriangle(i));
+      const c = color(this.colorForTriangle(i));
       for (let k = 0; k < 3; k++) {
         colorAttr.setXYZ(i * 3 + k, c.r, c.g, c.b);
       }
@@ -96,7 +119,10 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.camera.position.set(8, -12, 8);
     this.camera.up.set(0, 0, 1);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    // Toile transparente : le fond est celui de la carte (token --bg), qui suit
+    // le thème clair/sombre — opaque, elle restait noire en thème clair.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    this.renderer.setClearColor(0x000000, 0);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(host.clientWidth, host.clientHeight);
     host.appendChild(this.renderer.domElement);
@@ -127,6 +153,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
 
     const positions = new Float32Array(this.triangles.length * 9);
     const colors = new Float32Array(this.triangles.length * 9);
+    const color = colorResolver();
 
     this.triangles.forEach((tri, i) => {
       for (let k = 0; k < 3; k++) {
@@ -135,7 +162,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
         positions[i * 9 + k * 3 + 1] = p[1];
         positions[i * 9 + k * 3 + 2] = p[2];
       }
-      const c = resolveColor(this.colorForTriangle(i));
+      const c = color(this.colorForTriangle(i));
       for (let k = 0; k < 3; k++) {
         colors[i * 9 + k * 3 + 0] = c.r;
         colors[i * 9 + k * 3 + 1] = c.g;
@@ -163,7 +190,10 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     const center = sphere.center;
     const radius = Math.max(sphere.radius, 0.5);
     this.controls.target.copy(center);
-    this.camera.position.copy(center).add(new THREE.Vector3(radius * 1.6, -radius * 2.2, radius * 1.6));
+    // ≈ 1,9 rayon : la sphère englobante remplit la vue (champ de 50°). À 3,2 rayons
+    // (valeur d'origine), un quartier entier (environnement observé) n'occupait
+    // plus qu'un quart de la largeur.
+    this.camera.position.copy(center).add(new THREE.Vector3(radius * 0.95, -radius * 1.3, radius * 1.0));
     this.camera.near = radius / 100;
     this.camera.far = radius * 100;
     this.camera.updateProjectionMatrix();
@@ -180,7 +210,19 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     this.camera.updateProjectionMatrix();
   }
 
+  private downAt: { x: number; y: number } | null = null;
+
   private onPointerDown = (evt: PointerEvent): void => {
+    this.downAt = { x: evt.clientX, y: evt.clientY };
+  };
+
+  /** Sélection au RELÂCHEMENT, et seulement si le pointeur n'a presque pas
+   * bougé : auparavant, commencer à faire tourner la vue sélectionnait déjà le
+   * triangle sous le pointeur. */
+  private onPointerUp = (evt: PointerEvent): void => {
+    const down = this.downAt;
+    this.downAt = null;
+    if (!down || Math.hypot(evt.clientX - down.x, evt.clientY - down.y) > CLICK_TOLERANCE_PX) return;
     if (!this.pickable || !this.mesh || !this.camera) return;
     const rect = this.hostRef.nativeElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(

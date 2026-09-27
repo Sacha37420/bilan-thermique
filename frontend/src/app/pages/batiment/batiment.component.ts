@@ -1,6 +1,6 @@
 import { Component, OnInit, ViewChild, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
 import { generateBoxEnvelope } from '../../core/box-generator';
@@ -35,6 +35,7 @@ const SERIES_COLOR_VARS = [
 })
 export class BatimentComponent implements OnInit {
   private api = inject(ApiService);
+  private route = inject(ActivatedRoute);
 
   @ViewChild(MeshViewerComponent) viewer?: MeshViewerComponent;
 
@@ -85,6 +86,14 @@ export class BatimentComponent implements OnInit {
   ngOnInit(): void {
     this.refreshParoiModels();
     this.refreshBuildings();
+    // Lot AH : /batiment?id=… ouvre directement un bâtiment — lien donné par la
+    // page Environnement après création du bâtiment étudié.
+    this.route.queryParamMap.subscribe(params => {
+      const id = Number(params.get('id'));
+      if (Number.isInteger(id) && id > 0 && id !== this.currentBuildingId()) {
+        this.loadBuilding({ id });
+      }
+    });
   }
 
   private refreshParoiModels(): void {

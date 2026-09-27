@@ -21,3 +21,13 @@ mapbox_earcut>=1.0
 
 # ── Génération auto d'environnement (IGN Géoplateforme WFS / Overpass OSM) ────
 requests>=2.31
+
+# ── Environnement observé (Lot AH) : LiDAR HD IGN × BD TOPO ───────────────────
+# laspy + lazrs : lecture partielle des nuages COPC par requêtes Range.
+laspy[lazrs]>=2.5
+# pyproj : Lambert 93 ↔ WGS84, convergence des méridiens et facteur d'échelle.
+pyproj>=3.6
+# triangle : triangulation contrainte (toitures, planchers). Enveloppe de la
+# bibliothèque Triangle de J. R. Shewchuk — usage libre non commercial ; une
+# distribution dans un produit commercial demanderait l'accord de l'auteur.
+triangle>=20230923

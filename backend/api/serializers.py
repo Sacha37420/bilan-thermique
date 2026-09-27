@@ -116,8 +116,28 @@ class EnvironmentSerializer(serializers.Serializer):
         many=True, write_only=True, required=False, default=list, max_length=geometry.MAX_TRIANGLES,
     )
     envelope = serializers.JSONField(read_only=True)
+    # Lot AH — repère, objets et compte rendu d'un environnement généré. En
+    # lecture seule : les objets ne changent que par les actions dédiées
+    # (retirer/restaurer, bâtiment étudié, remplacement par un modèle importé),
+    # qui recomposent `envelope` à chaque fois.
+    georef_lat = serializers.FloatField(read_only=True)
+    georef_lon = serializers.FloatField(read_only=True)
+    georef_north_offset_deg = serializers.FloatField(read_only=True)
+    georef_ground_z = serializers.FloatField(read_only=True)
+    objects = serializers.JSONField(source='scene_objects', read_only=True)
+    generation = serializers.JSONField(read_only=True)
+    studied_buildings = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+    def get_studied_buildings(self, obj):
+        """{id d'objet: {id, name} du bâtiment étudié, ou null s'il a été supprimé
+        depuis} — pour que l'interface propose de réintégrer l'objet."""
+        refs = {o['id']: o.get('building_id') for o in (obj.scene_objects or [])
+                if o.get('status') == 'studied' and o.get('building_id')}
+        existing = {b.pk: b.name for b in Building.objects.filter(pk__in=set(refs.values()))}
+        return {str(oid): ({'id': bid, 'name': existing[bid]} if bid in existing else None)
+                for oid, bid in refs.items()}
 
     def validate_name(self, value):
         qs = Environment.objects.filter(name=value)
@@ -156,6 +176,10 @@ class EnvironmentSerializer(serializers.Serializer):
         envelope = self._build_envelope(validated_data)
         if envelope is not None:
             instance.envelope = envelope
+            # Un maillage fourni tel quel remplace la décomposition en objets :
+            # la garder ferait diverger `objects` et `envelope`, et la prochaine
+            # action sur un objet écraserait silencieusement ce maillage.
+            instance.scene_objects = []
         for field, value in validated_data.items():
             setattr(instance, field, value)
         instance.save()
@@ -168,6 +192,64 @@ class EnvironmentSerializer(serializers.Serializer):
             # l'environnement vers ses bâtiments manquait.
             Building.objects.filter(environment=instance).update(sun_visibility_stale=True)
         return instance
+
+
+class EnvironmentSummarySerializer(serializers.ModelSerializer):
+    """Liste des environnements : sans maillage ni objets. Un environnement
+    observé pèse plusieurs mégaoctets ; la liste ne sert qu'à choisir."""
+
+    n_objects = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Environment
+        fields = ['id', 'name', 'description', 'georef_lat', 'georef_lon', 'n_objects',
+                  'created_at', 'updated_at']
+        read_only_fields = fields
+
+    def get_n_objects(self, obj):
+        return len(obj.scene_objects or [])
+
+
+class EnvironmentObjectsStatusSerializer(serializers.Serializer):
+    """PATCH /api/environnements/<id>/objets/ — retirer ou restaurer des objets."""
+
+    ids = serializers.ListField(child=serializers.IntegerField(min_value=1), min_length=1, max_length=5000)
+    status = serializers.ChoiceField(choices=['active', 'removed'])
+
+
+class StudyObjectSerializer(serializers.Serializer):
+    """POST /api/environnements/<id>/objets/<obj>/etudier/"""
+
+    name = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
+
+
+class ReplaceObjectTriangleSerializer(serializers.Serializer):
+    v = serializers.ListField(child=serializers.IntegerField(min_value=0), min_length=3, max_length=3)
+    group = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
+
+
+class ReplaceObjectSerializer(serializers.Serializer):
+    """POST /api/environnements/<id>/objets/<obj>/remplacer/ — modèle importé
+    (OBJ/STL lu côté navigateur) placé automatiquement sur l'emprise de l'objet."""
+
+    name = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
+    vertices = serializers.ListField(
+        child=serializers.ListField(child=serializers.FloatField(), min_length=3, max_length=3),
+        min_length=3, max_length=geometry.MAX_VERTICES,
+    )
+    triangles = ReplaceObjectTriangleSerializer(many=True, min_length=1, max_length=geometry.MAX_TRIANGLES)
+    up_axis = serializers.ChoiceField(choices=['auto', 'z', 'y'], required=False, default='auto')
+    scale = serializers.ChoiceField(choices=['auto', '1', '0.01', '0.001', '0.0254'],
+                                    required=False, default='auto')
+
+    def validate(self, data):
+        n = len(data['vertices'])
+        for index, tri in enumerate(data['triangles']):
+            if any(i >= n for i in tri['v']):
+                raise serializers.ValidationError(
+                    {'triangles': f"Triangle {index} : indice de sommet hors limites (0..{n - 1})."}
+                )
+        return data
 
 
 class JobSerializer(serializers.ModelSerializer):
@@ -301,10 +383,19 @@ class GenerateEnvironmentRequestSerializer(serializers.Serializer):
 
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
     lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
-    radius_m = serializers.FloatField(min_value=10.0, max_value=400.0)
-    include_vegetation = serializers.BooleanField(required=False, default=False)
+    # Lot AH : 250 m au plus (400 auparavant). Le LiDAR HD, à ~18 points/m², fait
+    # passer une zone de 500 m de côté à ~6 millions de points en mémoire sur un
+    # worker partagé (2 vCPU / 16 Go pour tout le lab) ; au-delà de 250 m, un
+    # obstacle de 20 m de haut sous-tend moins de 5° : sans effet sur une grille
+    # d'ombrage au pas de 15°.
+    radius_m = serializers.FloatField(min_value=10.0, max_value=250.0)
+    include_vegetation = serializers.BooleanField(required=False, default=True)
+    include_terrain = serializers.BooleanField(required=False, default=True)
+    # Pas de la grille de terrain du générateur de REPLI (hors couverture LiDAR) ;
+    # le terrain LiDAR, lui, est un TIN adaptatif sans pas imposé.
     terrain_spacing_m = serializers.FloatField(required=False, allow_null=True, default=None,
                                                 min_value=2.0, max_value=100.0)
+    name = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
     # Lot AD : bâtiment de référence, optionnel. Fourni, la génération est
     # ALIGNÉE sur son repère local (rotation, altitude) et confrontée à son
     # empreinte — le bâtiment étudié lui-même est écarté, les obstacles qui
@@ -317,6 +408,15 @@ class GenerateEnvironmentRequestSerializer(serializers.Serializer):
     building_id = serializers.PrimaryKeyRelatedField(
         queryset=Building.objects.all(), required=False, allow_null=True, default=None,
     )
+
+    def validate(self, data):
+        building = data.get('building_id')
+        if building is not None and (building.georef_lat is None or building.georef_lon is None):
+            raise serializers.ValidationError(
+                {'building_id': "Ce bâtiment n'est pas géoréférencé : renseignez sa latitude/longitude "
+                                "(page Bâtiment) avant de générer son environnement."}
+            )
+        return data
 
 
 class SearchNearbyBuildingsRequestSerializer(serializers.Serializer):

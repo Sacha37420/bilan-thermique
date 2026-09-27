@@ -70,6 +70,11 @@ REST_FRAMEWORK = {
     ],
 }
 
+# Corps de requête JSON : un maillage importé (OBJ/STL, jusqu'à 20 000 sommets et
+# triangles — geometry.MAX_*) dépasse les 2,5 Mo par défaut de Django, qui le
+# refusait alors d'un 400 sans rapport apparent avec la taille (Lot AH).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 30 * 1024 * 1024
+
 # ── Celery / file de tâches asynchrones ────────────────────────────────────────
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://redis:6379/0')
 CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://redis:6379/1')
