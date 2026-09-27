@@ -1,17 +1,27 @@
 <div class="facade-panel">
   <p class="hint">
-    Chaque façade est retrouvée sur les photos de rue Panoramax (360°), la prise de vue est recalée
-    sur la géométrie du bâtiment, puis la façade est redressée et ses baies détectées
-    automatiquement (fenêtres et volets comptent comme vitrage, une porte reste opaque). Vérifiez
-    le résultat dans la vue ci-dessous — sans texture, les vitrages apparaissent en couleur.
+    Les façades sont texturées à partir des photos de rue Panoramax (360°), recalées par séquence sur
+    les bâtiments de l’environnement. Chaque point de façade prend la photo qui le voit réellement :
+    haies, murets, arbres et voitures relevés par le LiDAR sont écartés, et une zone qu’aucune photo
+    ne voit reste grise plutôt que d’être couverte par l’obstacle. Les baies sont détectées sur la
+    texture (fenêtres et volets comptent comme vitrage, une porte reste opaque), puis complétées en
+    grille d’étages dans les parties cachées. Sans texture, les vitrages apparaissent en couleur.
   </p>
 
   <div class="actions">
     <button type="button" class="btn-secondary" (click)="analyse()" [disabled]="busy()">
       {{ analysed ? 'Relancer l’analyse des façades' : 'Analyser les façades (photos de rue)' }}
     </button>
+    @if (missingTextures() > 0 && !busy()) {
+      <button type="button" class="btn-secondary" (click)="recompose()">Recomposer les textures</button>
+    }
     @if (status()) { <span class="hint">{{ status() }}</span> }
   </div>
+  @if (missingTextures() > 0 && !busy()) {
+    <p class="hint">{{ missingTextures() }} texture(s) effacée(s) du cache du serveur (redéploiement) : les baies sont
+      conservées, seules les images sont à recomposer.</p>
+  }
+  @if (building.facades?.note; as note) { <p class="hint">{{ note }}</p> }
   @if (error()) { <p class="field-error">{{ error() }}</p> }
 
   <div class="viewer-options">
@@ -42,7 +52,7 @@
       <table>
         <thead>
           <tr>
-            <th>Façade</th><th>Photo</th><th>Masquée</th><th>Fenêtres</th><th>Portes</th>
+            <th>Façade</th><th>Photo</th><th>Part vue</th><th>Fenêtres</th><th>Portes</th>
             <th>Vitrage détecté</th><th>Utiliser la détection</th>
           </tr>
         </thead>
@@ -51,13 +61,14 @@
             <tr>
               <td class="mono">{{ f.group }}</td>
               <td>{{ statusLabel(f) }}@if (f.pano?.datetime) { <span class="hint"> · {{ f.pano!.datetime!.slice(0, 10) }}</span> }</td>
-              <td>{{ f.occlusion !== undefined ? ((f.occlusion * 100) | number:'1.0-0') + ' %' : '—' }}</td>
-              <td>{{ count(f, 'window') }}</td>
+              <td>{{ f.coverage !== undefined ? ((f.coverage * 100) | number:'1.0-0') + ' %'
+                     : f.occlusion !== undefined ? (((1 - f.occlusion) * 100) | number:'1.0-0') + ' %' : '—' }}</td>
+              <td>{{ count(f, 'window') }}@if (countGrid(f)) { <span class="hint"> (dont {{ countGrid(f) }} en grille)</span> }</td>
               <td>{{ count(f, 'door') }}</td>
               <td>{{ detectedRatio(f) * 100 | number:'1.0-0' }} %</td>
               <td>
                 <input type="checkbox" [(ngModel)]="useDetection[f.group]" [name]="'use_' + f.group"
-                       [disabled]="f.status !== 'analysee'" [attr.aria-label]="'Utiliser la détection pour ' + f.group" />
+                       [disabled]="!isSeen(f)" [attr.aria-label]="'Utiliser la détection pour ' + f.group" />
               </td>
             </tr>
           }
@@ -65,9 +76,10 @@
       </table>
     </div>
     <p class="hint">
-      Détection cochée : la façade reçoit exactement les baies détectées — aucune si elle est
-      aveugle. Façade non retenue (aucune photo, masquée, ou détection décochée) : fenêtres
-      régulières à la proportion ci-dessous. Photos : contributeurs Panoramax ({{ producers || 'divers' }}), licence CC-BY-SA 4.0.
+      Détection cochée : la façade reçoit les baies détectées (complétées en grille dans ses parties
+      cachées) — aucune si elle est vue et aveugle. Façade non retenue (aucune photo, cachée, ou
+      détection décochée) : fenêtres régulières à la proportion des DPE si elle est connue, sinon à
+      la proportion ci-dessous. Photos : contributeurs Panoramax ({{ producers || 'divers' }}), licence CC-BY-SA 4.0.
     </p>
   }
 
@@ -90,6 +102,17 @@
       <input type="number" min="0" max="60" step="5" [(ngModel)]="fallbackPct" name="fallbackPct" />
     </label>
   </div>
+  @if (reference; as r) {
+    <label class="inline-check">
+      <input type="checkbox" [(ngModel)]="useReference" name="useReference" />
+      <span>Utiliser la proportion des DPE pour les façades non vues : {{ referenceSummary() }}</span>
+    </label>
+    <p class="hint">
+      {{ r.source }} du {{ r.dpe_date }}@if (r.type) { ({{ r.type }}@if (r.nb_log) { , {{ r.nb_log }} logement(s) }) }@if (r.mode === 'global') {
+      — pour un immeuble, le DPE décrit un logement : seule sa proportion de baies est reprise, appliquée à chaque façade }.
+      Données BDNB (CSTB, ADEME), {{ r.license }}.
+    </p>
+  }
   <button type="button" class="btn-primary" (click)="apply()" [disabled]="busy() || glazingModelId === null">
     {{ hasGlazing ? 'Réintégrer les vitrages' : 'Intégrer les vitrages dans le maillage' }}
   </button>

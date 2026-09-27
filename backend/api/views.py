@@ -455,6 +455,25 @@ class FacadeAnalyseView(APIView):
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
+class FacadeRecomposeView(APIView):
+    """
+    POST /api/batiments/<id>/facades/recomposer/
+    Lot AL — recompose en tâche de fond les textures multi-vues perdues (cache
+    effacé par un redéploiement), à partir des vues et recalages enregistrés.
+    """
+
+    def post(self, request, pk):
+        building = get_object_or_404(Building, pk=pk)
+        if not (building.facades or {}).get('facades'):
+            return Response({'detail': "Façades non analysées."}, status=status.HTTP_400_BAD_REQUEST)
+        if Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).exists():
+            return Response({'detail': "Un calcul est déjà en cours pour le lab — réessayez plus tard."},
+                            status=status.HTTP_409_CONFLICT)
+        job = Job.objects.create(kind='recompose_facades', params={'building_id': building.pk})
+        tasks.recompose_facades.delay(job.id, building.pk)
+        return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+
+
 class FacadeTextureView(APIView):
     """GET /api/batiments/<id>/facades/<group>/texture/ — texture redressée (JPEG)."""
 
@@ -467,6 +486,8 @@ class FacadeTextureView(APIView):
             return Response({'detail': "Pas de texture pour cette façade."}, status=status.HTTP_404_NOT_FOUND)
         try:
             data = facades.regenerate_texture(building.pk, entry, building.georef_north_offset_deg or 0.0)
+        except facades.TextureMissing as exc:
+            return Response({'detail': str(exc), 'code': 'recompose'}, status=status.HTTP_404_NOT_FOUND)
         except facades.FacadeError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
         response = HttpResponse(data, content_type='image/jpeg')
@@ -499,6 +520,7 @@ class FacadeApplyView(APIView):
             base['vertices'], base['triangles'], data_f.get('facades', {}), d['glazing_model_id'].pk,
             d['fallback_ratio'], d['use_detection'],
             wall_model_id=d['wall_model_id'].pk if d['wall_model_id'] else None,
+            reference=data_f.get('reference') if d['use_reference'] else None,
         )
         try:
             computed = geometry.compute_envelope_geometry(vertices, triangles)
@@ -507,6 +529,7 @@ class FacadeApplyView(APIView):
         building.envelope = {'vertices': vertices, 'triangles': computed}
         building.facades = {**data_f, 'base': base, 'applied': {
             'report': report, 'glazing_model_id': d['glazing_model_id'].pk, 'fallback_ratio': d['fallback_ratio'],
+            'use_reference': d['use_reference'],
         }}
         building.sun_visibility_stale = True
         building.save(update_fields=['envelope', 'facades', 'sun_visibility_stale', 'updated_at'])

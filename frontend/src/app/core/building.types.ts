@@ -56,31 +56,56 @@ export interface Envelope {
   triangles: Triangle[];
 }
 
-/** Lot AK — façade analysée sur une photo de rue Panoramax. */
+/** Lot AK/AL — façade analysée sur les photos de rue Panoramax. */
 export interface FacadeOpening {
   label: 'window' | 'door';
   score: number | null;
   s0: number; t0: number; s1: number; t1: number;
   synthetic?: boolean;
+  /** 'grille' : baie ajoutée par la grille des étages dans une partie non vue. */
+  source?: 'grille';
 }
 
 export interface FacadeEntry {
   group: string;
-  status: 'analysee' | 'masquee' | 'sans_photo';
+  status: 'analysee' | 'partielle' | 'masquee' | 'sans_photo';
   plane: { origin: number[]; u: number[]; n: number[]; width: number; height: number };
   area: number;
+  azimuth?: number;
+  /** Part de la façade réellement vue sur au moins une photo (0–1). */
+  coverage?: number;
   occlusion?: number;
   texture_key?: string;
   openings: FacadeOpening[];
+  grid?: { rows: number; cols: number; pitch_m: number; n_added: number } | null;
   pano?: { id: string; producer: string | null; license: string | null; datetime: string | null };
+  views?: { pano: { id: string; producer: string | null; datetime: string | null } }[];
   registration?: { score_gps: number; score: number };
+}
+
+/** Lot AL — proportion de baies déclarée dans les DPE (BDNB). */
+export interface GlazingReference {
+  source: string;
+  dpe_date: string;
+  type: string | null;
+  nb_log: number | null;
+  annee: number | null;
+  vitrage: string | null;
+  menuiserie: string | null;
+  uw: number | null;
+  g: number | null;
+  mode: 'orientation' | 'global';
+  ratios: Record<string, number>;
+  license: string;
 }
 
 export interface BuildingFacades {
   facades?: Record<string, FacadeEntry>;
   n_panoramas?: number;
+  reference?: GlazingReference;
+  note?: string;
   applied?: { report: Record<string, { source: string; n_openings: number; glazed_ratio: number }>;
-              glazing_model_id: number; fallback_ratio: number };
+              glazing_model_id: number; fallback_ratio: number; use_reference?: boolean };
 }
 
 export interface Building {

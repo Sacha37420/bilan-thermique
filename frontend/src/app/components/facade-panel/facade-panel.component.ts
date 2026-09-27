@@ -10,11 +10,15 @@ import { MeshViewerComponent, ViewerTexture } from '../mesh-viewer/mesh-viewer.c
 interface ParoiModelSummary { id: number; name: string; is_glazing: boolean }
 
 /**
- * Lot AK — façades du bâtiment d'après les photos de rue Panoramax : analyse
- * (prise de vue recalée, texture redressée, baies détectées), vérification
- * dans la vue 3D (texture ou couleurs : vitrages, portes, murs), puis
- * intégration des VRAIS vitrages dans le maillage. Partagé par le mode
- * simplifié et la page Bâtiment ; émet le bâtiment mis à jour.
+ * Lot AK/AL — façades du bâtiment d'après les photos de rue Panoramax : analyse
+ * dans l'ensemble de l'environnement (photos recalées par séquence, texture
+ * composée sur toutes les vues qui voient réellement chaque point, obstacles
+ * du nuage LiDAR écartés, baies détectées puis complétées en grille dans les
+ * parties non vues), vérification dans la vue 3D (texture ou couleurs :
+ * vitrages, portes, murs), puis intégration des VRAIS vitrages dans le
+ * maillage — repli sur la proportion de baies des DPE (BDNB) quand elle est
+ * connue. Partagé par le mode simplifié et la page Bâtiment ; émet le
+ * bâtiment mis à jour.
  */
 @Component({
   selector: 'app-facade-panel',
@@ -46,7 +50,10 @@ export class FacadePanelComponent implements OnChanges, OnDestroy {
   glazingModelId: number | null = null;
   wallModelId: number | null = null;
   fallbackPct = 20;
+  useReference = true;
   useDetection: Record<string, boolean> = {};
+  /** Textures absentes du cache serveur (après un redéploiement). */
+  missingTextures = signal(0);
 
   get facades(): FacadeEntry[] {
     const f = this.building?.facades?.facades ?? {};
@@ -85,10 +92,11 @@ export class FacadePanelComponent implements OnChanges, OnDestroy {
     for (const f of this.facades) {
       if (!(f.group in this.useDetection)) {
         // Vue sur photo : la détection fait foi, même sans baie (pignon aveugle).
-        this.useDetection[f.group] = f.status === 'analysee';
+        this.useDetection[f.group] = this.isSeen(f);
       }
     }
     this.report.set(this.building?.facades?.applied?.report ?? null);
+    if (this.building?.facades?.applied?.use_reference === false) this.useReference = false;
     this.loadTextures();
     this.viewer?.repaint();
   }
@@ -109,6 +117,8 @@ export class FacadePanelComponent implements OnChanges, OnDestroy {
     this.textureGroups = [];
     const loaded: { group: string; tex: ViewerTexture }[] = [];
     let pending = withTex.length;
+    let missing = 0;
+    this.missingTextures.set(0);
     for (const f of withTex) {
       this.api.getFacadeTexture(this.building.id, f.group).subscribe({
         next: (blob) => {
@@ -124,7 +134,10 @@ export class FacadePanelComponent implements OnChanges, OnDestroy {
           });
           if (--pending === 0) this.publish(loaded);
         },
-        error: () => { if (--pending === 0) this.publish(loaded); },
+        error: (err) => {
+          if (err?.status === 404) this.missingTextures.set(++missing);
+          if (--pending === 0) this.publish(loaded);
+        },
       });
     }
   }
@@ -164,8 +177,35 @@ export class FacadePanelComponent implements OnChanges, OnDestroy {
     this.textures.set([...this.textures()]);
   }
 
+  get reference() {
+    return this.building?.facades?.reference ?? null;
+  }
+
+  referenceSummary(): string {
+    const r = this.reference;
+    if (!r) return '';
+    const ratios = r.mode === 'global'
+      ? `${Math.round((r.ratios['N'] ?? 0) * 100)} % de baies`
+      : Object.entries(r.ratios).map(([c, v]) => `${c} ${Math.round(v * 100)} %`).join(' · ');
+    const extra = [r.vitrage, r.menuiserie, r.uw ? `Uw ${r.uw}` : null].filter(Boolean).join(', ');
+    return `${ratios}${extra ? ' — ' + extra : ''}`;
+  }
+
+  isSeen(f: FacadeEntry): boolean {
+    return f.status === 'analysee' || f.status === 'partielle';
+  }
+
   statusLabel(f: FacadeEntry): string {
-    return f.status === 'analysee' ? 'vue sur photo' : f.status === 'masquee' ? 'masquée (végétation)' : 'aucune photo';
+    switch (f.status) {
+      case 'analysee': return 'vue sur photo';
+      case 'partielle': return 'en partie vue';
+      case 'masquee': return 'cachée (végétation, relief…)';
+      default: return 'aucune photo';
+    }
+  }
+
+  countGrid(f: FacadeEntry): number {
+    return f.openings.filter(o => o.source === 'grille').length;
   }
 
   count(f: FacadeEntry, label: 'window' | 'door'): number {
@@ -190,7 +230,18 @@ export class FacadePanelComponent implements OnChanges, OnDestroy {
     });
   }
 
-  private poll(jobId: number): void {
+  recompose(): void {
+    if (this.busy()) return;
+    this.busy.set(true);
+    this.error.set('');
+    this.status.set('Recomposition des textures…');
+    this.api.recomposeFacades(this.building.id).subscribe({
+      next: (res) => this.poll((res as Job).id, true),
+      error: (err) => { this.busy.set(false); this.error.set(err?.error?.detail ?? 'Échec du lancement.'); },
+    });
+  }
+
+  private poll(jobId: number, reloadTextures = false): void {
     const handle = setInterval(() => {
       this.api.getJob(jobId).subscribe({
         next: (res) => {
@@ -203,8 +254,18 @@ export class FacadePanelComponent implements OnChanges, OnDestroy {
               this.error.set(job.message || 'Échec de l’analyse.');
               return;
             }
+            // Même clé de texture après une nouvelle analyse : forcer le rechargement.
+            this.loadedFor = '';
+            // Nouvelle analyse : les choix « utiliser la détection » repartent des
+            // nouveaux statuts (constaté : une façade masquée à l'analyse précédente
+            // et vue à la nouvelle restait décochée, et recevait le repli).
+            if (!reloadTextures) this.useDetection = {};
             this.api.getBuilding(this.building.id).subscribe({
-              next: (b) => { this.busy.set(false); this.buildingChange.emit(b as Building); },
+              next: (b) => {
+                this.busy.set(false);
+                this.buildingChange.emit(b as Building);
+                if (reloadTextures) this.loadTextures();
+              },
               error: () => { this.busy.set(false); this.error.set('Rechargement impossible.'); },
             });
           }
@@ -221,6 +282,7 @@ export class FacadePanelComponent implements OnChanges, OnDestroy {
     this.api.applyFacades(this.building.id, {
       glazing_model_id: this.glazingModelId, wall_model_id: this.wallModelId,
       fallback_ratio: this.fallbackPct / 100, use_detection: this.useDetection,
+      use_reference: this.useReference,
     }).subscribe({
       next: (res) => {
         const r = res as { building: Building };

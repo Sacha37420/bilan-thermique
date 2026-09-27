@@ -10,6 +10,16 @@ networks:
   bilan-thermique-net:
     driver: bridge
 
+volumes:
+  # Lot AL — cache des façades (photos Panoramax, modèles de détection,
+  # textures composées) PARTAGÉ entre worker (qui compose) et backend (qui
+  # sert les textures) : chacun avait son propre /tmp, et les textures
+  # composées par le worker n'étaient jamais visibles du backend. Local et
+  # non-external à dessein (cache recalculable, même raisonnement que le
+  # scratch d'atelier-3d) : vidé par clean2.sh, les textures se recomposent
+  # (« Recomposer les textures »), les baies restent en base.
+  facade-cache:
+
 services:
 
   backend:
@@ -19,6 +29,8 @@ services:
     env_file: .env
     ports:
       - "8099:8000"
+    volumes:
+      - facade-cache:/tmp/bilan-thermique-facades
     networks:
       - sso-net
       - dev-net
@@ -50,6 +62,8 @@ services:
     # applicatif dans les vues de lancement), même principe qu'atelier-3d/
     # lab-admin pour la même raison (2 vCPU/16 Go partagés par tout le lab).
     command: celery -A config worker --loglevel=info --concurrency=1
+    volumes:
+      - facade-cache:/tmp/bilan-thermique-facades
     depends_on:
       redis:
         condition: service_healthy

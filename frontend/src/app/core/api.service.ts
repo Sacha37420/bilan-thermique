@@ -141,13 +141,18 @@ export class ApiService {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/facades/analyser/`, {});
   }
 
+  /** Lot AL — recompose les textures perdues du cache (redéploiement). */
+  recomposeFacades(buildingId: number): Observable<unknown> {
+    return this.http.post(`${this.base}/api/batiments/${buildingId}/facades/recomposer/`, {});
+  }
+
   getFacadeTexture(buildingId: number, group: string): Observable<Blob> {
     return this.http.get(`${this.base}/api/batiments/${buildingId}/facades/${group}/texture/`, { responseType: 'blob' });
   }
 
   applyFacades(buildingId: number, payload: {
     glazing_model_id: number; wall_model_id?: number | null; fallback_ratio?: number;
-    use_detection?: Record<string, boolean>;
+    use_detection?: Record<string, boolean>; use_reference?: boolean;
   }): Observable<unknown> {
     return this.http.post(`${this.base}/api/batiments/${buildingId}/facades/appliquer/`, payload);
   }

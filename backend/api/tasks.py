@@ -322,14 +322,48 @@ def analyse_facades(self, job_id, building_id):
         def progress(msg, pct):
             job.set_state(progress=pct, message=msg)
 
-        result = facades.analyse(building.pk, base['vertices'], base['triangles'], frame, objects, progress)
+        ground_z = env.georef_ground_z if env is not None and env.georef_ground_z is not None \
+            else building.georef_ground_z
+        result = facades.analyse(building.pk, base['vertices'], base['triangles'], frame, objects, progress,
+                                 ground_z=ground_z, own_footprint=own)
         building.facades = {**result, 'base': base}
         building.save(update_fields=['facades', 'updated_at'])
-        n = sum(1 for f in result['facades'].values() if f['status'] == 'analysee')
+        n = sum(1 for f in result['facades'].values() if f['status'] in ('analysee', 'partielle'))
         n_open = sum(len(f['openings']) for f in result['facades'].values())
         job.result = {'n_facades': len(result['facades']), 'n_analysees': n, 'n_openings': n_open}
         job.save(update_fields=['result'])
         job.set_state(status=Job.DONE, progress=100,
-                      message=f"{n}/{len(result['facades'])} façade(s) vues sur photo, {n_open} baie(s) détectée(s).")
+                      message=f"{n}/{len(result['facades'])} façade(s) vues sur photo, {n_open} baie(s).")
+    except Exception as exc:  # noqa: BLE001
+        job.set_state(status=Job.ERROR, message=str(exc))
+
+
+@shared_task(bind=True)
+def recompose_facades(self, job_id, building_id):
+    """Lot AL — recompose les textures multi-vues perdues du cache (vues et
+    recalages enregistrés ; ni recalage ni détection refaits)."""
+    from . import facades, geodata, observed_env
+    job = Job.objects.get(pk=job_id)
+    job.celery_task_id = self.request.id
+    job.save(update_fields=['celery_task_id'])
+    try:
+        job.set_state(status=Job.RUNNING, progress=1, message="Préparation…")
+        building = Building.objects.get(pk=building_id)
+        env = building.environment
+        data = building.facades or {}
+        base = data.get('base') or building.envelope
+        frame = observed_env.LocalFrame(building.georef_lat, building.georef_lon,
+                                        building.georef_north_offset_deg or 0.0)
+        own = geodata.envelope_footprint_polygon({'vertices': base['vertices'], 'triangles': base['triangles']})
+        objects = list(env.scene_objects) if env is not None else []
+        if own is not None:
+            objects.append(observed_env.make_object(10 ** 9, 'building', 'etudie', 'bâtiment étudié',
+                                                    base['vertices'], base['triangles'], own))
+        ground_z = env.georef_ground_z if env is not None and env.georef_ground_z is not None \
+            else building.georef_ground_z
+        n = facades.recompose_textures(building.pk, base['vertices'], base['triangles'], data.get('facades', {}),
+                                       frame, objects, ground_z=ground_z, own_footprint=own,
+                                       progress_cb=lambda m, p: job.set_state(progress=p, message=m))
+        job.set_state(status=Job.DONE, progress=100, message=f"{n} texture(s) recomposée(s).")
     except Exception as exc:  # noqa: BLE001
         job.set_state(status=Job.ERROR, message=str(exc))

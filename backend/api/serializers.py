@@ -413,6 +413,8 @@ class FacadeApplySerializer(serializers.Serializer):
                                                        required=False, allow_null=True, default=None)
     fallback_ratio = serializers.FloatField(min_value=0.0, max_value=0.6, required=False, default=0.2)
     use_detection = serializers.DictField(child=serializers.BooleanField(), required=False, default=dict)
+    # Lot AL : repli à la proportion de baies des DPE (BDNB) par orientation, si connue.
+    use_reference = serializers.BooleanField(required=False, default=True)
 
 
 class RefineMeshRequestSerializer(serializers.Serializer):

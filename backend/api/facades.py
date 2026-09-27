@@ -112,7 +112,7 @@ def search_panoramas(bbox_wgs84, limit=400):
         lon, lat = f['geometry']['coordinates'][:2]
         assets = f.get('assets') or {}
         out.append({
-            'id': f['id'], 'lat': lat, 'lon': lon,
+            'id': f['id'], 'lat': lat, 'lon': lon, 'sequence': f.get('collection'),
             'heading': float(p['view:azimuth']), 'pitch': float(p.get('pers:pitch') or 0.0),
             'roll': float(p.get('pers:roll') or 0.0),
             'datetime': p.get('datetime'), 'license': p.get('license'),
@@ -276,35 +276,41 @@ def _edge_maps(img):
     return gx / norm, gy / norm, sky.astype(np.float32)
 
 
-def register_camera(pano_img, edges, cam0, heading0, pitch, north_offset_deg,
-                    xy_range=2.0, heading_range=3.0, z_range=0.0, sigma_m=2.0, prior_weight=1.0,
-                    sky_weight=4.0):
-    """Position (x, y, z) et cap de la prise de vue qui alignent au mieux les
-    arêtes du modèle sur les contours de l'image, de MÊME orientation
-    (verticale sur verticale, horizontale sur horizontale), végétation
-    masquée, avec un rappel gaussien vers la position GPS (σ = 3 m, la
-    précision annoncée) : un grand décalage doit être justifié par un net gain
-    d'alignement. Recherche grossière puis fine.
-    Retourne (cam, heading, score, score_initial)."""
+def edge_scorer(pano_img, edges, cam0, heading0, pitch, north_offset_deg, sky_weight=4.0, downsample=2):
+    """Fonction raw(dx, dy, dz, dh, dp=0) : alignement des arêtes du modèle sur les
+    contours de l'image, de MÊME orientation (verticale sur verticale,
+    horizontale sur horizontale), végétation masquée, façade interdite dans le
+    ciel. None si trop peu d'arêtes visibles."""
     edge_pts, vert, inner_pts = edges
     if len(edge_pts) < 30:
-        return list(cam0), heading0, 0.0, 0.0
-    small = pano_img[::2, ::2] if pano_img.shape[1] > 4096 else pano_img
+        return None
+    small = pano_img[::downsample, ::downsample] if downsample > 1 else pano_img
     gx, gy, sky = _edge_maps(small)
     ih, iw = gx.shape
 
-    def raw(dx, dy, dz, dh):
+    def raw(dx, dy, dz, dh, dp=0.0):
         cam = (cam0[0] + dx, cam0[1] + dy, cam0[2] + dz)
-        px, py = project_to_pano(edge_pts, cam, heading0 + dh, pitch, north_offset_deg, iw, ih)
+        px, py = project_to_pano(edge_pts, cam, heading0 + dh, pitch + dp, north_offset_deg, iw, ih)
         c = [py - 0.5, px - 0.5]
         vx = ndimage.map_coordinates(gx, c, order=1, mode='wrap')
         vy = ndimage.map_coordinates(gy, c, order=1, mode='wrap')
         value = float(np.where(vert, vx, vy).mean())
         if len(inner_pts):
-            # Façade projetée dans le ciel : impossible — forte pénalité.
-            qx, qy = project_to_pano(inner_pts, cam, heading0 + dh, pitch, north_offset_deg, iw, ih)
+            qx, qy = project_to_pano(inner_pts, cam, heading0 + dh, pitch + dp, north_offset_deg, iw, ih)
             value -= sky_weight * float(ndimage.map_coordinates(sky, [qy - 0.5, qx - 0.5], order=0, mode='wrap').mean())
         return value
+    return raw
+
+
+def register_camera(pano_img, edges, cam0, heading0, pitch, north_offset_deg,
+                    xy_range=2.0, heading_range=3.0, z_range=0.0, sigma_m=2.0, prior_weight=1.0,
+                    sky_weight=4.0):
+    """Recalage d'UNE photo seule (Lot AK) — remplacé pour l'analyse par le
+    recalage par séquence (facade_texture.register_sequences). Rappel gaussien
+    vers la position GPS. Retourne (cam, heading, score, score_initial)."""
+    raw = edge_scorer(pano_img, edges, cam0, heading0, pitch, north_offset_deg, sky_weight)
+    if raw is None:
+        return list(cam0), heading0, 0.0, 0.0
 
     def score(dx, dy, dz, dh):
         return raw(dx, dy, dz, dh) - prior_weight * (dx * dx + dy * dy) / (2 * sigma_m ** 2)
@@ -393,40 +399,51 @@ def detect_windows(texture, m_per_px, outline=None, facade_height=None):
     return windows, usable
 
 
-# ── Détecteur de baies : OWLv2 (Google, Apache 2.0), ONNX quantifié ────────────
-# Essais sur façades réelles (2026-09-27) : une heuristique de couleur manquait
-# les volets clairs sur mur crème et prenait les trouées d'une haie pour des
-# baies ; SegFormer/ADE20K segmente bien végétation et ciel mais ne voit AUCUNE
-# fenêtre sur une façade redressée. OWLv2, détecteur à vocabulaire ouvert,
-# trouve fenêtres, volets et portes avec des cadres justes (~33 s par façade
-# sur 2 vCPU chargés, en tâche de fond).
-
-OWL_REPO = 'https://huggingface.co/Xenova/owlv2-base-patch16-ensemble/resolve/main'
+# ── Détecteur de baies : OWL-ViT (Google, Apache 2.0), ONNX quantifié ──────────
+# Historique des essais sur façades réelles (Lots AK–AL, 2026-09-27) : règle de
+# couleur (volets clairs manqués, trouées de haie prises pour des baies) ;
+# SegFormer/ADE20K (aucune fenêtre) ; OWLv2 (bon, mais ~30–50 s par passe sur
+# 2 cœurs — une façade large découpée en tuiles coûtait plus de 4 min) ;
+# OWL-ViT v1 patch 32 (~6 s par passe, entrée 768 px en 24 × 24 zones) :
+# moins bon sur une façade entière, meilleur qu'OWLv2 entier sur TUILES
+# d'environ 6 m, où les baies occupent assez de place dans l'image.
+OWL_MODELS = {
+    'v1': {'repo': 'https://huggingface.co/Xenova/owlvit-base-patch32/resolve/main',
+           'dir': os.path.join(CACHE_DIR, 'owlvit32'), 'size': 768},
+    'v2': {'repo': 'https://huggingface.co/Xenova/owlv2-base-patch16-ensemble/resolve/main',
+           'dir': os.path.join(CACHE_DIR, 'owlv2'), 'size': 960},
+}
 OWL_FILES = {'model_quantized.onnx': 'onnx/model_quantized.onnx', 'tokenizer.json': 'tokenizer.json'}
-OWL_DIR = os.path.join(CACHE_DIR, 'owlv2')
 OWL_QUERIES = [('window', 'a window'), ('window', 'a window shutter'), ('door', 'a door')]
 OWL_MEAN = np.array([0.48145466, 0.4578275, 0.40821073])
 OWL_STD = np.array([0.26862954, 0.26130258, 0.27577711])
-OWL_SIZE = 960
-OWL_THRESHOLDS = {'window': 0.15, 'door': 0.20}
-
+OWL_THRESHOLDS = {'v1': {'window': 0.2, 'door': 0.25}, 'v2': {'window': 0.15, 'door': 0.20}}
+OWL_TILE_M = 6.0
+# Complément OWLv2 (façade entière) quand OWL-ViT a trouvé moins de 10 % de
+# vitrage sur une façade assez vue (proportion courante d'un logement : 15 à
+# 25 %) : constaté sur un collectif clair en plein soleil, où OWL-ViT ne
+# propose aucune fenêtre et OWLv2 les trouve. Les deux listes sont réunies.
+OWL_V2_MIN_SEEN_M2 = 8.0
+OWL_V2_BELOW_RATIO = 0.10
 _owl = {}
 
 
-def _owl_session():
+def _owl_session(kind='v1'):
     """Session ONNX et jetons des requêtes, chargés une fois par processus.
-    Le modèle (155 Mo) est téléchargé au premier usage dans le cache local."""
-    if 'sess' in _owl:
-        return _owl['sess'], _owl['ids'], _owl['mask']
+    Chaque modèle (~155 Mo) est téléchargé au premier usage dans le cache local."""
+    if kind in _owl:
+        return _owl[kind]
+    cfg = OWL_MODELS[kind]
+    model_dir, repo = cfg['dir'], cfg['repo']
     import onnxruntime as ort
     from tokenizers import Tokenizer
-    os.makedirs(OWL_DIR, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
     for name, remote in OWL_FILES.items():
-        path = os.path.join(OWL_DIR, name)
+        path = os.path.join(model_dir, name)
         if os.path.exists(path):
             continue
         try:
-            with requests.get(f'{OWL_REPO}/{remote}', stream=True, timeout=120,
+            with requests.get(f'{repo}/{remote}', stream=True, timeout=120,
                               headers={'User-Agent': USER_AGENT}) as resp:
                 resp.raise_for_status()
                 tmp = path + '.part'
@@ -436,8 +453,8 @@ def _owl_session():
                 os.replace(tmp, path)
         except requests.RequestException as exc:
             raise FacadeError(f"Modèle de détection indisponible ({exc}).") from exc
-    sess = ort.InferenceSession(os.path.join(OWL_DIR, 'model_quantized.onnx'), providers=['CPUExecutionProvider'])
-    tok = Tokenizer.from_file(os.path.join(OWL_DIR, 'tokenizer.json'))
+    sess = ort.InferenceSession(os.path.join(model_dir, 'model_quantized.onnx'), providers=['CPUExecutionProvider'])
+    tok = Tokenizer.from_file(os.path.join(model_dir, 'tokenizer.json'))
     L = 16
     ids = np.zeros((len(OWL_QUERIES), L), dtype=np.int64)
     mask = np.zeros_like(ids)
@@ -445,8 +462,8 @@ def _owl_session():
         e = tok.encode(q).ids[:L]
         ids[k, :len(e)] = e
         mask[k, :len(e)] = 1
-    _owl.update(sess=sess, ids=ids, mask=mask)
-    return sess, ids, mask
+    _owl[kind] = (sess, ids, mask)
+    return _owl[kind]
 
 
 def _merge_boxes(boxes, scores, labels, gap_px):
@@ -501,34 +518,34 @@ def _nms(boxes, scores, iou=0.3):
     return keep
 
 
-def detect_openings(texture, m_per_px, outline=None):
-    """Baies d'une texture redressée (ligne 0 = haut) : liste de
-    {'label': 'window'|'door', 'score', 's0', 't0', 's1', 't1'} en mètres
-    (repère de façade). Une fenêtre ou un volet compte comme vitrage ; une
-    porte reste opaque. Filtrage : taille plausible, dans le contour du mur,
-    suppression des doublons (NMS)."""
+def _owl_run(canvas, kind='v1'):
+    """Une passe OWL-ViT (v1) ou OWLv2 (v2) sur une image carrée uint8 → (boîtes px x0,y0,x1,y1,
+    scores, étiquettes) au-dessus des seuils."""
     from PIL import Image
-    sess, ids, mask = _owl_session()
-    h, w = texture.shape[:2]
-    side = max(h, w)
-    canvas = np.full((side, side, 3), 128, dtype=np.uint8)
-    canvas[:h, :w] = texture
-    x = np.asarray(Image.fromarray(canvas).resize((OWL_SIZE, OWL_SIZE), Image.BILINEAR)) / 255.0
+    sess, ids, mask = _owl_session(kind)
+    size = OWL_MODELS[kind]['size']
+    side = canvas.shape[0]
+    x = np.asarray(Image.fromarray(canvas).resize((size, size), Image.BILINEAR)) / 255.0
     x = ((x - OWL_MEAN) / OWL_STD).transpose(2, 0, 1)[None].astype(np.float32)
     names = [o.name for o in sess.get_outputs()]
     res = sess.run(None, {'input_ids': ids, 'attention_mask': mask, 'pixel_values': x})
     prob = 1.0 / (1.0 + np.exp(-res[names.index('logits')][0]))
     boxes = res[names.index('pred_boxes')][0] * side
-    cand_boxes, cand_scores, cand_labels = [], [], []
+    out = []
     for q, (label, _text) in enumerate(OWL_QUERIES):
-        for i in np.nonzero(prob[:, q] > OWL_THRESHOLDS[label])[0]:
+        for i in np.nonzero(prob[:, q] > OWL_THRESHOLDS[kind][label])[0]:
             cx, cy, bw, bh = boxes[i]
-            x0, y0, x1, y1 = max(cx - bw / 2, 0), max(cy - bh / 2, 0), min(cx + bw / 2, w), min(cy + bh / 2, h)
-            if x1 <= x0 or y1 <= y0:
-                continue
-            cand_boxes.append((x0, y0, x1, y1))
-            cand_scores.append(float(prob[i, q]))
-            cand_labels.append(label)
+            out.append(((cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2), float(prob[i, q]), label))
+    return out
+
+
+def _postprocess(cands, h, w, m_per_px, outline):
+    """Détections d'UNE façade (px de sa texture) → baies en mètres (s, t)."""
+    cand_boxes, cand_scores, cand_labels = [], [], []
+    for (x0, y0, x1, y1), sc, label in cands:
+        x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, w), min(y1, h)
+        if x1 > x0 and y1 > y0:
+            cand_boxes.append((x0, y0, x1, y1)); cand_scores.append(sc); cand_labels.append(label)
     out = []
     if not cand_boxes:
         return out
@@ -546,9 +563,70 @@ def detect_openings(texture, m_per_px, outline=None):
             rect = sg.box(s0, t0, s1, t1)
             if rect.intersection(core).area < 0.7 * rect.area:
                 continue
-        out.append({'label': cand_labels[i], 'score': round(cand_scores[i], 3),
+        label = cand_labels[i]
+        # (« porte » en étage → fenêtre : décidé dans facade_texture.fix_door_labels,
+        # qui sait si le bas du cadre est vu ou caché par une clôture.)
+        # Une « porte » de 1,5 m de large ou plus est une baie coulissante
+        # vitrée (constaté sur une maison : la baie du séjour sortait en porte).
+        if label == 'door' and bw >= 1.5:
+            label = 'window'
+        out.append({'label': label, 'score': round(cand_scores[i], 3),
                     's0': round(s0, 2), 't0': round(t0, 2), 's1': round(s1, 2), 't1': round(t1, 2)})
     return out
+
+
+def detect_openings_batch(items):
+    """Baies de plusieurs façades, par tuiles carrées d'environ OWL_TILE_M
+    (chevauchement d'un quart) sur fond gris ; tuile presque entièrement non
+    vue (gris 128 de equalize_seen) sautée. Regrouper plusieurs façades sur
+    une même image a été essayé et abandonné : la même façade donnait 5 baies
+    seule et 0 en compagnie d'autres (score très dépendant du contexte).
+    items : {clé: (texture (h, w, 3) ligne 0 = haut, m_par_px, contour)}.
+    Retourne {clé: [baies]}."""
+    out = {}
+    for key, (tex, scale, outline) in items.items():
+        h, w = tex.shape[:2]
+        side = max(64, int(round(OWL_TILE_M / scale)))
+        stride = max(1, int(side * 0.75))
+        unseen = (tex == 128).all(axis=2)
+        xs = list(range(0, max(w - side, 0) + 1, stride))
+        ys = list(range(0, max(h - side, 0) + 1, stride))
+        if xs[-1] + side < w:
+            xs.append(w - side)
+        if ys[-1] + side < h:
+            ys.append(h - side)
+        cands = []
+        for y0 in ys:
+            for x0 in xs:
+                sub = tex[y0:y0 + side, x0:x0 + side]
+                if (~unseen[y0:y0 + side, x0:x0 + side]).mean() < 0.15:
+                    continue
+                canvas = np.full((side, side, 3), 128, dtype=np.uint8)
+                canvas[:sub.shape[0], :sub.shape[1]] = sub
+                for (bx0, by0, bx1, by1), sc, label in _owl_run(canvas):
+                    cands.append(((bx0 + x0, by0 + y0, bx1 + x0, by1 + y0), sc, label))
+        found = _postprocess(cands, h, w, scale, outline)
+        seen_m2 = float((~unseen).sum()) * scale * scale
+        glazed = sum((o['s1'] - o['s0']) * (o['t1'] - o['t0']) for o in found if o['label'] == 'window')
+        if seen_m2 >= OWL_V2_MIN_SEEN_M2 and glazed < OWL_V2_BELOW_RATIO * seen_m2:
+            full = max(h, w, 480)
+            canvas = np.full((full, full, 3), 128, dtype=np.uint8)
+            canvas[:h, :w] = tex
+            found = _postprocess(cands + _owl_run(canvas, 'v2'), h, w, scale, outline)
+        # Cadre collé au sommet du mur : garde-corps de terrasse ou rive de
+        # toit, pas une fenêtre (constaté sur un collectif à attique).
+        top = h * scale
+        out[key] = [o for o in found if o['t1'] < top - 0.25]
+    return out
+
+
+def detect_openings(texture, m_per_px, outline=None):
+    """Baies d'une texture redressée (ligne 0 = haut) : liste de
+    {'label': 'window'|'door', 'score', 's0', 't0', 's1', 't1'} en mètres
+    (repère de façade). Une fenêtre ou un volet compte comme vitrage ; une
+    porte reste opaque. Filtrage : taille plausible, dans le contour du mur,
+    suppression des doublons (NMS)."""
+    return detect_openings_batch({0: (texture, m_per_px, outline)})[0]
 
 
 # ── Choix de la prise de vue pour chaque façade ────────────────────────────────
@@ -871,10 +949,61 @@ def texture_path(building_id, group, key):
     return os.path.join(CACHE_DIR, 'textures', f'{building_id}_{group}_{key}.jpg')
 
 
-def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=None):
-    """Analyse complète des façades exposées d'un bâtiment. Retourne le dict
-    à ranger dans Building.facades (sans l'enveloppe de base, ajoutée par
-    l'appelant). frame : LocalFrame du bâtiment (repère de l'environnement)."""
+def facade_azimuth(plane, north_offset_deg):
+    """Azimut vrai (0 = nord, sens horaire) de la normale sortante d'une façade."""
+    e, n_, _z = _true_enu(np.asarray(plane['n'], float), north_offset_deg)
+    return math.degrees(math.atan2(e, n_)) % 360.0
+
+
+def glazing_reference(planes, frame, north, footprint):
+    """Proportion de baies déclarée dans les DPE (BDNB) pour ce bâtiment, ou
+    None. Points d'interrogation : un point intérieur de chaque partie de
+    l'emprise, et une grille à 15 m pour une grande emprise (bâtiments réunis)."""
+    from . import bdnb
+    if footprint is None:
+        return None
+    pts = []
+    for part in getattr(footprint, 'geoms', [footprint]):
+        pts.append(part.representative_point())
+        if part.area > 400:
+            x0, y0, x1, y1 = part.bounds
+            for x in np.arange(x0 + 7.5, x1, 15.0):
+                for y in np.arange(y0 + 7.5, y1, 15.0):
+                    q = sg.Point(x, y)
+                    if part.contains(q):
+                        pts.append(q)
+    latlon = [frame.latlon(q.x, q.y) for q in pts[:12]]
+    try:
+        rnb = bdnb.rnb_ids_at([(float(a), float(b)) for a, b in latlon])
+        dpes, fiches = bdnb.dpe_for_rnb(rnb)
+    except bdnb.BdnbError:
+        return None
+    areas = {}
+    for pl in planes.values():
+        c = bdnb.cardinal_of(facade_azimuth(pl, north))
+        areas[c] = areas.get(c, 0.0) + pl['area']
+    info = bdnb.glazing_ratios(dpes, fiches, areas)
+    if info is not None:
+        info['rnb_ids'] = rnb
+    return info
+
+
+def _pano_meta(p):
+    return {kk: p.get(kk) for kk in ('id', 'hd', 'sd', 'lat', 'lon', 'pitch', 'producer', 'license',
+                                     'datetime', 'sequence')}
+
+
+def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=None,
+            ground_z=None, own_footprint=None):
+    """Analyse des façades exposées d'un bâtiment DANS son environnement
+    (Lot AL, voir api.facade_texture) : photos recalées par séquence, texture
+    composée texel par texel sur toutes les vues qui voient réellement la
+    façade (occultation par la scène ET par le nuage LiDAR brut), baies
+    détectées sur la composition et complétées en grille dans les parties
+    non vues, proportion de baies des DPE (BDNB) en référence.
+    Retourne le dict à ranger dans Building.facades (sans l'enveloppe de base)."""
+    from . import facade_texture as FT
+
     def report(msg, pct):
         if progress_cb:
             progress_cb(msg, pct)
@@ -882,128 +1011,218 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
     planes = facade_planes(vertices, triangles)
     if not planes:
         raise FacadeError("Aucune façade exposée à analyser.")
+    north = frame.north_offset_deg
     V = np.asarray(vertices, dtype=float)
-    x0, y0 = V[:, 0].min() - 40, V[:, 1].min() - 40
-    x1, y1 = V[:, 0].max() + 40, V[:, 1].max() + 40
-    lat_a, lon_a = frame.latlon(x0, y0)
-    lat_b, lon_b = frame.latlon(x1, y1)
-    report("Recherche des photos Panoramax…", 3)
+    margin = FT.MAX_VIEW_DIST_M + 5
+    bounds = (V[:, 0].min() - margin, V[:, 1].min() - margin, V[:, 0].max() + margin, V[:, 1].max() + margin)
+    lat_a, lon_a = frame.latlon(bounds[0], bounds[1])
+    lat_b, lon_b = frame.latlon(bounds[2], bounds[3])
+    report("Recherche des photos Panoramax…", 2)
     panos = search_panoramas((min(lat_a, lat_b), min(lon_a, lon_b), max(lat_a, lat_b), max(lon_a, lon_b)))
     for p in panos:
         e, n = frame._fwd.transform(p['lon'], p['lat'])
         x, y = frame.to_local(e, n)
         p['xy'] = (float(x), float(y))
+    # Photos utiles : devant au moins une façade, à portée. Limitées aux 16
+    # plus proches : chacune coûte un téléchargement (~6 Mo), un recalage et
+    # une segmentation — 40 photos prenaient plus de 10 min pour une maison.
+    useful = []
+    for p in panos:
+        best = None
+        for pl in planes.values():
+            mid = np.asarray(pl['origin']) + np.asarray(pl['u']) * pl['width'] / 2
+            d = np.asarray(p['xy']) - mid[:2]
+            dist = float(np.linalg.norm(d))
+            if 2.0 < dist < FT.MAX_VIEW_DIST_M + pl['width'] / 2 and float(d @ np.asarray(pl['n'])[:2]) / dist > 0.1:
+                best = dist if best is None else min(best, dist)
+        if best is not None:
+            useful.append((best, p))
+    useful.sort(key=lambda r: r[0])
+    panos = [p for _d, p in useful[:16]]
+    panos_by_id = {p['id']: p for p in panos}
+
+    report("Référence DPE (BDNB)…", 4)
+    reference = glazing_reference(planes, frame, north, own_footprint)
+
+    report("Nuage LiDAR de l'environnement (haies, murets, arbres)…", 6)
+    occupancy, occ_note = None, None
+    try:
+        occupancy = FT.load_occupancy(frame, ground_z, bounds, own_footprint.buffer(0.8) if own_footprint else None)
+    except Exception as exc:  # noqa: BLE001 — sans LiDAR : scène seule
+        occ_note = f"Occultation LiDAR indisponible ({exc}) : seuls les objets de la scène masquent."
+    mesh_occ = _occluder(env_objects)
     ground_at = _terrain_sampler(env_objects, fallback=float(V[:, 2].min()))
-    north = frame.north_offset_deg
 
     registered = {}
-    occluder = _occluder(env_objects)
-
-    def registration(p):
-        if p['id'] not in registered:
-            img = load_panorama(p, 'hd')
-            edges = model_edge_points(env_objects, p['xy'])
-            # Hauteur d'appareil au-dessus du terrain SOUS la prise de vue — pas
-            # du pied du bâtiment : dans une rue en pente, l'écart d'un mètre
-            # faisait remonter la texture d'un mur jusque dans le toit (constaté).
-            z_cam = ground_at(p['xy'][0], p['xy'][1]) + CAMERA_HEIGHT_M
-            cam, heading, sc, sc0 = register_camera(img, edges, [p['xy'][0], p['xy'][1], z_cam],
-                                                    p['heading'], p['pitch'], north)
-            registered[p['id']] = (cam, heading, sc, sc0)
-        return registered[p['id']]
+    if panos:
+        report(f"Recalage de {len(panos)} photo(s) par séquence…", 10)
+        registered = FT.register_sequences(
+            panos, env_objects, ground_at, north,
+            progress=lambda d, t: report(f"Recalage des photos ({d}/{t})…", 10 + int(30 * d / max(t, 1))))
 
     out = {}
-    groups = sorted(planes)
-    for k, g in enumerate(groups):
-        pl = planes[g]
-        report(f"Façade {k + 1}/{len(groups)} : photo et redressement…", 5 + int(80 * k / len(groups)))
-        base = {'group': g, 'plane': {kk: pl[kk] for kk in ('origin', 'u', 'n', 'width', 'height')},
-                'area': round(pl['area'], 2)}
-        cands = candidate_panoramas(pl, panos, max_count=6)
-        if not cands:
-            out[g] = {**base, 'status': 'sans_photo', 'openings': []}
-            continue
-        best = None
-        for p in cands:
-            try:
-                # Pré-filtre à la position GPS brute, avant tout téléchargement.
-                rough = [p['xy'][0], p['xy'][1], ground_at(p['xy'][0], p['xy'][1]) + CAMERA_HEIGHT_M]
-                if visible_fraction(pl, rough, occluder) < 0.3:
-                    continue
-                cam, heading, sc, sc0 = registration(p)
-                if visible_fraction(pl, cam, occluder) < 0.5:
-                    continue
-                key = f"{p['id'][:8]}"
-                path = texture_path(building_id, g, key)
-                tex, scale = rectify_to_file(pl, p, cam, heading, north, path)
-            except FacadeError:
+    to_detect, originals = {}, {}
+    groups = sorted(planes, key=lambda g: -planes[g]['area'])
+    try:
+        for k, g in enumerate(groups):
+            pl = planes[g]
+            report(f"Façade {k + 1}/{len(groups)} : composition des vues…", 42 + int(33 * k / len(groups)))
+            base = {'group': g, 'plane': {kk: pl[kk] for kk in ('origin', 'u', 'n', 'width', 'height')},
+                    'area': round(pl['area'], 2), 'azimuth': round(facade_azimuth(pl, north), 1)}
+            views = FT.candidate_views(pl, registered, panos_by_id)
+            if not views:
+                out[g] = {**base, 'status': 'sans_photo', 'coverage': 0.0, 'openings': []}
                 continue
-            occ = occlusion_fraction(tex)
-            # Choix de la photo (itéré sur une façade réelle, 2026-09-27) : les
-            # candidates sont déjà classées proche et de face d'abord ; on prend
-            # la PREMIÈRE suffisamment dégagée, sinon la moins masquée. Choisir
-            # sur le score de recalage retenait des vues fausses (recalage parti
-            # à 3 m sur les lames d'un volet), alors que la photo la plus proche,
-            # à peine corrigée, était la bonne.
-            quality = -occ
-            if best is None or quality > best[0]:
-                best = (quality, occ, p, cam, heading, sc, sc0, tex, scale, key)
-            if occ <= 0.55:
-                break
-        if best is None:
-            out[g] = {**base, 'status': 'sans_photo', 'openings': []}
-            continue
-        _q, occ, p, cam, heading, sc, sc0, tex, scale, key = best
-        entry = {
-            **base, 'occlusion': round(occ, 2), 'texture_key': key,
-            'm_per_px': scale, 'tex_size': [int(tex.shape[1]), int(tex.shape[0])],
-            'pano': {kk: p.get(kk) for kk in ('id', 'hd', 'sd', 'lat', 'lon', 'pitch', 'producer',
-                                              'license', 'datetime')},
-            'camera': [round(c, 3) for c in cam], 'heading': round(heading, 2),
-            'registration': {'score_gps': round(sc0, 2), 'score': round(sc, 2)},
-        }
-        if occ > 0.7:
-            entry.update(status='masquee', openings=[])
-        else:
-            report(f"Façade {k + 1}/{len(groups)} : détection des baies…", 5 + int(80 * (k + 0.5) / len(groups)))
-            entry.update(status='analysee', openings=detect_openings(tex, scale, pl['outline']))
-        out[g] = entry
+            tex, seen_cells, scale, coverage, seen_img, used = FT.compose_facade(
+                pl, views, north, mesh_occ=mesh_occ, occupancy=occupancy)
+            seen = FT.encode_seen(seen_cells)
+            if not used or coverage < 0.1:
+                out[g] = {**base, 'status': 'masquee', 'coverage': round(coverage, 3), 'openings': [],
+                          'seen': seen}
+                continue
+            key = 'mv' + used[0][0]['id'][:6]
+            path = texture_path(building_id, g, key)
+            from PIL import Image
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            Image.fromarray(tex).save(path, quality=88)
+            main_pano, main_reg, _n = used[0]
+            out[g] = {
+                **base, 'coverage': round(coverage, 3), 'occlusion': round(1 - coverage, 2),
+                'status': 'analysee' if coverage >= 0.6 else 'partielle',
+                'seen': seen, 'texture_key': key, 'm_per_px': scale,
+                'tex_size': [int(tex.shape[1]), int(tex.shape[0])],
+                'pano': _pano_meta(main_pano), 'camera': [round(c, 3) for c in main_reg['camera']],
+                'heading': round(main_reg['heading'], 2),
+                'registration': {'score_gps': main_reg['score_gps'], 'score': main_reg['score'],
+                                 'common': main_reg['common'], 'n_joint': main_reg['n_joint']},
+                'views': [{'pano': _pano_meta(p), 'camera': [round(c, 3) for c in r['camera']],
+                           'heading': round(r['heading'], 2), 'pitch': round(r.get('pitch', p['pitch']), 2),
+                           'texels': int(n_)} for p, r, n_ in used],
+                'openings': [],
+            }
+            # Détection seulement si assez de façade vue pour contenir une baie.
+            if coverage * pl['area'] >= 3.0 and min(pl['width'], pl['height']) >= 1.0:
+                to_detect[g] = (FT.equalize_seen(tex, seen_img), scale, pl['outline'])
+                originals[g] = tex
+    finally:
+        FT.clear_caches()
+
+    if to_detect:
+        report(f"Détection des baies ({len(to_detect)} façade(s))…", 78)
+        found_all = detect_openings_batch(to_detect)
+        for g, found in found_all.items():
+            seen = out[g]['seen']
+            # Une baie « détectée » dans une zone non vue est un artefact (gris uniforme).
+            found = [o for o in found if FT.seen_fraction(seen, o['s0'], o['t0'], o['s1'], o['t1']) >= 0.5
+                     and FT.vegetation_fraction(originals[g], o, out[g]['m_per_px']) < 0.25]
+            found = FT.fix_door_labels(found, seen)
+            openings, grid = FT.regularize_openings(found, planes[g], seen)
+            out[g].update(openings=openings, grid=grid)
     report("Terminé.", 98)
-    return {'facades': out, 'n_panoramas': len(panos)}
+    result = {'facades': out, 'n_panoramas': len(panos), 'method': 'multivue'}
+    if reference:
+        result['reference'] = reference
+    if occ_note:
+        result['note'] = occ_note
+    return result
+
+
+class TextureMissing(FacadeError):
+    """Texture composée absente du cache (redéploiement) : à recomposer par
+    une tâche de fond (recompose_textures), pas dans une requête."""
 
 
 def regenerate_texture(building_id, entry, north_offset_deg):
-    """Texture d'une façade à partir des paramètres enregistrés (cache perdu,
-    par exemple après un redéploiement)."""
+    """Octets JPEG de la texture d'une façade. Texture d'une seule photo (Lot
+    AK) : refaite à la volée ; texture composée (Lot AL) : TextureMissing."""
     path = texture_path(building_id, entry['group'], entry['texture_key'])
     if not os.path.exists(path):
+        if entry.get('views'):
+            raise TextureMissing("Texture à recomposer (cache effacé par un redéploiement).")
         pano = dict(entry['pano'])
         rectify_to_file(entry['plane'], pano, entry['camera'], entry['heading'], north_offset_deg, path)
     with open(path, 'rb') as fh:
         return fh.read()
 
 
+def recompose_textures(building_id, vertices, triangles, facades, frame, env_objects, ground_z=None,
+                       own_footprint=None, progress_cb=None):
+    """Recompose les textures multi-vues à partir des vues et recalages
+    enregistrés (sans refaire le recalage ni la détection)."""
+    from PIL import Image
+
+    from . import facade_texture as FT
+    planes = facade_planes(vertices, triangles)
+    north = frame.north_offset_deg
+    V = np.asarray(vertices, dtype=float)
+    margin = FT.MAX_VIEW_DIST_M + 5
+    bounds = (V[:, 0].min() - margin, V[:, 1].min() - margin, V[:, 0].max() + margin, V[:, 1].max() + margin)
+    try:
+        occupancy = FT.load_occupancy(frame, ground_z, bounds, own_footprint.buffer(0.8) if own_footprint else None)
+    except Exception:  # noqa: BLE001
+        occupancy = None
+    mesh_occ = _occluder(env_objects)
+    todo = [(g, e) for g, e in facades.items() if e.get('views') and g in planes]
+    try:
+        for k, (g, e) in enumerate(todo):
+            if progress_cb:
+                progress_cb(f"Façade {k + 1}/{len(todo)}…", 5 + int(90 * k / max(len(todo), 1)))
+            views = [(v['pano'], {'camera': v['camera'], 'heading': v['heading'],
+                                  'pitch': v.get('pitch', v['pano'].get('pitch') or 0.0)}) for v in e['views']]
+            # Vues enregistrées déjà recalées sur la façade : pas de second recalage.
+            tex, *_rest = FT.compose_facade(planes[g], views, north, mesh_occ=mesh_occ, occupancy=occupancy,
+                                            refine=False)
+            path = texture_path(building_id, g, e['texture_key'])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            Image.fromarray(tex).save(path, quality=88)
+    finally:
+        FT.clear_caches()
+    return len(todo)
+
+
 def apply_openings(base_vertices, base_triangles, facades, glazing_model_id, fallback_ratio,
-                   use_detection, wall_model_id=None):
+                   use_detection, wall_model_id=None, reference=None):
     """Enveloppe du bâtiment avec ses vrais vitrages, à partir de l'enveloppe
-    de BASE (avant toute insertion : on peut réappliquer autrement). Façade
-    analysée et retenue → baies détectées ; sinon → fenêtres régulières à
-    `fallback_ratio`. Retourne (vertices, triangles, rapport par façade)."""
+    de BASE (avant toute insertion : on peut réappliquer autrement).
+    - Façade vue (analysée ou partiellement vue) et retenue → baies détectées
+      (grille complétée dans les parties non vues) ; façade partiellement vue
+      SANS grille établie → fenêtres de repli ajoutées dans les seules parties
+      non vues.
+    - Sinon → fenêtres régulières à la proportion de repli : celle des DPE
+      (BDNB) pour l'orientation de la façade si `reference` est fourni, sinon
+      `fallback_ratio`.
+    Retourne (vertices, triangles, rapport par façade)."""
+    from . import bdnb
+    from . import facade_texture as FT
     vertices = [list(v) for v in base_vertices]
     triangles = [dict(t) for t in base_triangles]
     planes = facade_planes(vertices, triangles)
+    ref_ratios = (reference or {}).get('ratios') or {}
     report = {}
     for g, pl in planes.items():
         entry = facades.get(g) or {}
+        ratio, ratio_src = fallback_ratio, 'proportion'
+        if ref_ratios and entry.get('azimuth') is not None:
+            c = bdnb.cardinal_of(entry['azimuth'])
+            if c in ref_ratios:
+                ratio, ratio_src = ref_ratios[c], 'DPE'
+        seen_ok = entry.get('status') in ('analysee', 'partielle')
         # Façade vue sur photo : la détection fait foi, MÊME sans baie trouvée — un
         # pignon aveugle vu de face doit rester aveugle (constaté : il recevait
         # des fenêtres de repli quand on n'utilisait la détection que si elle
         # avait trouvé quelque chose).
-        use = use_detection.get(g, entry.get('status') == 'analysee')
-        if use and entry.get('status') == 'analysee':
-            openings, source = entry.get('openings') or [], 'détection'
+        use = use_detection.get(g, seen_ok)
+        if use and seen_ok:
+            openings, source = list(entry.get('openings') or []), 'détection'
+            if entry.get('status') == 'partielle' and not entry.get('grid'):
+                extra = [o for o in synthetic_openings(pl, ratio)
+                         if FT.seen_fraction(entry.get('seen'), o['s0'], o['t0'], o['s1'], o['t1']) < 0.3
+                         and not any(FT._overlap(FT.sg_box(o), FT.sg_box(q)) for q in openings)]
+                if extra:
+                    openings += extra
+                    source = f'détection + {ratio_src} (non vu)'
         else:
-            openings, source = synthetic_openings(pl, fallback_ratio), 'proportion'
+            openings, source = synthetic_openings(pl, ratio), ratio_src
         vertices, triangles, n = insert_openings(vertices, triangles, g, pl, openings, glazing_model_id)
         glazed = sum((o['s1'] - o['s0']) * (o['t1'] - o['t0']) for o in openings if o['label'] == 'window')
         report[g] = {'source': source, 'n_openings': n, 'glazed_ratio': round(glazed / max(pl['area'], 1e-6), 3)}

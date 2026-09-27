@@ -4331,3 +4331,131 @@ class RefineEnvelopeTest(SimpleTestCase):
         kept = {tuple(t['v']) for t in T2}
         self.assertTrue(all(tuple(f) in kept for f in fine))
         self.assertLess(len(T2), 2 * n_fine)
+
+
+class FacadeEnvironmentTextureTest(SimpleTestCase):
+    """Lot AL — façades traitées dans l'ensemble de leur environnement."""
+    databases = []
+
+    def _occupancy(self, exclude=None):
+        from . import facade_texture as ft
+        # Sol plat à z = 0 sur 40 × 40 m ; une haie de 1,8 m (points sur son
+        # dessus seulement, comme vus d'avion) le long de y = -3, de x = 0 à 10.
+        gx, gy = np.meshgrid(np.arange(-20, 20, 0.5), np.arange(-20, 20, 0.5))
+        hx, hy = np.meshgrid(np.arange(0, 10, 0.2), np.arange(-3.3, -2.7, 0.2))
+        x = np.concatenate([gx.ravel(), hx.ravel()])
+        y = np.concatenate([gy.ravel(), hy.ravel()])
+        z = np.concatenate([np.zeros(gx.size), np.full(hx.size, 1.8)])
+        cls = np.concatenate([np.full(gx.size, 2), np.full(hx.size, 5)])
+        return ft.LidarOccupancy(x, y, z, cls, (-20, -20, 20, 20), exclude=exclude)
+
+    def test_low_hedge_seen_from_the_air_blocks_rays_through_its_body(self):
+        occ = self._occupancy()
+        cam = [[5.0, -10.0, 2.2]] * 2
+        pts = [[5.0, 0.0, 0.8],      # pied du mur, derrière la haie
+               [5.0, 0.0, 5.0]]      # étage, au-dessus de la haie
+        blocked = occ.blocked(cam, pts)
+        self.assertTrue(blocked[0])
+        self.assertFalse(blocked[1])
+
+    def test_excluded_polygon_ignored(self):
+        import shapely.geometry as sg
+        occ = self._occupancy(exclude=sg.box(-1, -4, 11, -2))
+        self.assertFalse(occ.blocked([[5.0, -10.0, 2.2]], [[5.0, 0.0, 0.8]])[0])
+
+    def test_grid_completed_only_in_unseen_part(self):
+        from . import facade_texture as ft
+        from . import facades as fc
+        v, t = _box_building(w=12.0, d=8.0, h=9.0)
+        pl = next(p for p in fc.facade_planes(v, t).values() if np.allclose(p['n'], [0, -1, 0]))
+        # Deux étages vus (fenêtres à 3,5 m et 6,3 m, deux travées), le bas
+        # (< 3 m) caché par une haie ; la travée de droite de l'étage du haut
+        # est vue et SANS fenêtre (mur aveugle) — elle doit le rester.
+        win = lambda s0, t0: {'label': 'window', 'score': 0.5, 's0': s0, 't0': t0, 's1': s0 + 1.2, 't1': t0 + 1.4}
+        found = [win(2.0, 3.5), win(8.0, 3.5), win(2.0, 6.3)]
+        rows = []
+        for j in range(18):                       # cellules de 0,5 m, ligne 0 = bas
+            rows.append(('0' if j * 0.5 < 3.0 else '1') * 24)
+        seen = {'cell_m': 0.5, 'rows': rows}
+        openings, grid = ft.regularize_openings(found, pl, seen)
+        added = [o for o in openings if o.get('source') == 'grille']
+        self.assertIsNotNone(grid)
+        self.assertEqual(len(added), 2)                               # rez caché, deux travées
+        self.assertTrue(all(o['t1'] <= 3.0 + 1e-6 for o in added))
+        self.assertFalse(any(o['s0'] > 7 and o['t0'] > 6 for o in openings))   # aveugle vu
+
+    def test_equalize_ignores_unseen(self):
+        from . import facade_texture as ft
+        tex = np.full((10, 10, 3), 200, dtype=np.uint8)
+        tex[:, :5] = 210
+        seen = np.zeros((10, 10), dtype=bool)
+        seen[:, :8] = True
+        eq = ft.equalize_seen(tex, seen)
+        self.assertTrue((eq[:, 8:] == 128).all())
+        self.assertLess(int(eq[0, 7, 0]), int(eq[0, 0, 0]))           # contraste étiré
+
+    def test_door_rules(self):
+        from . import facades as fc
+        m = 0.02
+        h = 500      # 10 m
+        px = lambda s0, t0, s1, t1: (s0 / m, h - t1 / m, s1 / m, h - t0 / m)
+        cands = [(px(1.0, 4.0, 2.0, 6.0), 0.5, 'door'),               # en étage, dessous vu → fenêtre
+                 (px(4.0, 0.0, 6.2, 2.2), 0.5, 'door'),               # 2,2 m de large → baie vitrée
+                 (px(8.0, 0.0, 9.0, 2.2), 0.5, 'door'),               # vraie porte
+                 (px(10.0, 1.3, 11.0, 3.3), 0.5, 'door')]             # bas caché par une clôture
+        from . import facade_texture as ft
+        # Cellules de 0,5 m : x ≥ 10 m et t < 1,5 m cachés (clôture).
+        rows = [r[:20] + ('0000' if j < 3 else '1111') for j, r in enumerate(['1' * 24] * 20)]
+        out = ft.fix_door_labels(fc._postprocess(cands, h, 600, m, None), {'cell_m': 0.5, 'rows': rows})
+        labels = sorted((o['s0'], o['label']) for o in out)
+        self.assertEqual([lab for _s, lab in labels], ['window', 'window', 'door', 'door'])
+
+
+class GlazingReferenceTest(SimpleTestCase):
+    databases = []
+
+    def test_cardinal(self):
+        from . import bdnb
+        self.assertEqual([bdnb.cardinal_of(a) for a in (0, 44, 46, 180, 269, 316)], ['N', 'N', 'E', 'S', 'O', 'N'])
+
+    def test_house_uses_surfaces_per_orientation(self):
+        from . import bdnb
+        dpe = [{'type_batiment_dpe': 'maison', 'surface_vitree_nord': 4.0, 'surface_vitree_sud': 10.0,
+                'surface_vitree_est': None, 'surface_vitree_ouest': 2.0, 'date_etablissement_dpe': '2024-01-01',
+                'pourcentage_surface_baie_vitree_exterieur': 0.15}]
+        info = bdnb.glazing_ratios(dpe, [{'nb_log': 1}], {'N': 40.0, 'S': 40.0, 'E': 20.0, 'O': 20.0})
+        self.assertEqual(info['mode'], 'orientation')
+        self.assertAlmostEqual(info['ratios']['S'], 0.25)
+        self.assertAlmostEqual(info['ratios']['E'], 0.0)
+
+    def test_apartment_uses_global_ratio_only(self):
+        from . import bdnb
+        dpe = [{'type_batiment_dpe': 'appartement', 'surface_vitree_est': 9.0,
+                'pourcentage_surface_baie_vitree_exterieur': 0.23}]
+        info = bdnb.glazing_ratios(dpe, [{'nb_log': 26}], {'E': 100.0, 'O': 100.0})
+        self.assertEqual(info['mode'], 'global')
+        self.assertEqual(set(info['ratios'].values()), {0.23})
+
+    def test_apply_uses_reference_for_unseen_and_fills_partial(self):
+        from . import facades as fc
+        v, t = _box_building(w=12.0, d=8.0, h=6.0)
+        planes = fc.facade_planes(v, t)
+        south = next(g for g, p in planes.items() if np.allclose(p['n'], [0, -1, 0]))
+        facades = {}
+        for g, p in planes.items():
+            facades[g] = {'status': 'sans_photo', 'openings': [], 'azimuth': fc.facade_azimuth(p, 0.0)}
+        # Façade sud en partie vue : moitié haute vue, sans baie ; moitié basse cachée.
+        rows = [('0' if j < 6 else '1') * 24 for j in range(12)]
+        facades[south] = {'status': 'partielle', 'openings': [], 'grid': None, 'azimuth': 180.0,
+                          'seen': {'cell_m': 0.5, 'rows': rows}}
+        ref = {'ratios': {'N': 0.0, 'E': 0.3, 'S': 0.3, 'O': 0.3}}
+        vv, tt, report = fc.apply_openings(v, t, facades, 5, 0.2, {}, reference=ref)
+        north = next(g for g, p in planes.items() if np.allclose(p['n'], [0, 1, 0]))
+        self.assertEqual(report[north]['n_openings'], 0)               # DPE : aucune baie au nord
+        self.assertEqual(report[north]['source'], 'DPE')
+        self.assertGreater(report[south]['n_openings'], 0)             # complété dans la partie cachée
+        self.assertIn('non vu', report[south]['source'])
+        V = np.asarray(vv)
+        for x in tt:
+            if x['group'] == 'vitrage_' + south.split('_')[1]:
+                self.assertLessEqual(V[x['v']][:, 2].max(), 3.0 + 1e-6)
