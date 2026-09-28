@@ -483,7 +483,8 @@ def compose_facade(plane, views, north, mesh_occ=None, occupancy=None, m_per_px=
     colors, weights, valids, plausibility = [], [], [], []
     used = []
     for pano, reg in views:
-        if refine:
+        # Pose photogrammétrique (Lot AM) : exacte, aucun recalage local.
+        if refine and 'R' not in reg:
             try:
                 reg, _gain = refine_view_on_facade(plane, pano, reg, north)
             except F.FacadeError:
@@ -516,7 +517,11 @@ def compose_facade(plane, views, north, mesh_occ=None, occupancy=None, m_per_px=
         ih, iw = img.shape[:2]
         tv = vis[cidx] & inside
         sel = np.nonzero(tv)[0]
-        px, py = F.project_to_pano(Pt[sel], cam, reg['heading'], reg.get('pitch', pano['pitch']), north, iw, ih)
+        if 'R' in reg:
+            from .facade_sfm import project as sfm_project
+            px, py = sfm_project(Pt[sel], cam, reg['R'], iw, ih)
+        else:
+            px, py = F.project_to_pano(Pt[sel], cam, reg['heading'], reg.get('pitch', pano['pitch']), north, iw, ih)
         col = np.zeros((nh * nw, 3), dtype=np.float32)
         coords = [py - 0.5, px - 0.5]
         for c in range(3):

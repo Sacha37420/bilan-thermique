@@ -1038,8 +1038,12 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
         if best is not None:
             useful.append((best, p))
     useful.sort(key=lambda r: r[0])
+    # Photogrammétrie (Lot AM) : un ensemble plus large (36 au plus) pour que
+    # les séquences se relient ; la texture n'emploie ensuite que les 16 plus
+    # utiles.
+    sfm_set = [p for _d, p in useful[:36]]
     panos = [p for _d, p in useful[:16]]
-    panos_by_id = {p['id']: p for p in panos}
+    panos_by_id = {p['id']: p for p in sfm_set}
 
     report("Référence DPE (BDNB)…", 4)
     reference = glazing_reference(planes, frame, north, own_footprint)
@@ -1053,12 +1057,23 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
     mesh_occ = _occluder(env_objects)
     ground_at = _terrain_sampler(env_objects, fallback=float(V[:, 2].min()))
 
-    registered = {}
-    if panos:
-        report(f"Recalage de {len(panos)} photo(s) par séquence…", 10)
-        registered = FT.register_sequences(
-            panos, env_objects, ground_at, north,
-            progress=lambda d, t: report(f"Recalage des photos ({d}/{t})…", 10 + int(30 * d / max(t, 1))))
+    registered, sfm_report = {}, None
+    if sfm_set:
+        from . import facade_sfm as FS
+        report(f"Photogrammétrie de {len(sfm_set)} photo(s)…", 10)
+        poses, sfm_report = FS.solve_poses(
+            sfm_set, os.path.join(FS.SFM_DIR, str(building_id)), ground_at,
+            progress=lambda m, f: report(f"Photogrammétrie : {m.lower()}…", 10 + int(20 * f)))
+        for pid, pose in poses.items():
+            head, pit = FS.pose_angles(pose['R'], north)
+            registered[pid] = {**pose, 'heading': head, 'pitch': pit, 'score': None, 'score_gps': None,
+                               'common': None, 'n_joint': None}
+        # Photos non reconstruites : ancien recalage (GPS + arêtes), signalé.
+        rest = [p for p in panos if p['id'] not in registered]
+        if rest:
+            report(f"Recalage de {len(rest)} photo(s) hors photogrammétrie…", 32)
+            for pid, reg in FT.register_sequences(rest, env_objects, ground_at, north).items():
+                registered[pid] = {**reg, 'source': 'gps'}
 
     out = {}
     to_detect, originals = {}, {}
@@ -1093,10 +1108,13 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
                 'tex_size': [int(tex.shape[1]), int(tex.shape[0])],
                 'pano': _pano_meta(main_pano), 'camera': [round(c, 3) for c in main_reg['camera']],
                 'heading': round(main_reg['heading'], 2),
-                'registration': {'score_gps': main_reg['score_gps'], 'score': main_reg['score'],
+                'registration': {'source': main_reg.get('source', 'gps'),
+                                 'score_gps': main_reg['score_gps'], 'score': main_reg['score'],
                                  'common': main_reg['common'], 'n_joint': main_reg['n_joint']},
                 'views': [{'pano': _pano_meta(p), 'camera': [round(c, 3) for c in r['camera']],
                            'heading': round(r['heading'], 2), 'pitch': round(r.get('pitch', p['pitch']), 2),
+                           'source': r.get('source', 'gps'),
+                           **({'R': [[round(x, 6) for x in row] for row in r['R']]} if 'R' in r else {}),
                            'texels': int(n_)} for p, r, n_ in used],
                 'openings': [],
             }
@@ -1119,7 +1137,9 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
             openings, grid = FT.regularize_openings(found, planes[g], seen)
             out[g].update(openings=openings, grid=grid)
     report("Terminé.", 98)
-    result = {'facades': out, 'n_panoramas': len(panos), 'method': 'multivue'}
+    result = {'facades': out, 'n_panoramas': len(panos), 'method': 'photogrammetrie'}
+    if sfm_report is not None:
+        result['sfm'] = sfm_report
     if reference:
         result['reference'] = reference
     if occ_note:
@@ -1168,7 +1188,8 @@ def recompose_textures(building_id, vertices, triangles, facades, frame, env_obj
             if progress_cb:
                 progress_cb(f"Façade {k + 1}/{len(todo)}…", 5 + int(90 * k / max(len(todo), 1)))
             views = [(v['pano'], {'camera': v['camera'], 'heading': v['heading'],
-                                  'pitch': v.get('pitch', v['pano'].get('pitch') or 0.0)}) for v in e['views']]
+                                  'pitch': v.get('pitch', v['pano'].get('pitch') or 0.0),
+                                  **({'R': v['R']} if 'R' in v else {})}) for v in e['views']]
             # Vues enregistrées déjà recalées sur la façade : pas de second recalage.
             tex, *_rest = FT.compose_facade(planes[g], views, north, mesh_occ=mesh_occ, occupancy=occupancy,
                                             refine=False)

@@ -41,3 +41,4 @@ embreex>=2.17
 # en ONNX quantifié — onnxruntime pour l'inférence, tokenizers pour les requêtes.
 onnxruntime>=1.17
 tokenizers>=0.15
+pycolmap>=4.2

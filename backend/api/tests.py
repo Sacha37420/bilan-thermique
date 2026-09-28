@@ -4459,3 +4459,56 @@ class GlazingReferenceTest(SimpleTestCase):
         for x in tt:
             if x['group'] == 'vitrage_' + south.split('_')[1]:
                 self.assertLessEqual(V[x['v']][:, 2].max(), 3.0 + 1e-6)
+
+
+class SfmAlignmentTest(SimpleTestCase):
+    """Lot AM — calage d'un modèle photogrammétrique dans le repère local."""
+    databases = []
+
+    @staticmethod
+    def _rot(axis, deg):
+        a = math.radians(deg)
+        c, s = math.cos(a), math.sin(a)
+        if axis == 'x':
+            return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
+        if axis == 'y':
+            return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+        return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+
+    def test_recovers_positions_and_orientations_despite_gps_noise(self):
+        from . import facade_sfm as fs
+        rng = np.random.default_rng(1)
+        # Vraies poses : trajet en L, appareil à 2,2 m, cap variable ; caméra
+        # COLMAP : x droite, y bas, z avant → monde ← caméra.
+        true_C, true_R = [], []
+        for k in range(20):
+            x, y = (k * 1.5, 0.0) if k < 12 else (16.5, (k - 11) * 1.5)
+            heading = 90.0 if k < 12 else 0.0
+            Rwc = self._rot('z', -heading) @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], float)
+            true_C.append([x, y, 2.2])
+            true_R.append(Rwc)
+        true_C, true_R = np.array(true_C), np.array(true_R)
+        # Repère arbitraire de la reconstruction : échelle 0,37, rotation quelconque.
+        Q = self._rot('x', 25) @ self._rot('z', 70) @ self._rot('y', -40)
+        sfm_C = 0.37 * (true_C @ Q.T) + np.array([3.0, -8.0, 1.0])
+        sfm_R = np.array([Q @ R for R in true_R])
+        gps = true_C[:, :2] + rng.normal(0, 1.5, (20, 2))
+        gps[5] += [15.0, -9.0]                                        # une position aberrante
+        Cw, Rw, res, stats = fs.align_poses(sfm_C, sfm_R, gps, ground_at=lambda x, y: 0.0)
+        self.assertLess(np.abs(Cw - true_C).max(), 1.2)                # l'erreur GPS se moyenne
+        ang = [math.degrees(math.acos(np.clip((np.trace(a.T @ b) - 1) / 2, -1, 1))) for a, b in zip(Rw, true_R)]
+        self.assertLess(max(ang), 3.0)
+        self.assertGreaterEqual(stats['n_inliers'], 17)
+        self.assertGreater(res[5], 8.0)                                # l'aberrante est écartée
+
+    def test_projection_matches_colmap_convention(self):
+        from . import facade_sfm as fs
+        R = self._rot('z', 0) @ np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], float)  # regarde vers +y (nord)
+        # Point droit devant, à hauteur d'appareil → centre de l'image.
+        px, py = fs.project([[0.0, 10.0, 0.0]], [0.0, 0.0, 0.0], R, 4000, 2000)
+        self.assertAlmostEqual(px[0], 2000.0, places=6)
+        self.assertAlmostEqual(py[0], 1000.0, places=6)
+        # Point à droite (est) → quart droit ; point plus haut → au-dessus du centre.
+        px, py = fs.project([[10.0, 0.0, 0.0], [0.0, 10.0, 10.0]], [0, 0, 0], R, 4000, 2000)
+        self.assertAlmostEqual(px[0], 3000.0, places=6)
+        self.assertLess(py[1], 1000.0)
