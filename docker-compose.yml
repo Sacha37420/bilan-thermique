@@ -75,7 +75,16 @@ services:
     build: ./frontend
     container_name: bilan-thermique-frontend
     restart: unless-stopped
-    env_file: .env
+    # Uniquement les variables que lit nginx-entrypoint.sh pour écrire env.js —
+    # aucune n'est secrète (env.js est servi au navigateur). `env_file: .env`
+    # donnait à ce conteneur nginx tous les secrets de l'app.
+    environment:
+      DOMAIN: ${DOMAIN:-}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-}
+      PORT_BACKEND: ${PORT_BACKEND:-}
+      PORT_FRONTEND: ${PORT_FRONTEND:-}
     ports:
       - "4214:80"
     networks:

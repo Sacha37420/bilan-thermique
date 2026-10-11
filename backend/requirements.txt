@@ -42,3 +42,4 @@ embreex>=2.17
 onnxruntime>=1.17
 tokenizers>=0.15
 pycolmap>=4.2
+gunicorn>=23.0,<24.0
