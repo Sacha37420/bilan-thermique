@@ -185,3 +185,10 @@ TEMPLATES = [
         },
     },
 ]
+
+# ── Façades : photogrammétrie des photos de rue (Lot AM) ──────────────────────
+# Désactivée par défaut : mesurée le 2026-10-12 à ~9 min et 3,4 Go de mémoire
+# pour 36 photos sur cette machine (2 vCPU / 16 Go partagés par tout le lab).
+# L'analyse retombe alors sur le recalage par séquence du Lot AL. Mettre
+# FACADE_SFM_ENABLED=True dans le .env pour la réactiver.
+FACADE_SFM_ENABLED = config('FACADE_SFM_ENABLED', default=False, cast=bool)

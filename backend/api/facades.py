@@ -1058,7 +1058,17 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
     ground_at = _terrain_sampler(env_objects, fallback=float(V[:, 2].min()))
 
     registered, sfm_report = {}, None
-    if sfm_set:
+    from django.conf import settings as _settings
+    use_sfm = bool(getattr(_settings, 'FACADE_SFM_ENABLED', False))
+    if not use_sfm:
+        # Photogrammétrie désactivée (réglage FACADE_SFM_ENABLED) : recalage
+        # par séquence du Lot AL sur les 16 photos utiles, comme avant le Lot AM.
+        if panos:
+            report(f"Recalage de {len(panos)} photo(s) par séquence…", 10)
+            registered = FT.register_sequences(
+                panos, env_objects, ground_at, north,
+                progress=lambda d, t: report(f"Recalage des photos ({d}/{t})…", 10 + int(30 * d / max(t, 1))))
+    elif sfm_set:
         from . import facade_sfm as FS
         report(f"Photogrammétrie de {len(sfm_set)} photo(s)…", 10)
         poses, sfm_report = FS.solve_poses(
@@ -1137,7 +1147,7 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
             openings, grid = FT.regularize_openings(found, planes[g], seen)
             out[g].update(openings=openings, grid=grid)
     report("Terminé.", 98)
-    result = {'facades': out, 'n_panoramas': len(panos), 'method': 'photogrammetrie'}
+    result = {'facades': out, 'n_panoramas': len(panos), 'method': 'photogrammetrie' if use_sfm else 'multivue'}
     if sfm_report is not None:
         result['sfm'] = sfm_report
     if reference:
