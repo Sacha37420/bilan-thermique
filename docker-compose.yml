@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "8099:8000"
+      - "${LAB_BIND_ADDR:-127.0.0.1}:8099:8000"
     volumes:
       - facade-cache:/tmp/bilan-thermique-facades
     networks:
@@ -86,7 +86,7 @@ services:
       PORT_BACKEND: ${PORT_BACKEND:-}
       PORT_FRONTEND: ${PORT_FRONTEND:-}
     ports:
-      - "4214:80"
+      - "${LAB_BIND_ADDR:-127.0.0.1}:4214:80"
     networks:
       - sso-net
     labels:

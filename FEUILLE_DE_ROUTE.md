@@ -65,16 +65,22 @@ Théorie est une documentation physique.
 - [ ] Page vérifiée en navigateur réel, clair et sombre ; lien présent dans la nav
 **Vérifié le :**
 
-## Lot 5 — Gabarit front et chemin à portes   ·   statut : à faire
+## Lot 5 — Gabarit front et chemin à portes   ·   statut : en cours
 **Objectif :** même comportement que le gabarit corrigé (T3), déploiement par le moteur (T1).
 **Tâches :**
-- [ ] Polices en chemin relatif ; `tokenBases()` ; PKCE. Le `redirectUri` est déjà sur la page courante.
+- [x] Polices en chemin relatif (`styles.scss`) ; `tokenBases()` (`core/env.ts` : la seule API de l'app ; `core/token-scope.ts`, copie de lab-admin) ; `pkceMethod: 'S256'` (front — `--pkce` sur le client reste à poser par l'architecte après déploiement) ; `redirectUri` par `core/redirect-uri.ts` (copie de lab-admin : la page courante seulement sous l'origine et le préfixe de l'app, sinon `appUrl`)
+- [x] Ports publiés liés à `${LAB_BIND_ADDR:-127.0.0.1}` (chantier « failles », I1)
 - [ ] Renommer le service `worker` en `bilan-thermique-worker`
 - [ ] Documenter l'exception « couleurs du rendu three.js » (`calcul-3d.component.ts:91-93`, `mesh-viewer.component.ts:25`)
 - [ ] Découper `backend/api/tests.py` (4 514 lignes) par domaine
 **Tests à passer avant de clore le lot :**
 - [ ] `validate-app.sh bilan-thermique --quality-only` vert ; cloisonnement `ok` par le moteur ; même nombre de tests après le découpage
-**Vérifié le :**
+**Vérifié le :** 2026-11-01 — non déployé. Chantier « failles » (secteur E) : image candidate
+`bilan-thermique-frontend:candidat` construite depuis une copie propre du frontend (`npm install` +
+`ng build` OK ; le bundle porte `pkceMethod:"S256"`, les WOFF2 sont référencés en `./media/…`) ;
+`docker compose config` rend `host_ip: 127.0.0.1` pour les deux ports publiés (backend, frontend ;
+`worker` et `redis` n'en publient pas). Backend non modifié. Restent le renommage du `worker`, la
+documentation des couleurs three.js et le découpage des tests (hors chantier).
 
 ## Lot 6 — Façades par SfM à la demande (Lot AM)   ·   statut : à faire
 **Objectif :** Ⓟ facultatif. Rendre le Lot AM utilisable sans option globale.

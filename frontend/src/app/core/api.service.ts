@@ -1,18 +1,14 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-
-interface EnvWindow {
-  __env?: { apiUrl?: string };
-}
+import { apiUrl } from './env';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private http = inject(HttpClient);
 
   private get base(): string {
-    return (window as unknown as EnvWindow).__env?.apiUrl
-      ?? 'http://localhost:8099';
+    return apiUrl();
   }
 
   getMe(): Observable<unknown> {
