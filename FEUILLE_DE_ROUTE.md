@@ -81,6 +81,11 @@ Théorie est une documentation physique.
 `docker compose config` rend `host_ip: 127.0.0.1` pour les deux ports publiés (backend, frontend ;
 `worker` et `redis` n'en publient pas). Backend non modifié. Restent le renommage du `worker`, la
 documentation des couleurs three.js et le découpage des tests (hors chantier).
+**Relecture du 2026-11-08 (nuit) :** statut « en cours » juste (seul lot en cours). Déjà acquis pour la
+case de test : `validate-app.sh --quality-only` code 0 (copie de ce dossier, outil `valq.sh`) et
+cloisonnement `ok` par le moteur le 2026-11-01 (`<LAB_STATE_DIR>/tests/bilan-thermique.json`) ; le
+`--pkce` du client a été posé au chantier « failles ». Restent les trois tâches non cochées :
+`docker-compose.yml:55` nomme toujours le service `worker`, `backend/api/tests.py` fait toujours 4 514 lignes.
 
 ## Lot 6 — Façades par SfM à la demande (Lot AM)   ·   statut : à faire
 **Objectif :** Ⓟ facultatif. Rendre le Lot AM utilisable sans option globale.
