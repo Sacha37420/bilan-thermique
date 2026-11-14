@@ -183,7 +183,8 @@ def key_influence(building, eff, weather):
     from .engines import n1
     from . import shading_service
     base = {k: f.value for k, f in eff.items()}
-    geom = (building.pipeline or {}).get('geometry')
+    from . import geometry_service
+    geom = geometry_service.effective_summary(building)
     variants, labels = [base], []
     for k in uncertainty.UNCERTAIN_KEYS:
         f = eff.get(k)

@@ -512,3 +512,26 @@ class ShadingDevice(models.Model):
     class Meta:
         db_table = 'shading_devices'
         ordering = ['building', 'orientation', 'created_at']
+
+
+class GeometryEdit(models.Model):
+    """Géométrie corrigée d'un bâtiment (refonte, Lot 15 — api.geometry_service) : une surcharge de la
+    géométrie automatique (BD TOPO), qui reste en mémoire ; la retirer revient à l'automatique."""
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='geometry_edits')
+    scenario = models.ForeignKey('Scenario', null=True, blank=True, on_delete=models.CASCADE, related_name='geometry_edits')
+    footprint_xy = models.JSONField(default=list)
+    eave_height_m = models.FloatField()
+    levels = models.PositiveIntegerField()
+    roof_type = models.CharField(max_length=10, default='terrasse')
+    roof_pitch_deg = models.FloatField(default=0.0)
+    summary = models.JSONField(default=dict, blank=True)
+    envelope_regenerated = models.BooleanField(default=False)
+    author_sub = models.CharField(max_length=64, blank=True, default='')
+    author_name = models.CharField(max_length=150, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    retired_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'geometry_edits'
+        ordering = ['-created_at']

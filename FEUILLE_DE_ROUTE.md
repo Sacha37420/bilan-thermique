@@ -306,6 +306,29 @@ maximal 0,067 ; degrés-heures > 26 °C sur 45 jours d'été réduits de **69,6 
 « périmé », effet 59 → 0 degrés-heures ; rejeu de tous les scénarios des Lots 3 à 14 avec les onglets ;
 clair et sombre sans erreur console.
 
+## Lot 15 — Géométrie : emprise, hauteurs, toiture, baies (B3)   ·   statut : livré
+**Objectif :** corriger la géométrie automatique sans la perdre ; l'enveloppe régénérée est validée
+avant tout calcul (`refonte.md` § B3).
+**Tâches :**
+- [x] La chaîne garde l'emprise (repère local) et jusqu'à 40 voisins (`Building.pipeline`)
+- [x] `GeometryEdit` (surcharge : emprise, hauteur à l'égout, niveaux, toiture, pente ; résumé recalculé)
+  et `api/geometry_service.py` : validation (polygone simple, 3 à 60 sommets, ≥ 5 m², hauteurs, pente),
+  mitoyenneté et horizon recalculés avec les voisins, faits déclarés, enveloppe N2 régénérée — toit
+  plat, deux pans (pignons) ou quatre pans sur le rectangle orienté minimal — et **vérifiée** (fermée,
+  normales sortantes, aucun triangle dégénéré) ; jamais d'écrasement d'une enveloppe aux parois
+  assignées à la main sans le demander ; « revenir à l'automatique » ; écart affiché
+- [x] Clés `toiture.type`, `toiture.pente_deg` ; surface de toiture inclinée dans N0/N1 ; N0/N1 lisent la
+  géométrie effective (édition, sinon automatique)
+- [x] `GET|POST|DELETE /api/batiments/<id>/geometrie/` ; onglet « Géométrie » : éditeur SVG (sommets
+  déplaçables, ajout, suppression, déplacement au clavier), hauteurs, toiture, taux de vitrage par façade
+**Tests à passer avant de clore le lot :**
+- [x] Édition → enveloppe valide → calcul (`GeometryEditTest.test_edit_regenerates_valid_envelope_then_computes`)
+- [x] Toits plat, deux pans, quatre pans fermés ; repli terrasse ; validations (`EnvelopeTest`)
+**Vérifié le :** 2026-11-14 — 386 tests OK. Navigateur réel (banc) : glisser un sommet (80 → 123 m²), ajouter
+puis supprimer un sommet, hauteur 9 m, 3 niveaux, deux pans → « enveloppe régénérée et vérifiée », écart
+« hauteur 6 → 9 m » affiché, calcul « à jour » ; 390 px sans défilement horizontal ; clair et sombre sans
+erreur console (une erreur `NaN` de la vue SVG avant chargement, trouvée par ce contrôle, est corrigée).
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

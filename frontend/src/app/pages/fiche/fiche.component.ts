@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { GeometrieComponent } from '../../components/geometrie/geometrie.component';
 import { ProtectionsComponent } from '../../components/protections/protections.component';
 import { MeteoCarteComponent } from '../../components/meteo-carte/meteo-carte.component';
 import { QuestionnaireComponent } from '../../components/questionnaire/questionnaire.component';
@@ -22,7 +23,7 @@ interface BuildingInfo {
 @Component({
   selector: 'app-fiche',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent, ProtectionsComponent],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent, ProtectionsComponent, GeometrieComponent],
   templateUrl: './fiche.component.html',
   styleUrl: './fiche.component.scss',
 })
@@ -40,7 +41,7 @@ export class FicheComponent implements OnInit {
   saving = signal(false);
   ficheVersion = signal(0);
   tab = signal('synthese');
-  tabs: [string, string][] = [['synthese', 'Synthèse'], ['meteo', 'Météo'], ['protections', 'Protections solaires'],
+  tabs: [string, string][] = [['synthese', 'Synthèse'], ['meteo', 'Météo'], ['geometrie', 'Géométrie'], ['protections', 'Protections solaires'],
     ['donnees', 'Données et provenance']];
 
   setTab(t: string): void {

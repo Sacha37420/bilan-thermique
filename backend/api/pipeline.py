@@ -398,6 +398,13 @@ def initialize(building, progress=None):
             height = h_bdtopo if not approx else (bdnb_h or h_bdtopo)
             g = geometry_from_footprints(poly, neighbours, height)
             report['geometry'] = g
+            # Lot 15 : emprise et voisins gardés (repère local, m) pour recalculer après une édition.
+            report['footprint_xy'] = [[round(x, 2), round(y, 2)] for x, y in
+                                      list(shapely.geometry.polygon.orient(poly if poly.geom_type == 'Polygon' else
+                                           max(poly.geoms, key=lambda q: q.area), sign=1.0).simplify(0.2).exterior.coords)[:-1]]
+            report['neighbours'] = [{'xy': [[round(x, 2), round(y, 2)] for x, y in list(q.simplify(0.3).exterior.coords)[:-1]],
+                                     'h': round(h, 1)} for q, h in sorted(neighbours, key=lambda t: t[0].distance(poly))[:40]
+                                    if q.geom_type == 'Polygon']
             report['horizon_deg'] = g['horizon_deg']
             geo_rows += [('identite.emprise_m2', g['emprise_m2'], 'infere', 0.65, 'BD TOPO (IGN)'),
                          ('identite.hauteur_m', round(height, 1), 'infere', 0.4 if approx else 0.65, 'BD TOPO (IGN)'),

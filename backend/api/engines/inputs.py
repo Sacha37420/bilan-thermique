@@ -111,9 +111,12 @@ def from_fiche(values, geometry=None):
     floor_type = _v(values, 'plancher.type', 'terre_plein')
     floor_area = 0.0 if floor_type == 'local_chauffe' else emprise
     t_cool = values.get('usage.consigne_froid_c')
+    roof_area = emprise
+    if _v(values, 'toiture.type', 'terrasse') in ('2pans', '4pans'):
+        roof_area = emprise / max(math.cos(math.radians(float(_v(values, 'toiture.pente_deg', 35.0)))), 0.3)
     return Params(
         a_floor=a_floor, volume=a_floor * CEILING_H, walls=walls,
-        roof_area=emprise, u_roof=float(_v(values, 'toiture.u', 1.0)),
+        roof_area=roof_area, u_roof=float(_v(values, 'toiture.u', 1.0)),
         floor_area=floor_area, u_floor=float(_v(values, 'plancher.u', 1.0)),
         g_window=float(_v(values, 'baies.g', 0.6)),
         absorptance=float(_v(values, 'enveloppe.couleur_absorptance', 0.6)),

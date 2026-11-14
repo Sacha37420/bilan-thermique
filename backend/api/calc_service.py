@@ -65,17 +65,18 @@ def resolve_weather(building, spec=None):
 
 def params_for(building, scenario=None, values=None):
     vals = values if values is not None else facts.effective_values(building, scenario)
-    p = engine_inputs.from_fiche(vals, (building.pipeline or {}).get('geometry'))
+    from . import geometry_service
+    p = engine_inputs.from_fiche(vals, geometry_service.effective_summary(building, scenario))
     from . import shading_service
     shading_service.apply(p, building, scenario)
     return p, vals
 
 
 def inputs_hash_for(building, level, scenario, weather_hash, values=None):
-    from . import shading_service
+    from . import geometry_service, shading_service
     vals = values if values is not None else facts.effective_values(building, scenario)
     return stable_hash(level, ENGINE_VERSION[level], stable_hash(sorted(vals.items())), weather_hash,
-                       shading_service.signature(building, scenario), (building.pipeline or {}).get('geometry'))
+                       shading_service.signature(building, scenario), geometry_service.effective_summary(building, scenario))
 
 
 def is_up_to_date(run):
@@ -155,7 +156,8 @@ def run_n1_with_range(building, scenario, eff, weather, nominal_params):
     from . import uncertainty
     from .engines import inputs as engine_inputs
     seed = int(stable_hash(sorted((k, f.value) for k, f in eff.items()))[:8], 16)
-    geom = (building.pipeline or {}).get('geometry')
+    from . import geometry_service
+    geom = geometry_service.effective_summary(building, scenario)
     samples = uncertainty.sample_values(eff, seed=seed)
     params = [nominal_params]
     from . import shading_service
