@@ -60,7 +60,8 @@
     @if (initJob(); as j) { <p class="rf-hint" role="status">{{ j.message }} @if (j.status === 'RUNNING') { ({{ j.progress }} %) }</p> }
   </section>
 
-  @if (fiche()) {
+  @if (fiche() && buildingId !== null) {
+    <app-resultat-carte [buildingId]="buildingId" [refresh]="ficheVersion()" />
     @for (bl of blocks(); track bl.id) {
       <section class="rf-card" [attr.aria-labelledby]="'bl-' + bl.id">
         <h2 [id]="'bl-' + bl.id">{{ bl.label }}</h2>

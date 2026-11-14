@@ -285,6 +285,8 @@ class CalcRun(models.Model):
     LEVEL_CHOICES = [(N0, 'N0 — statique mensuel'), (N1, 'N1 — horaire réduit'), (N2, 'N2 — FEM 3D')]
 
     building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='calc_runs')
+    # Variante (Lot 18) ; vide = état actuel (base).
+    scenario = models.ForeignKey('Scenario', null=True, blank=True, on_delete=models.CASCADE, related_name='calc_runs')
     level = models.CharField(max_length=2, choices=LEVEL_CHOICES)
     status = models.CharField(max_length=10, choices=Job.STATUS_CHOICES, default=Job.PENDING)
     job = models.ForeignKey(Job, null=True, blank=True, on_delete=models.SET_NULL, related_name='calc_runs')
@@ -306,8 +308,9 @@ class CalcRun(models.Model):
         constraints = [
             # Verrou du § 8 : au plus un calcul actif par (bâtiment, variante, niveau).
             models.UniqueConstraint(
-                fields=['building', 'level'],
+                fields=['building', 'scenario', 'level'],
                 condition=models.Q(status__in=['PENDING', 'RUNNING']),
+                nulls_distinct=False,
                 name='calc_run_one_active',
             ),
         ]

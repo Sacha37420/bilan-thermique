@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { ResultatCarteComponent } from '../../components/resultat-carte/resultat-carte.component';
 import { Catalogue, CatalogueKey, Fact, Fiche, METHOD_LABELS, Method } from '../../core/refonte.types';
 
 interface BuildingSummary { id: number; name: string; }
@@ -18,7 +19,7 @@ interface BuildingInfo {
 @Component({
   selector: 'app-fiche',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent],
   templateUrl: './fiche.component.html',
   styleUrl: './fiche.component.scss',
 })
@@ -34,6 +35,7 @@ export class FicheComponent implements OnInit {
   fiche = signal<Fiche | null>(null);
   error = signal('');
   saving = signal(false);
+  ficheVersion = signal(0);
   methodLabels = METHOD_LABELS;
 
   editing = signal<string | null>(null);
@@ -155,14 +157,14 @@ export class FicheComponent implements OnInit {
     if (value === '') value = null;
     this.saving.set(true);
     this.rf.declare(this.buildingId, { key: k.key, value, method: this.editMethod, source: this.editSource || 'saisie' }).subscribe({
-      next: f => { this.fiche.set(f); this.editing.set(null); this.saving.set(false); },
+      next: f => { this.fiche.set(f); this.editing.set(null); this.saving.set(false); this.ficheVersion.update(v => v + 1); },
       error: e => { this.error.set(e?.error?.detail ?? 'Valeur refusée.'); this.saving.set(false); },
     });
   }
 
   backToAuto(f: Fact): void {
     this.rf.retire(f.id).subscribe({
-      next: fi => this.fiche.set(fi),
+      next: fi => { this.fiche.set(fi); this.ficheVersion.update(v => v + 1); },
       error: e => this.error.set(e?.error?.detail ?? 'Impossible de retirer cette valeur.'),
     });
   }

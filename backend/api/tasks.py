@@ -400,5 +400,23 @@ def init_building(self, job_id, building_id):
 
 
 def after_init(building, job):
-    """Suite de la chaîne (A7→A9 : météo, calcul N1) — branchée au Lot 10."""
+    """Suite de la chaîne (A7→A9) : météo de l'année type du site, calculs N0 puis N1."""
+    from . import calc_service
+    if building.georef_lat is None:
+        return None
+    try:
+        job.set_state(progress=96, message="Météo et calculs N0 / N1…")
+        for lvl in ('N0', 'N1'):
+            calc_service.run_level(building, lvl, owner_sub=job.owner_sub, job=None)
+    except calc_service.CalcError as exc:
+        pipe = dict(building.pipeline or {})
+        pipe.setdefault('steps', {})['A8'] = {'ok': False, 'error': str(exc)[:300]}
+        building.pipeline = pipe
+        building.pipeline_status = 'incomplet'
+        building.save(update_fields=['pipeline', 'pipeline_status'])
+        return None
+    pipe = dict(building.pipeline or {})
+    pipe.setdefault('steps', {})['A8'] = {'ok': True}
+    building.pipeline = pipe
+    building.save(update_fields=['pipeline'])
     return None

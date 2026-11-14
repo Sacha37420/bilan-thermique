@@ -190,6 +190,28 @@ base jetable) : `initialiser_adresses` sur 10 adresses de Tours, Orléans et Blo
 Navigateur réel (banc sans Internet) : initialisation → « incomplet », étapes et messages fixes affichés,
 valeurs d'archétype posées, en clair et en sombre, sans erreur console.
 
+## Lot 10 — Moteurs N0 (mensuel) et N1 (horaire 5R1C), comparaison à N2   ·   statut : livré
+**Objectif :** un résultat en secondes depuis la fiche, comparable au N2 (`refonte.md` § 6, D5, D12).
+**Tâches :**
+- [x] `api/engines/inputs.py` : traducteur fiche → paramètres (murs par orientation, mitoyenneté, baies,
+  ventilation effective, inertie, plancher couplé au sol, horizon) et traducteur maillage N2 → mêmes paramètres
+- [x] `api/engines/n1.py` : 5R1C ISO 13790 annexe C, Crank-Nicolson, chauffage et froid, température
+  opérative, bilan par poste, mois ; **vectorisé** sur S jeux de paramètres (prêt pour Monte-Carlo)
+- [x] `api/engines/n0.py` : méthode mensuelle (facteur d'utilisation des apports)
+- [x] `api/calc_service.py` : météo de l'année type du site (PVGIS, repli Open-Meteo, en cache), `CalcRun`
+  avec indicateurs et **faits utilisés** (traçabilité), empreinte des entrées : pas de recalcul identique,
+  « à jour / périmé », et le calcul correspondant à la fiche actuelle est repris s'il existe
+- [x] `POST /api/batiments/<id>/calculer/`, `GET /api/batiments/<id>/resultat/` ; la chaîne automatique
+  enchaîne N0 puis N1 (étape A8) ; carte « Résultat » de la fiche ; section 13 bis de la page Théorie
+**Tests à passer avant de clore le lot :**
+- [x] Écart N1/N2 sous le seuil (20 %, D12) sur les 3 cas de recette (`N1VersusN2Test`)
+- [x] Régime permanent conforme à l'oracle du 5R1C ; effets dans le bon sens (U, mitoyenneté, consigne, horizon)
+**Vérifié le :** 2026-11-14 — 313 tests OK. Écarts mesurés sur année synthétique : N1/N2 −3,4 % (boîte),
++6,0 % (maison vitrée au sud), −15,3 % (petit collectif) ; N0/N2 +5 %, +33 %, −1 %. Durées : N2 ≈ 2,2 s
+(12 à 20 triangles), N1 0,5 à 0,9 s, N0 < 0,1 s. Navigateur réel (banc) : Calculer → « à jour », indicateurs,
+mois, bilan ; corriger « U des murs » → « périmé » ; recalcul 173 → 91 kWh/m² ; revenir à l'automatique →
+de nouveau « à jour » sans recalcul ; clair et sombre sans erreur console.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

@@ -688,3 +688,4 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 5 | livré 2026-11-14 | `Lot 5` | Service `bilan-thermique-worker`, tests découpés (268 = 268), `lab-module.json`, `README.md`, exception three.js documentée, `npm ci`. |
 | 8 | livré 2026-11-14 | `Lot 8` | `BuildingFact` + catalogue de clés, fiche effective, surcharges réversibles, scores de confiance/complétude, page Fiche. 268 → 282 tests. |
 | 9 | livré 2026-11-14 | `Lot 9` | Chaîne A1→A6 (BAN, RNB, BDNB/DPE, BD TOPO, archétypes), cache + quota, mitoyenneté et horizon, carte d'initialisation. **10/10 adresses réelles** en ~2 s. 282 → 301 tests. |
+| 10 | livré 2026-11-14 | `Lot 10` | N1 5R1C vectorisé + N0 mensuel, traçabilité des faits, à jour/périmé ; écart N1/N2 −3 / +6 / −15 %. 301 → 313 tests. |

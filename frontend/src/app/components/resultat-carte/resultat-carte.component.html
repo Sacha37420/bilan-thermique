@@ -1,0 +1,44 @@
+<section class="rf-card" aria-labelledby="res-title">
+  <div class="rf-card-head">
+    <h2 id="res-title">Résultat</h2>
+    @if (latest()?.N1; as r) {
+      @if (r.up_to_date) { <span class="rf-badge m-mesure">à jour</span> }
+      @else { <span class="rf-badge m-infere">périmé — la fiche a changé</span> }
+    }
+    <button type="button" class="rf-btn primary" (click)="compute()" [disabled]="busy()">
+      {{ busy() ? 'Calcul…' : (latest()?.N1 ? 'Recalculer (N0, N1)' : 'Calculer (N0, N1)') }}</button>
+  </div>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  @if (latest()?.N1; as r) {
+    <div class="rf-kpis">
+      <div class="rf-kpi"><small>Besoin de chauffage</small><strong>{{ num(r, 'heating_kwh_m2') | number: '1.0-0' }}</strong><em>kWh/m²·an (N1)</em></div>
+      <div class="rf-kpi"><small>Besoin total</small><strong>{{ num(r, 'heating_kwh') | number: '1.0-0' }}</strong><em>kWh/an</em></div>
+      <div class="rf-kpi"><small>Puissance maximale</small><strong>{{ num(r, 'heating_kw_max') | number: '1.1-1' }}</strong><em>kW</em></div>
+      <div class="rf-kpi"><small>Heures &gt; 28 °C</small><strong>{{ num(r, 'hours_over_28') | number: '1.0-0' }}</strong><em>température opérative</em></div>
+      <div class="rf-kpi"><small>Confiance de la fiche</small><strong>{{ (num(r, 'confidence') ?? 0) * 100 | number: '1.0-0' }} %</strong><em>complétude {{ (num(r, 'completeness') ?? 0) * 100 | number: '1.0-0' }} %</em></div>
+    </div>
+    <div class="cols">
+      <figure class="months" aria-label="Besoin de chauffage par mois (kWh)">
+        <figcaption>Besoin par mois (kWh)</figcaption>
+        <div class="bars">
+          @for (b of bars(r); track $index) {
+            <div class="bar" [title]="b.m + ' : ' + (b.v | number: '1.0-0') + ' kWh'"><i [style.height.%]="b.h"></i><span>{{ b.m }}</span></div>
+          }
+        </div>
+      </figure>
+      <div class="bal">
+        <h3>Bilan annuel</h3>
+        <table class="rf-table">
+          @for (x of balance(r); track x.k) { <tr><td>{{ x.label }}</td><td class="num">{{ x.v | number: '1.0-0' }} kWh</td></tr> }
+        </table>
+      </div>
+    </div>
+    <p class="rf-hint">
+      N1 (horaire 5R1C) · météo : {{ r.weather.source }} ({{ r.weather.n_hours }} h) · calculé le {{ r.created_at | date: 'dd/MM/yyyy HH:mm' }}
+      @if (latest()?.N0; as n0) { · contrôle N0 : {{ num(n0, 'heating_kwh') | number: '1.0-0' }} kWh @if (gap() !== null) { ({{ gap()! > 0 ? '+' : '' }}{{ gap() }} %) } }
+      @if (r.weather.warning) { · {{ r.weather.warning }} }
+    </p>
+  } @else if (!busy()) {
+    <p class="rf-hint">Aucun calcul pour l'instant. N0 et N1 prennent moins de deux secondes.</p>
+  }
+</section>

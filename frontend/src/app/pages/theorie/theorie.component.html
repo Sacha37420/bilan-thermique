@@ -34,6 +34,7 @@
         <li><a href="#sec-bilan"><span class="n">11</span> Bilan énergétique</a></li>
         <li><a href="#sec-batiment"><span class="n">12</span> Du modèle 1D au bâtiment complet</a></li>
         <li><a href="#sec-extensions"><span class="n">13</span> Extensions possibles</a></li>
+        <li><a href="#sec-reduits"><span class="n">13b</span> Moteurs réduits N0 / N1</a></li>
         <li><a href="#sec-notations"><span class="n">14</span> Table des notations</a></li>
       </ol>
     </nav>
@@ -56,6 +57,7 @@
             <li><a href="#sec-bilan"><span class="n">11</span> Bilan énergétique</a></li>
             <li><a href="#sec-batiment"><span class="n">12</span> Du modèle 1D au bâtiment complet</a></li>
             <li><a href="#sec-extensions"><span class="n">13</span> Extensions possibles</a></li>
+            <li><a href="#sec-reduits"><span class="n">13b</span> Moteurs réduits N0 / N1</a></li>
             <li><a href="#sec-notations"><span class="n">14</span> Table des notations</a></li>
           </ol>
         </nav>
@@ -919,6 +921,42 @@
             <li><strong>Saisonnalité de la végétation</strong> — les transmittances « feuilles absentes » sont déjà tabulées par type ; il manque la bascule en fonction de la date, qui suppose de faire entrer une notion de calendrier là où le solveur ne connaît aujourd'hui que des heures.</li>
             <li><strong>Couplage multizone</strong> — la sommation des contributions <span class="sym">hᵢ·(Tₙ − T_air,int)</span> de toutes les parois sur une même ligne du système est <em>déjà faite</em> par le solveur bâtiment (section 12). Ce qui reste une limite, c'est le <strong>mono-zone</strong> : un unique nœud d'air pour tout le bâtiment, donc ni pièce plus froide qu'une autre, ni stratification, ni paroi de refend. Multiplier les nœuds d'air supposerait de découper le bâtiment en zones et d'introduire un type de paroi qui n'existe pas ici — un refend, sans face extérieure.</li>
           </ul>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-reduits">
+        <p class="chapter-eyebrow">13 bis — Moteurs réduits N0 et N1 (refonte)</p>
+        <h2>Calculer un parc en secondes, sur la même fiche</h2>
+        <div class="prose">
+          <p>
+            Le solveur détaillé ci-dessus (<strong>N2</strong> : une paroi 1D par triangle) demande un maillage et
+            une dizaine de secondes. Pour un parc, deux moteurs réduits lisent la <em>même fiche</em> que lui
+            (surface, U des parois, baies par orientation, ventilation, inertie, consignes, masques) :
+          </p>
+          <ul>
+            <li><strong>N1 — modèle horaire 5R1C</strong> (ISO 13790 annexe C, repris par l'ISO 52016-1) : trois nœuds
+              — air <span class="sym">θ_air</span>, surfaces <span class="sym">θ_s</span>, masse <span class="sym">θ_m</span> —, cinq
+              conductances (<span class="sym">H_ve</span>, <span class="sym">H_tr,is = 3,45·A_t</span>, <span class="sym">H_tr,w</span>,
+              <span class="sym">H_tr,ms = 9,1·A_m</span>, <span class="sym">H_tr,em</span>) et une capacité <span class="sym">C_m</span>,
+              intégrés par Crank-Nicolson au pas horaire. Le besoin se déduit par interpolation linéaire entre un
+              pas sans puissance et un pas à 10 W/m². La température <strong>opérative</strong>
+              <span class="sym">θ_op = 0,3·θ_air + 0,7·θ_s</span> sert au confort d'été.</li>
+            <li><strong>N0 — bilan mensuel</strong> (ISO 13790, méthode mensuelle, proche de la 3CL) :
+              <span class="sym">Q_H = Q_ht − η·Q_gn</span>, avec le facteur d'utilisation des apports
+              <span class="sym">η = (1 − γᵃ)/(1 − γᵃ⁺¹)</span>, <span class="sym">a = 1 + τ/15</span>.</li>
+          </ul>
+          <p>
+            Mêmes hypothèses que N2 pour rester comparables : ciel isotrope, albédo du sol 0,20 par défaut, pas
+            d'échange infrarouge avec le ciel, plancher couplé à une température de sol constante, pas de ponts
+            thermiques. Les masques lointains sont un horizon par façade tiré des bâtiments voisins (BD TOPO).
+            Les murs mitoyens sont adiabatiques. Propriété connue du 5R1C : <span class="sym">H_tr,is</span> compte une
+            seconde fois une résistance superficielle déjà présente dans les U, ce qui abaisse un peu les pertes.
+          </p>
+          <p>
+            Écart mesuré sur trois cas de recette (année synthétique, mêmes parois) : N1 / N2 = −3 % (boîte),
+            +6 % (maison vitrée au sud), −15 % (petit collectif) ; N0 / N2 jusqu'à +33 % quand les apports
+            solaires sont importants. N1 est donc l'estimation du parc ; N0 un contrôle de cohérence.
+          </p>
         </div>
       </section>
 
