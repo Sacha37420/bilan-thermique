@@ -19,6 +19,7 @@ bâtiments issus d'IGN — les bâtiments issus d'OpenStreetMap restent posés �
 import math
 import re
 import time
+from . import net
 
 import requests
 import shapely.geometry
@@ -31,7 +32,7 @@ IGN_WFS_URL = 'https://data.geopf.fr/wfs/ows'
 IGN_TYPENAME = 'BDTOPO_V3:batiment'
 IGN_VEGETATION_TYPENAME = 'BDTOPO_V3:zone_de_vegetation'
 OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
-USER_AGENT = 'bilan-thermique-lab/1.0 (usage interne, contact: sacha.mailler@gmail.com)'
+USER_AGENT = net.USER_AGENT
 
 HTTP_TIMEOUT_S = 25
 MAX_BUILDINGS_PER_REQUEST = 1000
@@ -173,7 +174,7 @@ def resolve_base_z(items, ground_z_ref, elevation_lookup, warnings=None,
     except Exception as exc:  # noqa: BLE001 — best-effort par conception
         if warnings is not None:
             warnings.append(
-                f"Altitude des {label} indisponible ({exc}) — posé(s) au niveau du bâtiment."
+                f"Altitude des {label} indisponible ({net.reason(exc)}) — posé(s) au niveau du bâtiment."
             )
         return base
 
@@ -231,7 +232,7 @@ def fetch_ign_buildings(bbox):
                                     headers={'User-Agent': USER_AGENT}, timeout=HTTP_TIMEOUT_S)
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        raise GeodataError(f"IGN Géoplateforme WFS injoignable ou en erreur ({exc}).") from exc
+        raise GeodataError(f"IGN Géoplateforme WFS injoignable ou en erreur ({net.reason(exc)}).") from exc
 
     buildings = []
     for feature in data.get('features', []):
@@ -278,7 +279,7 @@ def fetch_osm_buildings(bbox):
                                     headers={'User-Agent': USER_AGENT}, timeout=HTTP_TIMEOUT_S + 5)
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        raise GeodataError(f"OpenStreetMap (Overpass) injoignable ou en erreur ({exc}).") from exc
+        raise GeodataError(f"OpenStreetMap (Overpass) injoignable ou en erreur ({net.reason(exc)}).") from exc
 
     buildings = []
     for element in data.get('elements', []):
@@ -432,7 +433,7 @@ def search_nearby_buildings(lat, lon, radius_m, max_results=5, max_walls=None):
             buildings = fetch_osm_buildings(bbox)
         except GeodataError as exc:
             if ign_error is not None:
-                raise GeodataError(f"{ign_error} Repli OpenStreetMap également en échec : {exc}") from exc
+                raise GeodataError(f"{ign_error} Repli OpenStreetMap également en échec : {net.reason(exc)}") from exc
             raise
 
     if not buildings:
@@ -630,7 +631,7 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
             buildings = fetch_ign_buildings(bbox)
             n_ign = len(buildings)
         except GeodataError as exc:
-            warnings.append(f"{exc} Repli sur OpenStreetMap.")
+            warnings.append(f"{net.reason(exc)} Repli sur OpenStreetMap.")
 
     if not buildings:
         report('osm', 40)
@@ -641,7 +642,7 @@ def generate_environment_mesh(lat, lon, radius_m, progress_cb=None,
         except GeodataError as exc:
             if n_ign == 0 and not warnings:
                 raise
-            warnings.append(str(exc))
+            warnings.append(net.reason(exc))
 
     if not buildings:
         return {
@@ -833,7 +834,7 @@ def fetch_ign_vegetation(bbox):
                                     headers={'User-Agent': USER_AGENT}, timeout=HTTP_TIMEOUT_S)
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        raise GeodataError(f"IGN (végétation) injoignable ou en erreur ({exc}).") from exc
+        raise GeodataError(f"IGN (végétation) injoignable ou en erreur ({net.reason(exc)}).") from exc
 
     zones = []
     for feature in data.get('features', []):
@@ -896,7 +897,7 @@ def fetch_osm_vegetation(bbox):
                                     headers={'User-Agent': USER_AGENT}, timeout=HTTP_TIMEOUT_S + 5)
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        raise GeodataError(f"OpenStreetMap (végétation) injoignable ou en erreur ({exc}).") from exc
+        raise GeodataError(f"OpenStreetMap (végétation) injoignable ou en erreur ({net.reason(exc)}).") from exc
 
     trees, zones = [], []
     for element in data.get('elements', []):
@@ -951,7 +952,7 @@ def generate_vegetation_mesh(lat, lon, radius_m, north_offset_deg=0.0, ground_z_
             zones.extend(ign_zones)
             n_ign = len(ign_zones)
         except GeodataError as exc:
-            warnings.append(f"Végétation IGN indisponible ({exc}).")
+            warnings.append(f"Végétation IGN indisponible ({net.reason(exc)}).")
 
     try:
         osm_trees, osm_zones = fetch_osm_vegetation(bbox)
@@ -962,7 +963,7 @@ def generate_vegetation_mesh(lat, lon, radius_m, north_offset_deg=0.0, ground_z_
         if not is_in_france(lat, lon):
             zones.extend(osm_zones)
     except GeodataError as exc:
-        warnings.append(f"Végétation OpenStreetMap indisponible ({exc}).")
+        warnings.append(f"Végétation OpenStreetMap indisponible ({net.reason(exc)}).")
 
     objects = []
     for zone in zones:

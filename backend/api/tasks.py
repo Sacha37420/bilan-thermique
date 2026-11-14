@@ -6,6 +6,7 @@ from . import shadow
 from . import building_solver
 from . import geodata
 from . import weather_source
+from . import net
 
 
 def _environment_ground(environment):
@@ -64,7 +65,7 @@ def precompute_shadows(self, job_id: int, building_id: int):
         job.save(update_fields=['result'])
         job.set_state(status=Job.DONE, progress=100, message="Précalcul d'ombrage terminé.")
     except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 @shared_task(bind=True)
@@ -134,9 +135,9 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
                     f"chauffage {result['heating_kwh']:.0f} kWh, clim {result['cooling_kwh']:.0f} kWh.",
         )
     except building_solver.BuildingSimulationError as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
     except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 @shared_task(bind=True)
@@ -204,9 +205,9 @@ def generate_environment(self, job_id, params):
                     + (" (LiDAR HD)." if summary['source'] == 'lidar' else " (repli BD TOPO / OSM)."),
         )
     except (geodata.GeodataError, environment_service.EnvironmentServiceError) as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
     except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 @shared_task(bind=True)
@@ -270,9 +271,9 @@ def fetch_weather(self, job_id, params):
             message += f" {n_missing} heure(s) ignorée(s), donnée manquante."
         job.set_state(status=Job.DONE, progress=100, message=message)
     except weather_source.WeatherSourceError as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
     except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 from celery.signals import worker_ready  # noqa: E402
@@ -335,7 +336,7 @@ def analyse_facades(self, job_id, building_id):
         job.set_state(status=Job.DONE, progress=100,
                       message=f"{n}/{len(result['facades'])} façade(s) vues sur photo, {n_open} baie(s).")
     except Exception as exc:  # noqa: BLE001
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 @shared_task(bind=True)
@@ -366,4 +367,4 @@ def recompose_facades(self, job_id, building_id):
                                        progress_cb=lambda m, p: job.set_state(progress=p, message=m))
         job.set_state(status=Job.DONE, progress=100, message=f"{n} texture(s) recomposée(s).")
     except Exception as exc:  # noqa: BLE001
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))

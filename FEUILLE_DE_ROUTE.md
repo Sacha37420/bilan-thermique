@@ -29,19 +29,31 @@ Accès : `developers,famille,amis`.
 - [x] 244 tests backend (`backend/api/tests.py`)
 **Vérifié le :** 2026-10-31 — relevé par lecture (version en service = `c308617`), tests non rejoués.
 
-## Lot 2 — Garde-fous de calcul   ·   statut : à faire
+## Lot 2 — Garde-fous de calcul   ·   statut : livré
 **Objectif :** un calcul ne peut pas saturer le worker partagé (2 vCPU), et deux calculs ne partent
-pas en même temps.
+pas en même temps. Prérequis de la refonte (`refonte.md`, § 11).
 **Constat :**
 - [C, d'après le journal] Point L5 : `MAX_REALTIME_RAYCAST_OPS` ne compte pas la passe végétation.
 - [C] Pas de verrou de calcul : `exists()` puis création (`views.py:395,436,455`).
+- [C, relevé à la fusion] `bdnb._get` et les modules réseau recopiaient `str(exc)` d'une exception
+  `requests` (l'URL) dans les messages ; deux `User-Agent` portaient une adresse email personnelle.
 **Tâches :**
-- [ ] Compter la passe végétation dans le coût estimé
-- [ ] Verrou atomique (contrainte unique partielle, ou `pg_advisory_xact_lock`)
+- [x] Compter la passe végétation dans le coût estimé (`building_solver.check_realtime_cost`,
+  poids `VEGETATION_PASS_WEIGHT = 2`), contrôlé **dans la vue** avant tout envoi au worker (400, `code: cost`)
+- [x] Verrou atomique : `api/joblock.py` (`pg_advisory_xact_lock`, envoi Celery `on_commit`), utilisé
+  par précalcul d'ombrage, calcul 3D, analyse et recomposition des façades ; un job actif depuis
+  plus de 6 h est marqué en erreur au passage
+- [x] `Job.owner_sub` (qui a lancé le job, `sub` Keycloak) — migration `0014`
+- [x] `api/net.py` : `reason(exc)` (cause fixe, jamais le texte d'une exception `requests`),
+  `public_message(exc)` pour les jobs, `User-Agent` de l'app sans donnée personnelle ; appliqué
+  aux neuf modules réseau et à `tasks.py`
 **Tests à passer avant de clore le lot :**
-- [ ] Un calcul avec végétation au-delà du seuil est refusé
-- [ ] Deux lancements simultanés rendent `[202, 409]`
-**Vérifié le :**
+- [x] Un calcul avec végétation au-delà du seuil est refusé (`VegetationCostTest`, `VegetationCostViewTest`)
+- [x] Deux lancements simultanés rendent `[202, 409]` (`ConcurrentLaunchTest.test_two_simultaneous_launches`)
+- [x] Aucune URL dans un message d'erreur ; `User-Agent` sans `@` (`NoUrlInErrorsTest`)
+**Vérifié le :** 2026-11-14 — `python manage.py test` dans l'image `bilan-thermique-backend`,
+PostgreSQL jetable sur réseau interne (copie locale de `chantiers/tests/essai.sh`) : **257 tests OK**
+(244 avant le lot, aucun supprimé). Aucun écran touché.
 
 ## Lot 3 — Historique des calculs et ménage   ·   statut : à faire
 **Objectif :** revoir un résultat sans recalculer ; ne plus accumuler d'objets orphelins (points U3, L6, L7).
@@ -65,8 +77,10 @@ Théorie est une documentation physique.
 - [ ] Page vérifiée en navigateur réel, clair et sombre ; lien présent dans la nav
 **Vérifié le :**
 
-## Lot 5 — Gabarit front et chemin à portes   ·   statut : en cours
+## Lot 5 — Gabarit front et chemin à portes   ·   statut : à faire
 **Objectif :** même comportement que le gabarit corrigé (T3), déploiement par le moteur (T1).
+*Repassé de « en cours » à « à faire » le 2026-11-14 (refonte) : un seul lot en cours à la fois, et
+l'ordre de la refonte est 2 → 3 → 5. Les tâches déjà cochées restent acquises.*
 **Tâches :**
 - [x] Polices en chemin relatif (`styles.scss`) ; `tokenBases()` (`core/env.ts` : la seule API de l'app ; `core/token-scope.ts`, copie de lab-admin) ; `pkceMethod: 'S256'` (front — `--pkce` sur le client reste à poser par l'architecte après déploiement) ; `redirectUri` par `core/redirect-uri.ts` (copie de lab-admin : la page courante seulement sous l'origine et le préfixe de l'app, sinon `appUrl`)
 - [x] Ports publiés liés à `${LAB_BIND_ADDR:-127.0.0.1}` (chantier « failles », I1)

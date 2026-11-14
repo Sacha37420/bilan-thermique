@@ -26,6 +26,7 @@ Vérifié par appels réels le 2026-09-27 :
 
 import io
 import time
+from . import net
 
 import numpy as np
 import requests
@@ -90,7 +91,7 @@ def fetch_cosia(bbox_l93, year, px_per_m=2.0):
     try:
         resp = _throttled_get(WMS_R_URL, params=params)
     except requests.RequestException as exc:
-        raise GeodataError(f"CoSIA injoignable ({exc}).") from exc
+        raise GeodataError(f"CoSIA injoignable ({net.reason(exc)}).") from exc
     if not resp.headers.get('content-type', '').startswith('image/'):
         raise GeodataError(f"CoSIA : réponse inattendue ({resp.text[:200]}).")
     return np.asarray(Image.open(io.BytesIO(resp.content)).convert('RGBA'))
@@ -199,7 +200,7 @@ def fetch_lidar_tiles(bbox_wgs84):
     try:
         data = _throttled_get(IGN_WFS_URL, params=params).json()
     except (requests.RequestException, ValueError) as exc:
-        raise LidarUnavailable(f"Index LiDAR HD injoignable ({exc}).") from exc
+        raise LidarUnavailable(f"Index LiDAR HD injoignable ({net.reason(exc)}).") from exc
 
     tiles = []
     for feature in data.get('features', []):
@@ -241,7 +242,7 @@ def read_points(tiles, bbox_l93, progress_cb=None):
             reader = CopcReader(stream, close_fd=False, decompression_selection=selection)
             points = reader.query(bounds)
         except (requests.RequestException, laspy.LaspyException, OSError, ValueError) as exc:
-            raise LidarUnavailable(f"Lecture de la dalle {tile['name']} impossible ({exc}).") from exc
+            raise LidarUnavailable(f"Lecture de la dalle {tile['name']} impossible ({net.reason(exc)}).") from exc
         stats['requests'] += stream.n_requests
         stats['bytes'] += stream.n_bytes
         if len(points):
@@ -281,7 +282,7 @@ def fetch_bdtopo_buildings_l93(bbox_l93, max_features=2000):
         try:
             data = _throttled_get(IGN_WFS_URL, params=params).json()
         except (requests.RequestException, ValueError) as exc:
-            raise GeodataError(f"BD TOPO injoignable ou en erreur ({exc}).") from exc
+            raise GeodataError(f"BD TOPO injoignable ou en erreur ({net.reason(exc)}).") from exc
         features = data.get('features', [])
         for feature in features:
             geom = feature.get('geometry') or {}
@@ -341,7 +342,7 @@ def fetch_orthophoto(bbox_l93, layer, px_per_m=4.0):
     try:
         resp = _throttled_get(WMS_R_URL, params=params)
     except requests.RequestException as exc:
-        raise GeodataError(f"Orthophoto IGN injoignable ({exc}).") from exc
+        raise GeodataError(f"Orthophoto IGN injoignable ({net.reason(exc)}).") from exc
     if not resp.headers.get('content-type', '').startswith('image/'):
         raise GeodataError(f"Orthophoto IGN : réponse inattendue ({resp.text[:200]}).")
     return resp.content, width, height

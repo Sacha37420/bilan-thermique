@@ -53,6 +53,42 @@ MAX_REALTIME_RAYCAST_OPS = 2_000_000
 # combiné à un planning de ventilation à 24 valeurs toutes distinctes — marge
 # large.
 MAX_DISTINCT_BOUNDARY_COMBOS = 2000
+# Lot 2 (refonte) — passe végétation du mode temps réel : pour chaque rayon qui a passé le test
+# opaque, un second lancer `multiple_hits=True` traverse la végétation (shadow.VegetationScene).
+# Il n'était pas compté dans le coût estimé (point L5 du journal). Poids : un lancer à impacts
+# multiples parcourt la scène jusqu'au bout au lieu de s'arrêter au premier impact ; on le compte
+# pour deux lancers simples — estimation prudente, pas une mesure fine.
+VEGETATION_PASS_WEIGHT = 2.0
+
+
+def envelope_has_vegetation(*envelopes):
+    """Au moins un triangle translucide (végétation, Lot Z) dans ces enveloppes."""
+    for env in envelopes:
+        for tri in (env or {}).get('triangles', []) or []:
+            if shadow._is_translucent(tri):
+                return True
+    return False
+
+
+def realtime_raycast_ops(n_triangles, n_hours, has_vegetation):
+    """Coût estimé du mode temps réel, en lancers de rayons simples."""
+    weight = 1.0 + (VEGETATION_PASS_WEIGHT if has_vegetation else 0.0)
+    return int(n_triangles * n_hours * weight)
+
+
+def check_realtime_cost(building_envelope, environment_envelope, n_hours):
+    """Lève BuildingSimulationError si le mode temps réel dépasse le garde-fou."""
+    n_tri = len((building_envelope or {}).get('triangles', []) or [])
+    veg = envelope_has_vegetation(building_envelope, environment_envelope)
+    ops = realtime_raycast_ops(n_tri, n_hours, veg)
+    if ops > MAX_REALTIME_RAYCAST_OPS:
+        detail = ' (végétation comprise)' if veg else ''
+        raise BuildingSimulationError(
+            f"{n_tri} triangles × {n_hours} heures{detail} : coût estimé {ops} lancers de rayons, "
+            f"au-delà de la limite du mode temps réel ({MAX_REALTIME_RAYCAST_OPS}) — utiliser le mode "
+            "précalculé, ou réduire le maillage/la période."
+        )
+    return ops
 
 
 class BuildingSimulationError(ValueError):
@@ -628,11 +664,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         raise BuildingSimulationError("La série météo est vide.")
     if shadow_mode not in ('precomputed', 'realtime'):
         raise BuildingSimulationError(f"shadow_mode inconnu : {shadow_mode!r}")
-    if shadow_mode == 'realtime' and len(triangles) * len(weather) > MAX_REALTIME_RAYCAST_OPS:
-        raise BuildingSimulationError(
-            f"{len(triangles)} triangles × {len(weather)} heures dépasse la limite du mode temps réel "
-            f"({MAX_REALTIME_RAYCAST_OPS} — utiliser le mode précalculé, ou réduire le maillage/la période)."
-        )
+    if shadow_mode == 'realtime':
+        check_realtime_cost(building_envelope, environment_envelope, len(weather))
     if h_e_dynamic:
         # Garde-fou défensif — le serializer valide déjà ceci, mais
         # run_building_simulation reste appelable directement (voir tests.py).

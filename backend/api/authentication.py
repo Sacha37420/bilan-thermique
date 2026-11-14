@@ -15,6 +15,9 @@ class KeycloakUser:
         self.email: str = claims.get('email', '')
         self.username: str = claims.get('preferred_username', self.email)
         self.claims = claims
+        # Identité stable (refonte) : toute nouvelle table désigne une personne par son `sub`
+        # Keycloak, jamais par son email (l'email d'un compte peut changer dans l'annuaire).
+        self.sub: str = claims.get('sub', '') or ''
         # Required by some DRF internals
         self.pk = self.email
 

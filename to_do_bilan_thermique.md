@@ -3218,9 +3218,9 @@ appris, par onnxruntime) — variante **à ne pas retenter** sur cette machine, 
 
 La page Théorie (section « Portée et hypothèses ») exclut déjà explicitement, comme choix assumé et
 non comme oubli : **ponts thermiques linéiques / effets 2D-3D**, **couplage multi-locaux** (un seul
-nœud d'air pour tout le bâtiment), **échanges IR grande longueur d'onde avec le ciel**, **albédo du
-sol**, **réflexions multiples entre vitrages successifs**. Ce sont des refontes structurelles bien plus
-lourdes que les lots ci-dessus — à ne considérer que si l'utilisateur le demande explicitement, pas à
+nœud d'air pour tout le bâtiment), **échanges IR grande longueur d'onde avec le ciel**, **réflexions multiples entre vitrages successifs**. Ce sont des refontes structurelles bien plus
+lourdes que les lots ci-dessus (l'albédo du sol, longtemps cité ici, a été implémenté au Lot AI —
+ligne retirée le 2026-11-14, refonte) — à ne considérer que si l'utilisateur le demande explicitement, pas à
 improviser en marge d'un autre lot. Pour le pont thermique linéique : un ψ par arête de jonction entre
 triangles d'orientations différentes, sommé sur le linéaire réel — pas amorcé plus loin ici.
 

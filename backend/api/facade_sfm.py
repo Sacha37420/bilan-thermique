@@ -32,6 +32,7 @@ import os
 import shutil
 import time
 from pathlib import Path
+from . import net
 
 import numpy as np
 
@@ -205,14 +206,14 @@ def solve_poses(panos, workdir, ground_at, progress=None):
     try:
         models, by_name = reconstruct(panos, workdir, progress)
     except Exception as exc:  # noqa: BLE001 — la photogrammétrie est un plus, pas un prérequis
-        report['errors'].append(f"Reconstruction impossible ({exc}).")
+        report['errors'].append(f"Reconstruction impossible ({net.reason(exc)}).")
         return {}, report
     poses = {}
     for rec in models:
         try:
             out, stats = align_model(rec, by_name, ground_at)
         except SfmError as exc:
-            report['errors'].append(str(exc))
+            report['errors'].append(net.reason(exc))
             continue
         poses.update(out)
         report['models'].append(stats)

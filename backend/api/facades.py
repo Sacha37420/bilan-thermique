@@ -17,6 +17,7 @@ import io
 import math
 import os
 import time
+from . import net
 
 import numpy as np
 import requests
@@ -25,7 +26,7 @@ import shapely.ops
 from scipy import ndimage
 
 PANORAMAX_SEARCH_URL = 'https://api.panoramax.xyz/api/search'
-USER_AGENT = 'bilan-thermique-lab/1.0 (usage interne)'
+USER_AGENT = net.USER_AGENT
 CACHE_DIR = '/tmp/bilan-thermique-facades'
 CAMERA_HEIGHT_M = 2.2
 TEXTURE_M_PER_PX = 0.04
@@ -102,7 +103,7 @@ def search_panoramas(bbox_wgs84, limit=400):
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
-        raise FacadeError(f"Panoramax injoignable ({exc}).") from exc
+        raise FacadeError(f"Panoramax injoignable ({net.reason(exc)}).") from exc
     out = []
     for f in data.get('features', []):
         p = f.get('properties') or {}
@@ -452,7 +453,7 @@ def _owl_session(kind='v1'):
                         fh.write(chunk)
                 os.replace(tmp, path)
         except requests.RequestException as exc:
-            raise FacadeError(f"Modèle de détection indisponible ({exc}).") from exc
+            raise FacadeError(f"Modèle de détection indisponible ({net.reason(exc)}).") from exc
     sess = ort.InferenceSession(os.path.join(model_dir, 'model_quantized.onnx'), providers=['CPUExecutionProvider'])
     tok = Tokenizer.from_file(os.path.join(model_dir, 'tokenizer.json'))
     L = 16
@@ -1053,7 +1054,7 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
     try:
         occupancy = FT.load_occupancy(frame, ground_z, bounds, own_footprint.buffer(0.8) if own_footprint else None)
     except Exception as exc:  # noqa: BLE001 — sans LiDAR : scène seule
-        occ_note = f"Occultation LiDAR indisponible ({exc}) : seuls les objets de la scène masquent."
+        occ_note = f"Occultation LiDAR indisponible ({net.reason(exc)}) : seuls les objets de la scène masquent."
     mesh_occ = _occluder(env_objects)
     ground_at = _terrain_sampler(env_objects, fallback=float(V[:, 2].min()))
 

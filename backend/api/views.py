@@ -20,6 +20,12 @@ from . import geometry
 from . import geodata
 from . import elevation
 from . import environment_service
+from . import joblock
+
+
+def _sub(request):
+    """Identifiant Keycloak (`sub`) de l'appelant — l'identité stable (jamais l'email)."""
+    return getattr(request.user, 'sub', '') or ''
 
 
 class MeView(APIView):
@@ -313,12 +319,13 @@ class PrecomputeShadowsView(APIView):
             return Response({'detail': "Ce bâtiment n'a pas encore de maillage importé."},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        if Job.objects.filter(kind='shadow_precompute', status__in=[Job.PENDING, Job.RUNNING]).exists():
+        job = joblock.launch_exclusive(
+            'shadow_precompute', {'building_id': building.pk},
+            lambda j: tasks.precompute_shadows.delay(j.id, building.pk),
+            blocking_kinds=['shadow_precompute'], owner_sub=_sub(request))
+        if job is None:
             return Response({'detail': "Un précalcul d'ombrage est déjà en cours pour le lab — réessayez plus tard."},
                              status=status.HTTP_409_CONFLICT)
-
-        job = Job.objects.create(kind='shadow_precompute', params={'building_id': building.pk})
-        tasks.precompute_shadows.delay(job.id, building.pk)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
@@ -392,12 +399,22 @@ class BuildingCalculView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).exists():
+        if shadow_mode == 'realtime':
+            env_envelope = building.environment.envelope if building.environment_id else None
+            try:
+                building_solver.check_realtime_cost(building.envelope, env_envelope,
+                                                    len(serializer.validated_data['weather']))
+            except building_solver.BuildingSimulationError as exc:
+                return Response({'detail': str(exc), 'code': 'cost'}, status=status.HTTP_400_BAD_REQUEST)
+
+        payload = serializer.validated_data
+        job = joblock.launch_exclusive(
+            'building_calcul', {'building_id': building.pk},
+            lambda j: tasks.run_building_calcul.delay(j.id, building.pk, payload),
+            owner_sub=_sub(request))
+        if job is None:
             return Response({'detail': "Un calcul est déjà en cours pour le lab — réessayez plus tard."},
                              status=status.HTTP_409_CONFLICT)
-
-        job = Job.objects.create(kind='building_calcul', params={'building_id': building.pk})
-        tasks.run_building_calcul.delay(job.id, building.pk, serializer.validated_data)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
@@ -433,11 +450,12 @@ class FacadeAnalyseView(APIView):
         if building.georef_lat is None or not building.envelope.get('triangles'):
             return Response({'detail': "Bâtiment sans maillage ou non géoréférencé."},
                             status=status.HTTP_400_BAD_REQUEST)
-        if Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).exists():
+        job = joblock.launch_exclusive(
+            'analyse_facades', {'building_id': building.pk},
+            lambda j: tasks.analyse_facades.delay(j.id, building.pk), owner_sub=_sub(request))
+        if job is None:
             return Response({'detail': "Un calcul est déjà en cours pour le lab — réessayez plus tard."},
                             status=status.HTTP_409_CONFLICT)
-        job = Job.objects.create(kind='analyse_facades', params={'building_id': building.pk})
-        tasks.analyse_facades.delay(job.id, building.pk)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
@@ -452,11 +470,12 @@ class FacadeRecomposeView(APIView):
         building = get_object_or_404(Building, pk=pk)
         if not (building.facades or {}).get('facades'):
             return Response({'detail': "Façades non analysées."}, status=status.HTTP_400_BAD_REQUEST)
-        if Job.objects.filter(status__in=[Job.PENDING, Job.RUNNING]).exists():
+        job = joblock.launch_exclusive(
+            'recompose_facades', {'building_id': building.pk},
+            lambda j: tasks.recompose_facades.delay(j.id, building.pk), owner_sub=_sub(request))
+        if job is None:
             return Response({'detail': "Un calcul est déjà en cours pour le lab — réessayez plus tard."},
                             status=status.HTTP_409_CONFLICT)
-        job = Job.objects.create(kind='recompose_facades', params={'building_id': building.pk})
-        tasks.recompose_facades.delay(job.id, building.pk)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 

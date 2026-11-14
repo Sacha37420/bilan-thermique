@@ -227,6 +227,10 @@ class Job(models.Model):
     celery_task_id = models.CharField(max_length=100, blank=True)
     params = models.JSONField(default=dict, blank=True)
     result = models.JSONField(null=True, blank=True)
+    # Lot 2 (refonte) : qui a lancé le job (`sub` Keycloak, vide pour un job d'avant la refonte
+    # ou lancé par le système). Sert à ne rendre un job qu'à celui qui l'a lancé, et à garder les
+    # traitements faits avec la clé d'IA d'un utilisateur pour cet utilisateur seul.
+    owner_sub = models.CharField(max_length=64, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
