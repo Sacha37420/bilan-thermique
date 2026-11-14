@@ -198,3 +198,12 @@ TEMPLATES = [
 # L'analyse retombe alors sur le recalage par séquence du Lot AL. Mettre
 # FACADE_SFM_ENABLED=True dans le .env pour la réactiver.
 FACADE_SFM_ENABLED = config('FACADE_SFM_ENABLED', default=False, cast=bool)
+
+# ── Refonte, Lot 21 : coffre des clés d'IA et documents ───────────────────────
+# Clé Fernet du coffre (jamais dérivée de SECRET_KEY ; ne jamais la régénérer une fois posée).
+# Vide ⇒ coffre fermé : l'enregistrement d'une clé est refusé, rien d'autre ne change.
+VAULT_ENCRYPTION_KEY = config('VAULT_ENCRYPTION_KEY', default='')
+# Dépôt des originaux dans `storage` (espace personnel de l'utilisateur, avec son jeton) : demande
+# DL-2 de DEMANDES_LAB.md. Tant qu'elle n'est pas accordée, le texte seul est gardé.
+STORAGE_DOCUMENTS_ENABLED = config('STORAGE_DOCUMENTS_ENABLED', default=False, cast=bool)
+STORAGE_API_URL = config('STORAGE_API_URL', default='http://storage-backend:8000')

@@ -42,6 +42,8 @@ Toutes installées **dans les images Docker** (aucun script d'installation sur l
 | trimesh, rtree, shapely, mapbox_earcut, embreex | géométrie, lancer de rayons | MIT / Apache-2.0 | ~40 Mo |
 | requests | appels open data | Apache-2.0 | <1 Mo |
 | laspy[lazrs], pyproj, triangle, pillow | LiDAR HD, projections, triangulation, orthophotos | BSD / MIT / usage non commercial (triangle) / HPND | ~60 Mo |
+| anthropic 1.13.0 (refonte, Lot 21) | SDK Claude pour l'extraction de documents, avec la clé de l'utilisateur | MIT | ~5 Mo |
+| pypdf 5.4.0 (refonte, Lot 21) | lecture du texte des PDF (pas d'OCR, D16) | BSD-3-Clause | ~1 Mo |
 | onnxruntime, tokenizers, pycolmap | détection des baies, photogrammétrie (désactivée par défaut) | MIT / Apache-2.0 / BSD | ~150 Mo |
 
 ### Frontend (`frontend/package-lock.json`, installé par `npm ci`)

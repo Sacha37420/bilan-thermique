@@ -426,6 +426,28 @@ La paroi mitoyenne est au Lot 12.
 - [x] Définition de θ_op, régime d'hiver (θ_rm entre l'air et l'extérieur), indicateurs sur θ_op (`OperativeTemperatureN2Test`)
 **Vérifié le :** 2026-11-14 — 408 tests OK (dont tous les tests du N2 existants, inchangés).
 
+## Lot 21 — IA documentaire sur le compte de l'utilisateur   ·   statut : livré
+**Objectif :** l'IA lit les documents d'un bâtiment et **propose** des valeurs ; elle ne calcule jamais la
+physique ; rien n'entre dans la fiche sans validation ; chaque utilisateur paie sa propre IA (refonte § B8).
+**Tâches :**
+- [x] Coffre `AiKeyVault` par `sub` (`EncryptedTextField`, `VAULT_ENCRYPTION_KEY`), registre fermé
+  claude / mistral / albert, aucune URL saisie, `sk-ant-oat…` refusé, clé jamais renvoyée ni journalisée
+  (copie d'App Builder `0ff4e4e`, en-têtes « copie d'app-builder »)
+- [x] Documents : dépôt (PDF, XML DPE, texte ; 15 Mo), texte lu sur le serveur, original dans `storage`
+  si relié (DL-2), sinon non conservé
+- [x] XML DPE lu sans IA ; PDF : estimation des pages et des jetons, confirmation explicite, job avec la
+  clé de l'**auteur** du document seulement ; boucle bornée (3 appels, 90 s), outil `proposer_faits`
+- [x] Contrôle de chaque proposition (plage, cohérence, extrait retrouvé) ; acceptation = fait `document`
+  avec extrait et page ; rejet conservé
+- [x] Pages « Intelligence artificielle » (`/ia`) et onglet « Documents » de la fiche
+**Tests à passer avant de clore le lot :**
+- [x] `api/tests/test_ia.py` (15) : clé jamais rendue, `sk-ant-oat` refusé, coffre fermé, XML à entités refusé,
+  XML DPE → propositions, extraction simulée, extrait introuvable rejeté, clé d'un autre jamais utilisée,
+  confirmation exigée, document d'un autre invisible
+- [x] Navigateur (banc, clair et sombre) : clé enregistrée « configurée » seulement, XML DPE → 5 propositions,
+  acceptation → provenance « document », estimation avant envoi
+**Vérifié le :** 2026-11-15 — 423 tests OK ; aucun appel réel à un fournisseur (tous simulés).
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

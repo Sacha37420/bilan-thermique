@@ -1,0 +1,38 @@
+<div class="rf-page">
+  <p class="rf-eyebrow">Intelligence artificielle</p>
+  <h1>Votre IA, sur votre compte</h1>
+  <p class="rf-sub">L'IA lit les documents d'un bâtiment (DPE, audit, factures) et <strong>propose</strong> des valeurs, que
+    vous validez une à une. Elle ne calcule jamais la physique. L'app ne fournit aucune clé : chaque clé est la vôtre, chiffrée
+    sur le serveur, jamais renvoyée au navigateur, jamais utilisée pour quelqu'un d'autre.</p>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  @if (ok()) { <p class="rf-ok" role="status">{{ ok() }}</p> }
+  @if (settings(); as s) {
+    @if (!s.vault) { <p class="rf-error">Le coffre n'est pas configuré sur ce serveur : aucune clé ne peut être enregistrée pour l'instant.</p> }
+    @for (p of s.providers; track p.id) {
+      <section class="rf-card" [attr.aria-labelledby]="'p-' + p.id">
+        <div class="rf-card-head"><h2 [id]="'p-' + p.id">{{ p.label }}</h2>
+          <span class="rf-badge" [class]="'rf-badge ' + (p.configured ? 'm-mesure' : 'm-defaut')">{{ p.configured ? 'clé configurée' : 'aucune clé' }}</span></div>
+        <p class="rf-hint">{{ p.help }}</p>
+        <div class="rf-row">
+          <label class="rf-field" style="flex: 1 1 18rem"><span>{{ p.configured ? 'Remplacer la clé' : 'Clé d’API' }}</span>
+            <input type="password" autocomplete="off" [(ngModel)]="keys[p.id]" [attr.aria-label]="'Clé ' + p.label" [disabled]="!s.vault"></label>
+          <button type="button" class="rf-btn primary" (click)="saveKey(p, keys[p.id] || '')" [disabled]="!keys[p.id] || !s.vault">Enregistrer</button>
+          @if (p.configured) { <button type="button" class="rf-btn danger" (click)="saveKey(p, '')">Supprimer la clé</button> }
+        </div>
+        <div class="rf-row">
+          <label class="rf-field" style="flex: 1 1 18rem"><span>Modèle</span>
+            <select [ngModel]="s.preferences.models[p.id]" (ngModelChange)="savePrefs(p.id, $event)" [attr.aria-label]="'Modèle ' + p.label" [disabled]="!s.vault">
+              @for (m of p.models; track m.id) { <option [value]="m.id">{{ m.label }}</option> }</select></label>
+          @if (s.preferences.provider === p.id) { <span class="rf-badge m-declare">fournisseur par défaut</span> }
+          @else if (p.configured) { <button type="button" class="rf-btn" (click)="savePrefs(p.id, s.preferences.models[p.id])">Utiliser par défaut</button> }
+        </div>
+      </section>
+    }
+    <section class="rf-card">
+      <h2>Avec votre abonnement : Claude Code ou Mistral Vibe</h2>
+      <p class="rf-hint">Un jeton d'abonnement Claude (<code>sk-ant-oat…</code>) n'est pas accepté ici : les conditions d'Anthropic le
+        réservent à Claude Code. Pour utiliser votre abonnement, reliez votre Claude Code ou votre Vibe au serveur MCP de l'app
+        avec un jeton personnel (section ci-dessous).</p>
+    </section>
+  }
+</div>

@@ -522,3 +522,42 @@ def calibrate_building(self, job_id, building_id, measurement_id, dataset_id=Non
         job.set_state(status=Job.DONE, progress=100, message=msg)
     except Exception as exc:
         job.set_state(status=Job.ERROR, message=net.public_message(exc, 'Calage impossible.'))
+
+
+@shared_task(bind=True)
+def extract_document(self, job_id, run_id):
+    """Refonte (Lot 21) : lecture d'un document par l'IA, avec la clé de la personne qui l'a demandée
+    (job.owner_sub == document.owner_sub, vérifié par la vue et revérifié ici)."""
+    from . import documents
+    from .ia import fournisseurs, registre
+    from .models import AIExtractionRun, AiKeyVault
+    job = Job.objects.get(pk=job_id)
+    run = AIExtractionRun.objects.select_related('document__building').get(pk=run_id)
+    doc = run.document
+    try:
+        if not (job.owner_sub and job.owner_sub == run.owner_sub == doc.owner_sub):
+            raise ValueError('owner')
+        job.set_state(status=Job.RUNNING, progress=10, message='Lecture du document par l’IA…')
+        vault = AiKeyVault.objects.filter(owner_sub=job.owner_sub).first()
+        key = getattr(vault, registre.FOURNISSEURS[run.provider]['champ'], '') if vault else ''
+        if not key:
+            raise documents.DocumentError('Aucune clé configurée pour ce fournisseur (page « Intelligence artificielle »).')
+        rows, usage = documents.run_extraction(run.provider, key, run.model, doc.pages, run.pages_sent)
+        del key
+        props = documents.make_proposals(run, doc.building, rows, doc.pages)
+        run.tokens_input, run.tokens_output = usage['input_tokens'], usage['output_tokens']
+        run.status, run.message = 'DONE', f'{len(props)} proposition(s)'
+        run.save(update_fields=['tokens_input', 'tokens_output', 'status', 'message'])
+        job.result = {'run_id': run.pk, 'proposals': len(props)}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100, message=f'{len(props)} fait(s) proposé(s) : à valider.')
+    except fournisseurs.ErreurFournisseur as exc:
+        msg = exc.message or 'Document trop long pour ce modèle : envoyez moins de pages.'
+        run.status, run.message = 'ERROR', msg[:500]
+        run.save(update_fields=['status', 'message'])
+        job.set_state(status=Job.ERROR, message=msg[:500])
+    except Exception as exc:  # noqa: BLE001 — message fixe, jamais la clé ni le texte d'une exception réseau
+        msg = str(exc) if isinstance(exc, documents.DocumentError) else 'Lecture impossible.'
+        run.status, run.message = 'ERROR', msg[:500]
+        run.save(update_fields=['status', 'message'])
+        job.set_state(status=Job.ERROR, message=msg[:500])

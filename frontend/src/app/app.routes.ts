@@ -29,6 +29,7 @@ export const routes: Routes = [
   // ── Refonte : parc, fiche, affinage ──
   { path: 'parc', loadComponent: () => import('./pages/parc/parc.component').then(m => m.ParcComponent) },
   { path: 'parc/rejoindre', loadComponent: () => import('./pages/parc/rejoindre.component').then(m => m.RejoindreComponent) },
+  { path: 'ia', loadComponent: () => import('./pages/ia/ia.component').then(m => m.IaComponent) },
   { path: 'fiche', loadComponent: () => import('./pages/fiche/fiche.component').then(m => m.FicheComponent) },
   { path: '**',        redirectTo: 'calcul-1d' },
 ];

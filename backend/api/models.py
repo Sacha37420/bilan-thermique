@@ -1,5 +1,7 @@
 from django.db import models
 
+from .fields import EncryptedTextField
+
 
 class Department(models.Model):
     """Département ou équipe de l'organisation."""
@@ -556,3 +558,80 @@ class Measurement(models.Model):
     class Meta:
         db_table = 'measurements'
         ordering = ['-created_at']
+
+
+class AiKeyVault(models.Model):
+    """Coffre des clés d'IA d'une personne (refonte, Lot 21 — même forme qu'App Builder `0ff4e4e`).
+    Écart volontaire : l'identité est le `sub` Keycloak, pas l'email. Les clés sont chiffrées
+    (`VAULT_ENCRYPTION_KEY`) et ne servent qu'aux demandes de leur propriétaire."""
+
+    owner_sub = models.CharField(max_length=64, unique=True)
+    claude_key = EncryptedTextField(blank=True, default='')
+    mistral_key = EncryptedTextField(blank=True, default='')
+    albert_key = EncryptedTextField(blank=True, default='')
+    preferred_provider = models.CharField(max_length=20, blank=True, default='')
+    preferred_models = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ai_key_vault'
+
+
+class BuildingDocument(models.Model):
+    """Document d'un bâtiment (DPE XML ou PDF, audit, facture…) — donnée personnelle de son auteur.
+    L'original va dans `storage` (espace de la personne) quand c'est possible ; ici, seul le texte lu."""
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='documents')
+    owner_sub = models.CharField(max_length=64)
+    kind = models.CharField(max_length=10)            # xml_dpe | pdf | texte
+    filename = models.CharField(max_length=200)
+    size_bytes = models.PositiveIntegerField(default=0)
+    storage_path = models.CharField(max_length=400, blank=True)
+    pages = models.JSONField(default=list, blank=True)  # [texte de chaque page]
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'building_documents'
+        ordering = ['-created_at']
+
+
+class AIExtractionRun(models.Model):
+    """Une lecture d'un document (par l'IA ou localement pour un XML DPE). Jamais la clé."""
+
+    document = models.ForeignKey(BuildingDocument, on_delete=models.CASCADE, related_name='runs')
+    owner_sub = models.CharField(max_length=64)
+    provider = models.CharField(max_length=20)          # local | claude | mistral | albert | mcp
+    model = models.CharField(max_length=100, blank=True)
+    pages_sent = models.JSONField(default=list, blank=True)
+    tokens_estimated = models.PositiveIntegerField(default=0)
+    tokens_input = models.PositiveIntegerField(default=0)
+    tokens_output = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=10, default='PENDING')
+    message = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ai_extraction_runs'
+        ordering = ['-created_at']
+
+
+class FactProposal(models.Model):
+    """Fait proposé (par un document lu), en attente d'une décision humaine. Rien n'entre sans clic."""
+
+    run = models.ForeignKey(AIExtractionRun, on_delete=models.CASCADE, related_name='proposals')
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='proposals')
+    key = models.CharField(max_length=80)
+    value = models.JSONField(null=True)
+    unit = models.CharField(max_length=20, blank=True)
+    page = models.PositiveIntegerField(null=True, blank=True)
+    extract = models.CharField(max_length=500, blank=True)
+    control = models.CharField(max_length=20)   # ok | hors_plage | incoherent | extrait_introuvable | cle_inconnue
+    control_message = models.CharField(max_length=300, blank=True)
+    decision = models.CharField(max_length=12, default='en_attente')  # en_attente | acceptee | rejetee
+    decided_by = models.CharField(max_length=64, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    fact = models.ForeignKey(BuildingFact, null=True, blank=True, on_delete=models.SET_NULL, related_name='proposals')
+
+    class Meta:
+        db_table = 'fact_proposals'
+        ordering = ['run', 'key']
