@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { ProtectionsComponent } from '../../components/protections/protections.component';
 import { MeteoCarteComponent } from '../../components/meteo-carte/meteo-carte.component';
 import { QuestionnaireComponent } from '../../components/questionnaire/questionnaire.component';
 import { ResultatCarteComponent } from '../../components/resultat-carte/resultat-carte.component';
@@ -21,7 +22,7 @@ interface BuildingInfo {
 @Component({
   selector: 'app-fiche',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent, ProtectionsComponent],
   templateUrl: './fiche.component.html',
   styleUrl: './fiche.component.scss',
 })
@@ -38,6 +39,14 @@ export class FicheComponent implements OnInit {
   error = signal('');
   saving = signal(false);
   ficheVersion = signal(0);
+  tab = signal('synthese');
+  tabs: [string, string][] = [['synthese', 'Synthèse'], ['meteo', 'Météo'], ['protections', 'Protections solaires'],
+    ['donnees', 'Données et provenance']];
+
+  setTab(t: string): void {
+    this.tab.set(t);
+    void this.router.navigate([], { queryParams: { onglet: t }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
   methodLabels = METHOD_LABELS;
 
   editing = signal<string | null>(null);
@@ -105,7 +114,10 @@ export class FicheComponent implements OnInit {
     this.rf.catalogue().subscribe({ next: c => this.catalogue.set(c) });
     this.api.getBuildings().subscribe({ next: bs => this.buildings.set(bs as BuildingSummary[]) });
     this.route.queryParamMap.subscribe(p => {
+      const t = p.get('onglet');
+      if (t && this.tabs.some(x => x[0] === t)) this.tab.set(t);
       const b = Number(p.get('b'));
+      if (b === this.buildingId && this.fiche()) return;
       this.buildingId = Number.isFinite(b) && b > 0 ? b : null;
       this.load();
     });

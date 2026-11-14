@@ -3,6 +3,7 @@ from .views_calc import BuildingCalcRunsView, CalcRunDetailView, CalculerView, R
 from .views_pipeline import InitNewBuildingView, ReinitBuildingView
 from . import views_parc as vp
 from . import views_meteo as vm
+from . import views_protections as vpr
 from .views_questionnaire import QuestionsView, QuestionnaireView
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
 from .views import (
@@ -63,6 +64,11 @@ urlpatterns = [
     path('meteo/importer/', vm.ImportView.as_view()),
     path('batiments/<int:pk>/meteo/', vm.BuildingWeatherView.as_view()),
     path('batiments/<int:pk>/comparer-meteo/', vm.CompareWeatherView.as_view()),
+    # ── Refonte (Lot 14) : protections solaires ──
+    path('protections/catalogue/', vpr.CatalogueView.as_view()),
+    path('batiments/<int:pk>/protections/', vpr.DevicesView.as_view()),
+    path('batiments/<int:pk>/protections/effet/', vpr.EffectView.as_view()),
+    path('protections/<int:pk>/', vpr.DeviceDetailView.as_view()),
     # ── Refonte (Lot 11) : parcs ──
     path('parcs/', vp.PortfoliosView.as_view()),
     path('parcs/<int:pk>/', vp.PortfolioDetailView.as_view()),

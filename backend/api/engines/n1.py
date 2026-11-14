@@ -41,25 +41,41 @@ def schedules(hidx, residential, t_heat):
     return np.where(occ, 2.2, 0.3), np.where(occ, t_heat, t_heat - 3.0)
 
 
-def solar_terms(p, az, el, dni, dhi):
-    """(gains solaires par les baies, gains par les parois opaques, irradiance par orientation) — W."""
+def solar_terms(p, az, el, dni, dhi, t_e=None, hidx=None, by_orientation=None):
+    """(gains solaires par les baies, gains par les parois opaques, irradiance par orientation) — W.
+
+    Protections solaires (Lot 14) : `p.devices` → facteurs horaires sur le direct et le diffus des
+    baies de chaque orientation (`engines.shading.factors`). `by_orientation` (dict, facultatif) reçoit
+    les gains par les baies de chaque orientation (kWh), pour la restitution par façade."""
+    from . import shading as sh
     win = np.zeros(len(az))
     opq = np.zeros(len(az))
     irr = {}
+    if hidx is None:
+        hidx = np.arange(len(az))
+    if t_e is None:
+        t_e = np.full(len(az), 20.0)
+    occupied = None
+    if p.devices and not p.residential:
+        hour, day = hidx % 24, (hidx // 24) % 7
+        occupied = (hour >= 8) & (hour < 19) & (day < 5)
     for o in ORIENTATIONS:
         w = p.walls[o]
         if w['window'] <= 0 and w['opaque'] <= 0:
             irr[o] = np.zeros(len(az))
             continue
-        shade_dir = p.shading.get(o)
         total, beam = solar.surface_irradiance(az, el, dni, dhi, solar.ORIENT_AZ[o], 90.0,
-                                               horizon_deg=p.horizon.get(o, 0.0) or 0.0, beam_factor=shade_dir)
+                                               horizon_deg=p.horizon.get(o, 0.0) or 0.0)
         diffuse_part = total - beam
-        if o in p.shading_diffuse:
-            diffuse_part = diffuse_part * p.shading_diffuse[o]
+        if p.devices:
+            fb, fd = sh.factors(p.devices, o, solar.ORIENT_AZ[o], az, el, hidx, total, t_e, p.g_window, occupied)
+            beam, diffuse_part = beam * fb, diffuse_part * fd
         total_win = beam + diffuse_part
         irr[o] = total
-        win += w['window'] * p.g_window * p.frame_factor * total_win
+        gains_o = w['window'] * p.g_window * p.frame_factor * total_win
+        win += gains_o
+        if by_orientation is not None:
+            by_orientation[o] = round(float(gains_o.sum() / 1000.0), 1)
         opq += p.absorptance * R_SE * w['u'] * w['opaque'] * total
     roof_total, _ = solar.surface_irradiance(az, el, dni, dhi, 180.0, 0.0)
     opq += p.absorptance * R_SE * p.u_roof * p.roof_area * roof_total
@@ -105,8 +121,9 @@ def run(params, weather, *, t_init=None, keep_series=True):
     sol_w = np.zeros((S, T))
     sol_o = np.zeros((S, T))
     irr0 = None
+    by_o = [{} for _ in ps]
     for i, p in enumerate(ps):
-        w, o, irr = solar_terms(p, az, el, dni, dhi)
+        w, o, irr = solar_terms(p, az, el, dni, dhi, t_e, hidx, by_o[i])
         sol_w[i], sol_o[i] = w, o
         if irr0 is None:
             irr0 = irr
@@ -189,6 +206,8 @@ def run(params, weather, *, t_init=None, keep_series=True):
             r['t_op'] = [round(float(x), 2) for x in t_op[i]]
             r['phi_hc_w'] = [round(float(x), 1) for x in phi_hc[i]]
         results.append(r)
+    for i, r in enumerate(results):
+        r['solar_windows_by_orientation_kwh'] = by_o[i]
     if irr0 is not None and keep_series:
         results[0]['solar_by_orientation_kwh_m2'] = {o: round(float(v.sum() / 1000.0), 1) for o, v in irr0.items()}
     return results

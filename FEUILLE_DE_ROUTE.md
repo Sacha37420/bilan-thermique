@@ -283,6 +283,29 @@ moins de 60 km de Tours en 9 s ; station TOURS (37179001) année 2023 : 8 760 h,
 année type PVGIS (DJU 2 268). Navigateur réel (banc) : 3 météos comparées → 186 / 234 / 119 kWh/m², choix
 d'une météo → résultat à refaire, import CSV ; clair et sombre sans erreur console.
 
+## Lot 14 — Protections solaires (B4)   ·   statut : livré
+**Objectif :** déclarer des protections fixes, mobiles, de vitrage ou végétales et voir leur effet sur
+le confort d'été et le chauffage, avec deux méthodes cohérentes (`refonte.md` § B4, D8).
+**Tâches :**
+- [x] `ShadingDevice` (type, façade, mode paramétrique ou géométrique, paramètres, pilotage, variante)
+- [x] `api/engines/shading.py` : débord (casquette, balcon, débord de toit, loggia) et joues par angle de
+  profil, diffus masqué ; mobiles à position intermédiaire, pilotés par planning (heures, mois) ou
+  automatiquement (éclairement sur la façade, T ext., absence) ; film / vitrage (g) ; arbre caduc et
+  pergola (été / hiver) ; intégré au N1 et au N0 (gains par façade rendus)
+- [x] Mode géométrique : panneaux générés au-dessus / à côté des baies de la façade, ajoutés aux obstacles
+  du précalcul d'ombrage et du temps réel du N2 (`shading_service.geometric_occluders`) ; l'ombrage est marqué périmé
+- [x] Routes `/api/protections/catalogue/`, `…/protections/`, `…/protections/effet/` (sans / toutes /
+  chacune : heures > 26 et 28 °C, degrés-heures, T op. max, chauffage, apports par façade) ;
+  carte « Protections solaires » ; **fiche en onglets** (Synthèse, Météo, Protections, Données)
+**Tests à passer avant de clore le lot :**
+- [x] Casquette sud : réduction des heures chaudes cohérente entre les 2 méthodes (`ParametricVersusGeometricTest`)
+- [x] Fraction ensoleillée paramétrique = lancer de rayons à 0,1 près sur 6 positions du soleil
+**Vérifié le :** 2026-11-14 — 378 tests OK. Mesures : fraction ensoleillée paramétrique / lancer de rayons, écart
+maximal 0,067 ; degrés-heures > 26 °C sur 45 jours d'été réduits de **69,6 % (N1 paramétrique)** et
+**87,6 % (N2 géométrique)**. Navigateur réel (banc) : casquette + store automatique au sud → résultat
+« périmé », effet 59 → 0 degrés-heures ; rejeu de tous les scénarios des Lots 3 à 14 avec les onglets ;
+clair et sombre sans erreur console.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

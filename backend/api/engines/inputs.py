@@ -42,9 +42,8 @@ class Params:
     residential: bool = True
     t_ground: float = GROUND_T_DEFAULT
     horizon: dict = field(default_factory=lambda: {o: 0.0 for o in ORIENTATIONS})
-    # Protections solaires paramétriques (Lot 14) : orientation → facteur horaire sur le direct.
-    shading: dict = field(default_factory=dict)
-    shading_diffuse: dict = field(default_factory=dict)
+    # Protections solaires (Lot 14) : [{kind, orientation, mode, params, control}] — engines.shading.
+    devices: list = field(default_factory=list)
     sources: dict = field(default_factory=dict)
 
     @property

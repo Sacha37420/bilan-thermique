@@ -31,6 +31,10 @@ def precompute_shadows(self, job_id: int, building_id: int):
         job.set_state(status=Job.RUNNING, progress=0, message="Préparation de la géométrie…")
         building = Building.objects.get(pk=building_id)
         environment_envelope = building.environment.envelope if building.environment_id else None
+        # Refonte (Lot 14) : protections fixes en mode géométrique = obstacles supplémentaires.
+        from . import shading_service
+        environment_envelope = shading_service.merge_envelopes(
+            environment_envelope, shading_service.geometric_occluders(building)) or environment_envelope
 
         def progress_cb(done, total):
             # Grille de visibilité solaire : 0-79 % ; facteur de vue du ciel : 80-98 %.
@@ -95,6 +99,9 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
         }
         sun_visibility = building.sun_visibility if building.sun_visibility.get('per_triangle') else None
         environment_envelope = building.environment.envelope if building.environment_id else None
+        from . import shading_service
+        environment_envelope = shading_service.merge_envelopes(
+            environment_envelope, shading_service.geometric_occluders(building)) or environment_envelope
 
         # DB write throttlée (~1 % du run, jamais moins de 5s d'intervalle) —
         # un job de plusieurs milliers d'heures ne doit pas faire une écriture

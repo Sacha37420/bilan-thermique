@@ -61,9 +61,18 @@
   </section>
 
   @if (fiche() && buildingId !== null) {
-    <app-resultat-carte [buildingId]="buildingId" [refresh]="ficheVersion()" />
-    <app-questionnaire [buildingId]="buildingId" [refresh]="ficheVersion()" (changed)="onQuestionnaire()" />
-    <app-meteo-carte [buildingId]="buildingId" (changed)="onQuestionnaire()" />
+    <nav class="rf-tabs" aria-label="Sections de la fiche">
+      @for (t of tabs; track t[0]) {
+        <button type="button" [class.active]="tab() === t[0]" [attr.aria-pressed]="tab() === t[0]" (click)="setTab(t[0])">{{ t[1] }}</button>
+      }
+    </nav>
+    @if (tab() === 'synthese') {
+      <app-resultat-carte [buildingId]="buildingId" [refresh]="ficheVersion()" />
+      <app-questionnaire [buildingId]="buildingId" [refresh]="ficheVersion()" (changed)="onQuestionnaire()" />
+    }
+    @if (tab() === 'meteo') { <app-meteo-carte [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
+    @if (tab() === 'protections') { <app-protections [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
+    @if (tab() === 'donnees') {
     @for (bl of blocks(); track bl.id) {
       <section class="rf-card" [attr.aria-labelledby]="'bl-' + bl.id">
         <h2 [id]="'bl-' + bl.id">{{ bl.label }}</h2>
@@ -140,6 +149,7 @@
           </table>
         </div>
       </section>
+    }
     }
   } @else if (buildingId === null) {
     <p class="rf-hint">Choisissez un bâtiment, ou ouvrez-le depuis un <a routerLink="/parc">parc</a>.</p>

@@ -490,3 +490,25 @@ class Invitation(models.Model):
 
     class Meta:
         db_table = 'invitations'
+
+
+class ShadingDevice(models.Model):
+    """Protection solaire d'un bâtiment (refonte, Lot 14 — api.engines.shading, api.shading_service).
+
+    orientation : façade visée (N/E/S/O) ou `all` ; mode : `parametrique` (facteur horaire, N0/N1) ou
+    `geometrique` (obstacles ajoutés au lancer de rayons du N2, et facteur paramétrique pour N0/N1)."""
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='shading_devices')
+    scenario = models.ForeignKey('Scenario', null=True, blank=True, on_delete=models.CASCADE, related_name='shading_devices')
+    kind = models.CharField(max_length=20)
+    orientation = models.CharField(max_length=3)
+    mode = models.CharField(max_length=12, default='parametrique')
+    label = models.CharField(max_length=150, blank=True)
+    params = models.JSONField(default=dict, blank=True)
+    control = models.JSONField(default=dict, blank=True)
+    author_sub = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'shading_devices'
+        ordering = ['building', 'orientation', 'created_at']

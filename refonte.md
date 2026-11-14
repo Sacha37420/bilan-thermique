@@ -697,3 +697,4 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 11 | livré 2026-11-14 | `Lot 11` | Parcs, rôles, invitations, cloisonnement (anciennes routes comprises), import CSV, file `parc` prioritaire, fourchette P10–P90, tableau, export. **Recette réelle 19/20 en 85 s.** 313 → 336 tests. |
 | 12 | livré 2026-11-14 | `Lot 12` | Questionnaire (15 questions → faits), classement par sensibilité N1 × incertitude, incohérences, paroi mitoyenne `adiabatic` dans le N2. 336 → 348 tests. |
 | 13 | livré 2026-11-14 | `Lot 13` | `WeatherDataset` partagé, stations Météo-France en flux, TRACC (6 scénarios), réanalyse sur période, imports EPW/CSV, comparaison. Sources réelles vérifiées. 348 → 367 tests. |
+| 14 | livré 2026-11-14 | `Lot 14` | Protections fixes/mobiles/vitrage/végétation, paramétrique (N0/N1) et géométrique (N2) cohérents (−70 % / −88 % de degrés-heures), effet été/hiver, fiche en onglets. 367 → 378 tests. |

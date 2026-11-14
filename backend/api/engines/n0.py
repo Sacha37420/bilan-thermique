@@ -27,7 +27,7 @@ def run(p, weather):
     t0 = time.monotonic()
     t_e, az, el, dni, dhi, hidx = solar.arrays(weather)
     T = len(t_e)
-    sol_w, sol_o, _ = solar_terms(p, az, el, dni, dhi)
+    sol_w, sol_o, _ = solar_terms(p, az, el, dni, dhi, t_e, hidx)
     gain_f, t_set = schedules(hidx, p.residential, p.t_heat)
     phi_int = p.gains_w_m2 * p.a_floor * gain_f
     h_air = p.h_tr_w + p.h_tr_op_air + p.h_ve
