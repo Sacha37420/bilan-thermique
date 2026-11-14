@@ -46,6 +46,11 @@ class FactLogicTest(TestCase):
         facts.record(self.b, 'baies.uw', 1.3, 'mesure', author_sub='a')
         self.assertEqual(facts.effective(self.b)['baies.uw'].method, 'mesure')
 
+    def test_override_beats_imported_document(self):
+        facts.record(self.b, 'mur.u', 0.35, 'document', source='DPE (BDNB)')  # automatique
+        facts.record(self.b, 'mur.u', 0.2, 'declare', author_sub='u1')
+        self.assertEqual(facts.effective(self.b)['mur.u'].value, 0.2)
+
     def test_automatic_value_cannot_be_retired(self):
         f = facts.record(self.b, 'mur.u', 1.8, 'infere')
         with self.assertRaises(facts.FactError):

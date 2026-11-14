@@ -373,3 +373,32 @@ def recompose_facades(self, job_id, building_id):
         job.set_state(status=Job.DONE, progress=100, message=f"{n} texture(s) recomposée(s).")
     except Exception as exc:  # noqa: BLE001
         job.set_state(status=Job.ERROR, message=net.public_message(exc))
+
+
+@shared_task(bind=True)
+def init_building(self, job_id, building_id):
+    """Refonte (Lot 9) : chaîne automatique A1→A6 d'un bâtiment (réseau, léger en calcul)."""
+    from . import pipeline
+    job = Job.objects.get(pk=job_id)
+    job.celery_task_id = self.request.id or ''
+    job.save(update_fields=['celery_task_id'])
+    try:
+        building = Building.objects.get(pk=building_id)
+        Building.objects.filter(pk=building_id).update(pipeline_status='en_cours')
+        job.set_state(status=Job.RUNNING, progress=1, message="Initialisation…")
+        report = pipeline.initialize(building, progress=lambda m, p: job.set_state(progress=p, message=m))
+        after_init(building, job)
+        job.result = {'building_id': building.pk, 'pipeline_status': building.pipeline_status,
+                      'steps': report['steps']}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100,
+                      message='Fiche initiale prête.' if building.pipeline_status == 'complet'
+                      else 'Fiche initiale incomplète (voir les étapes).')
+    except Exception as exc:
+        Building.objects.filter(pk=building_id).update(pipeline_status='incomplet')
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
+
+
+def after_init(building, job):
+    """Suite de la chaîne (A7→A9 : météo, calcul N1) — branchée au Lot 10."""
+    return None

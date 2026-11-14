@@ -164,6 +164,32 @@ cloisonnement `ok` par le moteur le 2026-11-01 (`<LAB_STATE_DIR>/tests/bilan-the
 corriger « U des murs » → badge « déclaré » + valeur automatique visible → « Revenir à l'automatique » →
 « inféré », en clair et en sombre, sans erreur console ; 390 px de large sans défilement horizontal.
 
+## Lot 9 — Fiche initiale automatique : BDNB complète et archétypes   ·   statut : livré
+**Objectif :** une adresse (ou un identifiant RNB, ou une position) suffit à remplir la fiche depuis
+l'open data, sans saisie (`refonte.md` § 4.2, étapes A1 à A6).
+**Tâches :**
+- [x] `api/sources.py` : géocodage (Géoplateforme), RNB `closest` et détail, BDNB (groupe complet + DPE
+  représentatif) ; cache `SourceCache` par clé et durée de vie ; quota BDNB (≥ 0,5 s entre deux requêtes) ;
+  `User-Agent` de l'app ; erreurs à message fixe
+- [x] `api/pipeline.py` : correspondances BDNB/DPE → clés de la fiche (U des parois, vitrage, inertie,
+  isolation, ventilation, générateur, ECS, étiquette ; DPE d'une maison = `document`, d'un immeuble = `infere`),
+  géométrie BD TOPO (emprise, murs exposés par orientation, **mitoyenneté**, horizon par façade),
+  enveloppe LOD1 pour le N2, archétypes (`api/archetypes.py`, D14) sous tout le reste
+- [x] Une étape en échec n'arrête pas la chaîne (« incomplet » + raison) ; rejouer ne duplique rien et ne
+  touche aucune surcharge ; **une surcharge prime sur toute valeur automatique** (D20)
+- [x] `POST /api/batiments/initialiser/`, `POST /api/batiments/<id>/initialiser/`, tâche `init_building` ;
+  champs `rnb_id`, `address`, `pipeline_status`, `pipeline`, `confidence`, `completeness` (lecture) ;
+  commande `initialiser_adresses` ; carte « Fiche initiale automatique » de la page Fiche
+**Tests à passer avant de clore le lot :**
+- [x] 10 adresses réelles initialisées sans saisie (recette réelle, ci-dessous)
+- [x] Tests sans réseau : correspondances sur une réponse BDNB relevée, géométrie (mitoyenneté, horizon),
+  chaîne simulée complète / en échec / rejouée, cache, quota (`api/tests/test_fiche_auto.py`)
+**Vérifié le :** 2026-11-14 — 301 tests OK. Recette réelle (conteneur jetable de l'image, accès Internet,
+base jetable) : `initialiser_adresses` sur 10 adresses de Tours, Orléans et Blois → **10/10 « complet »**,
+1,0 à 2,3 s par bâtiment ; confiance 0,18 à 0,39, complétude 0,15 à 0,72 (selon la présence d'un DPE).
+Navigateur réel (banc sans Internet) : initialisation → « incomplet », étapes et messages fixes affichés,
+valeurs d'archétype posées, en clair et en sombre, sans erreur console.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

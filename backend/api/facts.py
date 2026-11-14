@@ -171,8 +171,17 @@ def validate_value(key, value):
     raise FactError('Type de clé inconnu.')
 
 
+def is_override(f):
+    """Surcharge = valeur posée par une personne (auteur connu), par opposition à une valeur
+    automatique (chaîne open data, archétype, calage), même de méthode « document »."""
+    return bool(f.author_sub)
+
+
 def _better(a, b):
-    """a prime-t-il sur b ? Rang de méthode, puis date."""
+    """a prime-t-il sur b ? Une surcharge prime sur toute valeur automatique (principe 3 : un DPE
+    réimporté ne reprend pas la main sur une correction) ; puis rang de méthode, puis date."""
+    if is_override(a) != is_override(b):
+        return is_override(a)
     ra, rb = METHOD_RANK[a.method], METHOD_RANK[b.method]
     if ra != rb:
         return ra > rb
@@ -252,6 +261,11 @@ def record(building, key, value, method, *, source='', confidence=None, author_s
     value = validate_value(key, value)
     spec = BY_KEY[key]
     conf = DEFAULT_CONFIDENCE[method] if confidence is None else max(0.0, min(1.0, float(confidence)))
+    same = BuildingFact.objects.filter(building=building, key=key, method=method, scenario=scenario,
+                                       author_sub=author_sub or '', retired_at__isnull=True,
+                                       superseded_by__isnull=True).order_by('-created_at').first()
+    if same is not None and same.value == value and same.source == (source or '')[:300]:
+        return same  # rejouer la chaîne ne multiplie pas les faits identiques
     fact = BuildingFact.objects.create(
         building=building, key=key, value=value, unit=spec.unit if unit is None else unit, method=method,
         source=(source or '')[:300], confidence=conf, author_sub=author_sub or '', author_name=(author_name or '')[:150],

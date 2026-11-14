@@ -7,6 +7,11 @@ import { RefonteApiService } from '../../core/refonte-api.service';
 import { Catalogue, CatalogueKey, Fact, Fiche, METHOD_LABELS, Method } from '../../core/refonte.types';
 
 interface BuildingSummary { id: number; name: string; }
+interface BuildingInfo {
+  id: number; name: string; address: string; rnb_id: string; pipeline_status: string;
+  pipeline: { steps?: Record<string, { ok: boolean; error?: string }>; horizon_deg?: Record<string, number>;
+    geometry?: { emprise_m2: number; mitoyennete: number }; sources?: string[] };
+}
 
 /** Fiche d'un bâtiment (refonte, Lot 8) : chaque valeur avec sa provenance ; corriger = poser une
  * surcharge ; « revenir à l'automatique » = la retirer. Les cartes d'affinage s'y ajoutent lot par lot. */
@@ -37,6 +42,55 @@ export class FicheComponent implements OnInit {
   editSource = '';
   history = signal<{ key: string; rows: Fact[] } | null>(null);
 
+  // ── Lot 9 : fiche initiale automatique ──
+  building = signal<BuildingInfo | null>(null);
+  initAddress = '';
+  initJob = signal<{ id: number; status: string; progress: number; message: string } | null>(null);
+  private initTimer?: ReturnType<typeof setInterval>;
+  stepLabels: Record<string, string> = { A1: 'Identification (BAN, RNB)', A2: 'Fiche BDNB et DPE',
+    A3: 'Géométrie, mitoyenneté, masques (BD TOPO)', A5: 'Compositions par archétype' };
+
+  initFromAddress(): void {
+    const a = this.initAddress.trim();
+    if (a.length < 3) return;
+    this.error.set('');
+    this.rf.post<{ building_id: number; job: { id: number; status: string; progress: number; message: string } }>(
+      '/batiments/initialiser/', { address: a }).subscribe({
+      next: r => { this.initJob.set(r.job); this.watchInit(r.job.id, r.building_id); },
+      error: e => this.error.set(e?.error?.detail ?? e?.error?.non_field_errors?.[0] ?? 'Initialisation refusée.'),
+    });
+  }
+
+  reinit(): void {
+    if (this.buildingId === null) return;
+    this.rf.post<{ building_id: number; job: { id: number; status: string; progress: number; message: string } }>(
+      `/batiments/${this.buildingId}/initialiser/`, {}).subscribe({
+      next: r => { this.initJob.set(r.job); this.watchInit(r.job.id, r.building_id); },
+      error: e => this.error.set(e?.error?.detail ?? 'Initialisation refusée.'),
+    });
+  }
+
+  private watchInit(jobId: number, buildingId: number): void {
+    clearInterval(this.initTimer);
+    this.initTimer = setInterval(() => {
+      this.api.getJob(jobId).subscribe({ next: j => {
+        const job = j as { id: number; status: string; progress: number; message: string };
+        this.initJob.set(job);
+        if (job.status === 'DONE' || job.status === 'ERROR') {
+          clearInterval(this.initTimer);
+          this.api.getBuildings().subscribe({ next: bs => this.buildings.set(bs as BuildingSummary[]) });
+          if (this.buildingId === buildingId) this.load();
+          else void this.router.navigate([], { queryParams: { b: buildingId } });
+        }
+      } });
+    }, 1500);
+  }
+
+  stepsOf(b: BuildingInfo): { key: string; ok: boolean; error?: string }[] {
+    const steps = b.pipeline?.steps ?? {};
+    return Object.keys(steps).map(k => ({ key: k, ok: steps[k].ok, error: steps[k].error }));
+  }
+
   blocks = computed(() => {
     const cat = this.catalogue();
     if (!cat) return [];
@@ -61,7 +115,9 @@ export class FicheComponent implements OnInit {
     this.fiche.set(null);
     this.editing.set(null);
     this.history.set(null);
+    this.building.set(null);
     if (this.buildingId === null) return;
+    this.api.getBuilding(this.buildingId).subscribe({ next: b => this.building.set(b as BuildingInfo) });
     this.rf.fiche(this.buildingId).subscribe({
       next: f => this.fiche.set(f),
       error: () => this.error.set('Fiche introuvable.'),

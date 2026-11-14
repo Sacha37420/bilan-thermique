@@ -24,3 +24,7 @@
   .facts th:nth-child(1) { width: 26%; } .facts th:nth-child(2) { width: 22%; }
   .facts th:nth-child(3) { width: 18%; } .facts th:nth-child(4) { width: 9%; }
 }
+.steps { list-style: none; padding: 0; margin: 0 0 var(--space-3); font-size: var(--text-sm); display: grid; gap: var(--space-1); }
+.steps li span { color: var(--success); font-weight: 700; }
+.steps li.ko span, .steps li.ko { color: var(--danger); }
+code { font-family: var(--font-mono); }

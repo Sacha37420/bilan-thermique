@@ -201,6 +201,13 @@ class Building(models.Model):
     sun_visibility = models.JSONField(default=dict, blank=True)
     sun_visibility_stale = models.BooleanField(default=True)
 
+    # Refonte (Lot 9) : chaîne automatique (api.pipeline).
+    rnb_id = models.CharField(max_length=20, blank=True, default='', db_index=True)
+    address = models.CharField(max_length=300, blank=True, default='')
+    pipeline_status = models.CharField(max_length=12, blank=True, default='')  # '' | en_attente | en_cours | complet | incomplet
+    # Compte rendu : étapes (ok / erreur, message fixe), géométrie simplifiée, horizon par façade.
+    pipeline = models.JSONField(default=dict, blank=True)
+
     # Refonte (Lot 8) : scores de la fiche effective (api.facts.scores), tenus à jour à chaque fait.
     confidence = models.FloatField(default=0.0)
     completeness = models.FloatField(default=0.0)
@@ -363,3 +370,15 @@ class BuildingFact(models.Model):
 
     def __str__(self) -> str:
         return f"{self.key}={self.value!r} [{self.method}] bâtiment {self.building_id}"
+
+
+class SourceCache(models.Model):
+    """Réponse d'un service open data, gardée par clé (Lot 9, refonte — api.sources)."""
+
+    key = models.CharField(max_length=300, unique=True)
+    service = models.CharField(max_length=30, blank=True)
+    payload = models.JSONField(null=True, blank=True)
+    fetched_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'source_cache'

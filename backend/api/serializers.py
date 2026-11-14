@@ -318,8 +318,19 @@ class BuildingSerializer(serializers.Serializer):
                                                         min_value=0.0, max_value=0.95)
     sun_visibility_stale = serializers.BooleanField(read_only=True)
     facades = serializers.SerializerMethodField()
+    # Refonte (Lots 8-9) : lecture seule — la fiche s'écrit par /faits/, la chaîne par /initialiser/.
+    rnb_id = serializers.CharField(read_only=True)
+    address = serializers.CharField(read_only=True)
+    pipeline_status = serializers.CharField(read_only=True)
+    pipeline = serializers.SerializerMethodField()
+    confidence = serializers.FloatField(read_only=True)
+    completeness = serializers.FloatField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+    def get_pipeline(self, obj):
+        p = obj.pipeline or {}
+        return {k: p.get(k) for k in ('steps', 'geometry', 'horizon_deg', 'sources', 'geocode_score') if k in p}
 
     def get_facades(self, obj):
         """Lot AK — analyse des façades, sans l'enveloppe de base (réservée à la

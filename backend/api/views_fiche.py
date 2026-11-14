@@ -29,7 +29,7 @@ def fiche_payload(building, viewer_sub, scenario=None):
     auto = {}
     # Valeur automatique sous-jacente quand une surcharge prime (affichée « automatique : … »).
     for f in facts.active_facts(building, scenario):
-        if f.method in facts.SYSTEM_METHODS:
+        if not facts.is_override(f):
             cur = auto.get(f.key)
             if cur is None or facts._better(f, cur):
                 auto[f.key] = f
