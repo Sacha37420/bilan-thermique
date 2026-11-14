@@ -262,6 +262,27 @@ fait déclaré, fait bouger le résultat et la confiance (`refonte.md` § B1, E9
 avec influence en kWh, « murs isolés par l'extérieur, 14 cm » → besoin 173 → 85 kWh/m²·an, confiance
 14 → 20 %, carte Résultat « à jour » ; clair et sombre sans erreur console.
 
+## Lot 13 — Météo choisie et comparée (B2)   ·   statut : livré
+**Objectif :** choisir la météo d'un calcul (année type, période réelle, station Météo-France, climat
+futur TRACC, import) et comparer ses effets (`refonte.md` § B2).
+**Tâches :**
+- [x] `WeatherDataset` (série horaire stockée une fois par empreinte, statistiques, qualité) ;
+  `Building.weather_dataset` (météo retenue pour N0/N1, défaut : année type du site)
+- [x] `api/weather_service.py` : année type PVGIS ; réanalyse Open-Meteo sur une période ; **stations
+  Météo-France** (fichiers horaires par département lus en flux, rayonnement de la station décomposé par
+  Erbs, sinon Open-Meteo ; trous ≤ 3 h comblés et comptés) ; **TRACC** +2 / +2,7 / +4 °C avec ou sans vague
+  de chaleur (station de référence la plus proche) ; imports EPW et CSV ; découpage par période
+- [x] Jobs `build_weather_dataset`, `list_weather_stations` ; routes `/api/meteo/…`, `PUT …/meteo/`,
+  `POST …/comparer-meteo/` (N1 sous chaque météo, DJU, ensoleillement) ; carte « Météo » de la fiche
+**Tests à passer avant de clore le lot :**
+- [x] Même bâtiment, 3 météos, 3 résultats comparés (`MeteoApiTest.test_same_building_three_weathers_three_results`)
+- [x] Lecture des fichiers Météo-France, TRACC, EPW, CSV ; trous ; périodes ; cache (`test_meteo_choix.py`, 19 tests)
+**Vérifié le :** 2026-11-14 — 367 tests OK. Sources réelles (conteneur jetable avec Internet) : 15 stations à
+moins de 60 km de Tours en 9 s ; station TOURS (37179001) année 2023 : 8 760 h, aucune heure manquante, 8 s
+(DJU 1 982, T moy. 13,6 °C) ; TRACC +2,7 °C station Tours : 8 760 h en 1 s (T max 43,2 °C, 190 h > 30 °C) ;
+année type PVGIS (DJU 2 268). Navigateur réel (banc) : 3 météos comparées → 186 / 234 / 119 kWh/m², choix
+d'une météo → résultat à refaire, import CSV ; clair et sombre sans erreur console.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

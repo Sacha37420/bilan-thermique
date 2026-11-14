@@ -433,3 +433,45 @@ def process_parc_next(self, portfolio_id, owner_sub=''):
     parc.process_one(b, owner_sub=owner_sub)
     process_parc_next.apply_async(args=[portfolio_id, owner_sub], queue='parc')
     return b.pk
+
+
+@shared_task(bind=True)
+def build_weather_dataset(self, job_id, params):
+    """Refonte (Lot 13) : construit un jeu météo (réseau) — année type, réanalyse, station, TRACC."""
+    from datetime import date as _date
+    from . import weather_service as ws
+    job = Job.objects.get(pk=job_id)
+    try:
+        job.set_state(status=Job.RUNNING, progress=5, message='Récupération des données météo…')
+        kind, lat, lon, owner = params['type'], params['lat'], params['lon'], job.owner_sub
+        if kind == 'tmy':
+            ds = ws.from_tmy(lat, lon, owner)
+        elif kind == 'reel':
+            ds = ws.from_reanalysis(lat, lon, _date.fromisoformat(params['start']), _date.fromisoformat(params['end']), owner)
+        elif kind == 'station':
+            job.set_state(progress=10, message='Lecture des fichiers horaires Météo-France (en flux)…')
+            ds = ws.from_station(params['station'], _date.fromisoformat(params['start']), _date.fromisoformat(params['end']), owner)
+        elif kind == 'tracc':
+            ds = ws.from_tracc(lat, lon, params['scenario'], owner)
+        else:
+            raise ws.WeatherError('Type de météo inconnu.')
+        job.result = {'dataset_id': ds.pk, 'label': ds.label}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100, message=f'« {ds.label} » prêt.')
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=net.public_message(exc, 'Météo indisponible.'))
+
+
+@shared_task(bind=True)
+def list_weather_stations(self, job_id, params):
+    """Refonte (Lot 13) : stations Météo-France proches (première fois par département : lecture en flux)."""
+    from . import weather_service as ws
+    job = Job.objects.get(pk=job_id)
+    try:
+        job.set_state(status=Job.RUNNING, progress=10, message='Recherche des stations Météo-France…')
+        stations = ws.stations_near(params['lat'], params['lon'], params.get('alt'))
+        job.result = {'stations': stations}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100, message=f'{len(stations)} station(s) à moins de {ws.STATION_MAX_KM} km.')
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=net.public_message(exc, 'Stations indisponibles.'))

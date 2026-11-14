@@ -2,6 +2,7 @@ from django.urls import path
 from .views_calc import BuildingCalcRunsView, CalcRunDetailView, CalculerView, ResultatView
 from .views_pipeline import InitNewBuildingView, ReinitBuildingView
 from . import views_parc as vp
+from . import views_meteo as vm
 from .views_questionnaire import QuestionsView, QuestionnaireView
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
 from .views import (
@@ -56,6 +57,12 @@ urlpatterns = [
     path('batiments/<int:pk>/initialiser/', ReinitBuildingView.as_view()),
     path('batiments/<int:pk>/questions/', QuestionsView.as_view()),
     path('batiments/<int:pk>/questionnaire/', QuestionnaireView.as_view()),
+    # ── Refonte (Lot 13) : météo ──
+    path('meteo/jeux/', vm.DatasetsView.as_view()),
+    path('meteo/stations/', vm.StationsView.as_view()),
+    path('meteo/importer/', vm.ImportView.as_view()),
+    path('batiments/<int:pk>/meteo/', vm.BuildingWeatherView.as_view()),
+    path('batiments/<int:pk>/comparer-meteo/', vm.CompareWeatherView.as_view()),
     # ── Refonte (Lot 11) : parcs ──
     path('parcs/', vp.PortfoliosView.as_view()),
     path('parcs/<int:pk>/', vp.PortfolioDetailView.as_view()),

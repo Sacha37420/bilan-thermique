@@ -131,6 +131,29 @@ class Environment(models.Model):
         return self.name
 
 
+class WeatherDataset(models.Model):
+    """Série météo horaire partagée (refonte, Lot 13 — api.weather_service). Stockée une fois par
+    empreinte de la série ; un fichier importé n'est pas gardé, seule la série lue l'est."""
+
+    KINDS = [('tmy', 'Année type'), ('reel', 'Période réelle (réanalyse)'), ('station', 'Station Météo-France'),
+             ('tracc', 'Climat futur TRACC'), ('import', 'Import')]
+    kind = models.CharField(max_length=10, choices=KINDS)
+    label = models.CharField(max_length=200)
+    lat = models.FloatField(null=True, blank=True)
+    lon = models.FloatField(null=True, blank=True)
+    series = models.JSONField(default=list)
+    series_hash = models.CharField(max_length=64, unique=True)
+    stats = models.JSONField(default=dict, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+    quality = models.JSONField(default=dict, blank=True)
+    owner_sub = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'weather_datasets'
+        ordering = ['-created_at']
+
+
 class Portfolio(models.Model):
     """Parc de bâtiments (refonte, Lot 11). Rôles par personne (`sub`) dans `PortfolioMember`."""
 
@@ -237,6 +260,9 @@ class Building(models.Model):
     sun_visibility = models.JSONField(default=dict, blank=True)
     sun_visibility_stale = models.BooleanField(default=True)
 
+    # Refonte (Lot 13) : météo retenue pour les calculs N0/N1 (vide = année type du site).
+    weather_dataset = models.ForeignKey('WeatherDataset', null=True, blank=True, on_delete=models.SET_NULL,
+                                        related_name='buildings')
     # Refonte (Lot 9) : chaîne automatique (api.pipeline).
     rnb_id = models.CharField(max_length=20, blank=True, default='', db_index=True)
     address = models.CharField(max_length=300, blank=True, default='')

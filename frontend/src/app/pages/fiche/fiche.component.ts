@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { MeteoCarteComponent } from '../../components/meteo-carte/meteo-carte.component';
 import { QuestionnaireComponent } from '../../components/questionnaire/questionnaire.component';
 import { ResultatCarteComponent } from '../../components/resultat-carte/resultat-carte.component';
 import { Catalogue, CatalogueKey, Fact, Fiche, METHOD_LABELS, Method } from '../../core/refonte.types';
@@ -20,7 +21,7 @@ interface BuildingInfo {
 @Component({
   selector: 'app-fiche',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent],
   templateUrl: './fiche.component.html',
   styleUrl: './fiche.component.scss',
 })

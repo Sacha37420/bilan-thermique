@@ -49,6 +49,8 @@ def resolve_weather(building, spec=None):
     if spec.get('points'):
         pts = spec['points']
         return pts, {'source': spec.get('label') or 'série fournie', 'n_hours': len(pts), 'hash': stable_hash(pts)[:16]}
+    if not spec.get('dataset_id') and building.weather_dataset_id:
+        spec = {**spec, 'dataset_id': building.weather_dataset_id}
     if spec.get('dataset_id'):
         from . import weather_service
         return weather_service.series_for(spec, building)

@@ -63,6 +63,7 @@
   @if (fiche() && buildingId !== null) {
     <app-resultat-carte [buildingId]="buildingId" [refresh]="ficheVersion()" />
     <app-questionnaire [buildingId]="buildingId" [refresh]="ficheVersion()" (changed)="onQuestionnaire()" />
+    <app-meteo-carte [buildingId]="buildingId" (changed)="onQuestionnaire()" />
     @for (bl of blocks(); track bl.id) {
       <section class="rf-card" [attr.aria-labelledby]="'bl-' + bl.id">
         <h2 [id]="'bl-' + bl.id">{{ bl.label }}</h2>
