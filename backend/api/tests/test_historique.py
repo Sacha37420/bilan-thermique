@@ -11,10 +11,10 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
-from . import calc_runs, environment_service, facade_sfm, tasks
-from .models import Building, CalcRun, Environment, Job, ParoiModel
-from .test_lot02_garde_fous import WALL, calcul_payload
-from .testing import box_envelope, client_for, patch_jwks
+from .. import calc_runs, environment_service, facade_sfm, tasks
+from ..models import Building, CalcRun, Environment, Job, ParoiModel
+from .test_garde_fous import WALL, calcul_payload
+from ..testing import box_envelope, client_for, patch_jwks
 
 
 @patch_jwks()

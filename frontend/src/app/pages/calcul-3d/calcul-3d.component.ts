@@ -88,6 +88,10 @@ const MARGIN = { top: 16, right: 16, bottom: 32, left: 46 };
 
 // Échelle divergente bleu/rouge (skill dataviz) pour une grandeur continue
 // (température) — distincte de la palette catégorielle des séries.
+// EXCEPTION DOCUMENTÉE à « aucune couleur en dur » (identité Foyer, Lot 5 de la refonte) : ces
+// trois valeurs colorent les SOMMETS d'un maillage three.js (WebGL), qui ne lit pas les variables
+// CSS ; elles encodent une donnée (température), pas le thème, et doivent rester identiques en
+// clair et en sombre pour que la légende garde son sens.
 const COLD_HEX = '#2a78d6';
 const HOT_HEX = '#e34948';
 const MID_HEX = '#c9c7bd';

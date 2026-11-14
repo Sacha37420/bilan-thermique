@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "name": "bilan-thermique",
+  "label": "Bilan Thermique",
+  "description": "Bilan thermique de bâtiments : analyse automatique d'un parc depuis l'open data, puis affinage bâtiment par bâtiment (formulaires, météo, géométrie, protections solaires, systèmes, mesures, documents lus par IA sur le compte de l'utilisateur).",
+  "category": "application",
+  "required": false,
+  "requires": {
+    "modules": [],
+    "system": [],
+    "domain": false
+  },
+  "resources": {
+    "build_ram_mb": 1500,
+    "disk_mb": 3000,
+    "build_minutes": 8,
+    "heavy_build": false
+  },
+  "settings": [],
+  "groups": ["developers", "famille", "amis"],
+  "install": null
+}

@@ -87,24 +87,34 @@ Théorie est une documentation physique.
 - [ ] Page vérifiée en navigateur réel, clair et sombre ; lien présent dans la nav
 **Vérifié le :**
 
-## Lot 5 — Gabarit front et chemin à portes   ·   statut : à faire
+## Lot 5 — Gabarit front et chemin à portes   ·   statut : livré
 **Objectif :** même comportement que le gabarit corrigé (T3), déploiement par le moteur (T1).
 *Repassé de « en cours » à « à faire » le 2026-11-14 (refonte) : un seul lot en cours à la fois, et
 l'ordre de la refonte est 2 → 3 → 5. Les tâches déjà cochées restent acquises.*
 **Tâches :**
 - [x] Polices en chemin relatif (`styles.scss`) ; `tokenBases()` (`core/env.ts` : la seule API de l'app ; `core/token-scope.ts`, copie de lab-admin) ; `pkceMethod: 'S256'` (front — `--pkce` sur le client reste à poser par l'architecte après déploiement) ; `redirectUri` par `core/redirect-uri.ts` (copie de lab-admin : la page courante seulement sous l'origine et le préfixe de l'app, sinon `appUrl`)
 - [x] Ports publiés liés à `${LAB_BIND_ADDR:-127.0.0.1}` (chantier « failles », I1)
-- [ ] Renommer le service `worker` en `bilan-thermique-worker`
-- [ ] Documenter l'exception « couleurs du rendu three.js » (`calcul-3d.component.ts:91-93`, `mesh-viewer.component.ts:25`)
-- [ ] Découper `backend/api/tests.py` (4 514 lignes) par domaine
+- [x] Renommer le service `worker` en `bilan-thermique-worker` (même `container_name` ; `--remove-orphans`
+  des deux chemins de déploiement retire l'ancien service — vérifié sur un projet compose factice)
+- [x] Documenter l'exception « couleurs du rendu three.js » (commentaires dans les deux fichiers + `README.md`)
+- [x] Découper `backend/api/tests.py` (4 514 lignes) par domaine : `backend/api/tests/` (8 domaines +
+  `helpers.py`, script AST, classes recopiées à l'identique ; tests des Lots 2 et 3 déplacés dedans)
+- [x] (refonte) `lab-module.json` à la racine (`REGLES_MODULE.md` : dépendances, ressources, groupes,
+  `install: null` — tout est dans l'image) ; `README.md` de l'app (dépendances, licences, limites)
+- [x] (refonte) Image frontend : `npm ci` au lieu de `npm install` (piège « résolution au jour du build »)
 **Tests à passer avant de clore le lot :**
-- [ ] `validate-app.sh bilan-thermique --quality-only` vert ; cloisonnement `ok` par le moteur ; même nombre de tests après le découpage
+- [x] `validate-app.sh bilan-thermique --quality-only` vert ; cloisonnement `ok` par le moteur ; même nombre de tests après le découpage
 **Vérifié le :** 2026-11-01 — non déployé. Chantier « failles » (secteur E) : image candidate
 `bilan-thermique-frontend:candidat` construite depuis une copie propre du frontend (`npm install` +
 `ng build` OK ; le bundle porte `pkceMethod:"S256"`, les WOFF2 sont référencés en `./media/…`) ;
 `docker compose config` rend `host_ip: 127.0.0.1` pour les deux ports publiés (backend, frontend ;
 `worker` et `redis` n'en publient pas). Backend non modifié. Restent le renommage du `worker`, la
 documentation des couleurs three.js et le découpage des tests (hors chantier).
+**Vérifié le 2026-11-14 (refonte) :** `bash scripts/validate-app.sh bilan-thermique --quality-only` code 0 ;
+contrôle complet : seul refus « arbre de travail modifié » (avant commit, attendu) ;
+`bash scripts/lab-modules.sh show bilan-thermique --check` → « rien ne manque » ; tests **268 avant et
+268 après le découpage**, tous OK ; `ng build` OK. Cloisonnement : dernier verdict du moteur `ok`
+(2026-11-01) ; non rejoué — cette session n'a pas d'accès au moteur (voir `refonte.md`, rapport).
 **Relecture du 2026-11-08 (nuit) :** statut « en cours » juste (seul lot en cours). Déjà acquis pour la
 case de test : `validate-app.sh --quality-only` code 0 (copie de ce dossier, outil `valq.sh`) et
 cloisonnement `ok` par le moteur le 2026-11-01 (`<LAB_STATE_DIR>/tests/bilan-thermique.json`) ; le

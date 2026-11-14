@@ -52,7 +52,10 @@ services:
       timeout: 3s
       retries: 20
 
-  worker:
+  # Service nommé `<app>-worker` (règle du lab, Lot 5 de la refonte). Ancien nom : `worker` —
+  # même conteneur ; les deux chemins de déploiement passent `--remove-orphans`, qui retire
+  # l'ancien service avant de créer celui-ci (vérifié sur un projet compose factice, 2026-11-14).
+  bilan-thermique-worker:
     build: ./backend
     container_name: bilan-thermique-worker
     restart: unless-stopped

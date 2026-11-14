@@ -19,6 +19,9 @@ export interface ViewerTexture {
   uv: (p: number[]) => [number, number];
 }
 
+// EXCEPTION DOCUMENTÉE à « aucune couleur en dur » (Foyer, Lot 5 de la refonte) : three.js
+// (WebGL) ne lit pas les variables CSS. Les couleurs de la scène passent par un token
+// (`--accent`…) résolu ici à l'exécution ; le gris `#888888` n'est qu'un repli si le token manque.
 function resolveColor(varNameOrHex: string): THREE.Color {
   if (varNameOrHex.startsWith('--')) {
     const value = getComputedStyle(document.documentElement).getPropertyValue(varNameOrHex).trim();

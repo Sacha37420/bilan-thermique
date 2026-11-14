@@ -8,9 +8,9 @@ import requests
 from django.db import connection
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
 
-from . import building_solver, net, bdnb, weather_source, geodata
-from .models import Building, Environment, Job, ParoiModel
-from .testing import box_envelope, client_for, patch_jwks
+from .. import building_solver, net, bdnb, weather_source, geodata
+from ..models import Building, Environment, Job, ParoiModel
+from ..testing import box_envelope, client_for, patch_jwks
 
 WALL = [{'e': 0.2, 'lam': 1.0, 'rho': 2000.0, 'c': 1000.0, 'tau': 0.0, 'r': 0.0, 'alpha': 0.6}]
 
