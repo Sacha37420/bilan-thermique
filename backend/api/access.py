@@ -14,3 +14,13 @@ def sub_of(request) -> str:
 
 def visible_buildings(request):
     return Building.objects.all()
+
+
+def can_declare(request, building) -> bool:
+    """Poser un fait déclaré/mesuré (surcharge). Bâtiment sans parc : tout membre (D4)."""
+    return True
+
+
+def can_retire(request, fact) -> bool:
+    """Retirer une surcharge : son auteur (complété au Lot 11 : gestionnaires du parc)."""
+    return bool(sub_of(request)) and fact.author_sub == sub_of(request)

@@ -140,6 +140,30 @@ cloisonnement `ok` par le moteur le 2026-11-01 (`<LAB_STATE_DIR>/tests/bilan-the
 - [ ] À définir avec chaque tâche retenue
 **Vérifié le :**
 
+## Lot 8 — Provenance : faits, fiche effective, surcharges   ·   statut : livré
+**Objectif :** chaque valeur de la fiche d'un bâtiment garde sa provenance (`refonte.md`, principes 2 et 3,
+§ 8) ; une correction est une surcharge réversible ; la confiance et la complétude se calculent.
+**Tâches :**
+- [x] Catalogue de clés (`api/facts.py` : identité, enveloppe, menuiseries, ventilation, usage, systèmes,
+  DPE ; type, unité, plage plausible, poids) et validation à message fixe
+- [x] `BuildingFact` (valeur, méthode `mesure > document > declare > infere > defaut`, source, confiance,
+  auteur par `sub`, extrait cité, `retired_at`, `superseded_by`) et `Scenario` (variante, utilisée au Lot 18)
+- [x] Fiche effective (rang puis date ; surcharge de variante prioritaire), empreinte `fiche_hash`,
+  scores `Building.confidence` / `completeness` tenus à jour
+- [x] Réimportation automatique : remplace l'ancienne valeur automatique, jamais une surcharge
+- [x] API : `GET /api/fiche/catalogue/`, `GET /api/batiments/<id>/fiche/`, `GET|POST /api/batiments/<id>/faits/`,
+  `DELETE /api/faits/<id>/` (« revenir à l'automatique », auteur seulement ; méthodes système refusées)
+- [x] Page « Fiche bâtiment » (`/fiche?b=<id>`) : provenance lisible, Corriger, Revenir à l'automatique,
+  historique ; classes partagées `rf-` dans `styles.scss`
+**Tests à passer avant de clore le lot :**
+- [x] Une surcharge retirée rend la valeur automatique (`FactLogicTest.test_retired_override_restores_automatic_value`,
+  `FicheApiTest.test_override_then_back_to_automatic`)
+- [x] La réimportation n'écrase pas une surcharge ; la confiance monte avec la méthode (`test_reimport_never_overwrites_override`,
+  `test_scores_rise_with_corrections`)
+**Vérifié le :** 2026-11-14 — 282 tests OK (14 nouveaux) ; `ng build` OK ; navigateur réel (banc jetable) :
+corriger « U des murs » → badge « déclaré » + valeur automatique visible → « Revenir à l'automatique » →
+« inféré », en clair et en sombre, sans erreur console ; 390 px de large sans défilement horizontal.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

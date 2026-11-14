@@ -1,0 +1,119 @@
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
+import { ApiService } from '../../core/api.service';
+import { RefonteApiService } from '../../core/refonte-api.service';
+import { Catalogue, CatalogueKey, Fact, Fiche, METHOD_LABELS, Method } from '../../core/refonte.types';
+
+interface BuildingSummary { id: number; name: string; }
+
+/** Fiche d'un bâtiment (refonte, Lot 8) : chaque valeur avec sa provenance ; corriger = poser une
+ * surcharge ; « revenir à l'automatique » = la retirer. Les cartes d'affinage s'y ajoutent lot par lot. */
+@Component({
+  selector: 'app-fiche',
+  standalone: true,
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe],
+  templateUrl: './fiche.component.html',
+  styleUrl: './fiche.component.scss',
+})
+export class FicheComponent implements OnInit {
+  private api = inject(ApiService);
+  private rf = inject(RefonteApiService);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+
+  buildings = signal<BuildingSummary[]>([]);
+  buildingId: number | null = null;
+  catalogue = signal<Catalogue | null>(null);
+  fiche = signal<Fiche | null>(null);
+  error = signal('');
+  saving = signal(false);
+  methodLabels = METHOD_LABELS;
+
+  editing = signal<string | null>(null);
+  editValue: unknown = null;
+  editMethod: Method = 'declare';
+  editSource = '';
+  history = signal<{ key: string; rows: Fact[] } | null>(null);
+
+  blocks = computed(() => {
+    const cat = this.catalogue();
+    if (!cat) return [];
+    return cat.blocks.map(([id, label]) => ({ id, label, keys: cat.keys.filter(k => k.block === id) }));
+  });
+
+  ngOnInit(): void {
+    this.rf.catalogue().subscribe({ next: c => this.catalogue.set(c) });
+    this.api.getBuildings().subscribe({ next: bs => this.buildings.set(bs as BuildingSummary[]) });
+    this.route.queryParamMap.subscribe(p => {
+      const b = Number(p.get('b'));
+      this.buildingId = Number.isFinite(b) && b > 0 ? b : null;
+      this.load();
+    });
+  }
+
+  onBuildingChange(): void {
+    void this.router.navigate([], { queryParams: { b: this.buildingId }, queryParamsHandling: 'merge' });
+  }
+
+  load(): void {
+    this.fiche.set(null);
+    this.editing.set(null);
+    this.history.set(null);
+    if (this.buildingId === null) return;
+    this.rf.fiche(this.buildingId).subscribe({
+      next: f => this.fiche.set(f),
+      error: () => this.error.set('Fiche introuvable.'),
+    });
+  }
+
+  fact(key: string): Fact | undefined { return this.fiche()?.facts[key]; }
+
+  display(k: CatalogueKey, v: unknown): string {
+    if (v === null || v === undefined || v === '') return '—';
+    if (k.kind === 'enum') return k.choices?.[String(v)] ?? String(v);
+    if (k.kind === 'bool') return v ? 'oui' : 'non';
+    if (typeof v === 'number') {
+      const s = Math.abs(v) >= 100 ? v.toFixed(0) : (Math.round(v * 1000) / 1000).toString().replace('.', ',');
+      return k.unit ? `${s} ${k.unit}` : s;
+    }
+    return String(v);
+  }
+
+  gaugeClass(x: number): string { return x < 0.35 ? 'low' : x < 0.65 ? 'mid' : 'high'; }
+
+  startEdit(k: CatalogueKey): void {
+    const f = this.fact(k.key);
+    this.editing.set(k.key);
+    this.editValue = f?.value ?? (k.kind === 'bool' ? false : null);
+    this.editMethod = 'declare';
+    this.editSource = '';
+    this.error.set('');
+  }
+
+  save(k: CatalogueKey): void {
+    if (this.buildingId === null) return;
+    let value: unknown = this.editValue;
+    if ((k.kind === 'number' || k.kind === 'int') && value !== null && value !== '') value = Number(value);
+    if (value === '') value = null;
+    this.saving.set(true);
+    this.rf.declare(this.buildingId, { key: k.key, value, method: this.editMethod, source: this.editSource || 'saisie' }).subscribe({
+      next: f => { this.fiche.set(f); this.editing.set(null); this.saving.set(false); },
+      error: e => { this.error.set(e?.error?.detail ?? 'Valeur refusée.'); this.saving.set(false); },
+    });
+  }
+
+  backToAuto(f: Fact): void {
+    this.rf.retire(f.id).subscribe({
+      next: fi => this.fiche.set(fi),
+      error: e => this.error.set(e?.error?.detail ?? 'Impossible de retirer cette valeur.'),
+    });
+  }
+
+  showHistory(k: CatalogueKey): void {
+    if (this.buildingId === null) return;
+    if (this.history()?.key === k.key) { this.history.set(null); return; }
+    this.rf.history(this.buildingId, k.key).subscribe({ next: r => this.history.set({ key: k.key, rows: r.results }) });
+  }
+}

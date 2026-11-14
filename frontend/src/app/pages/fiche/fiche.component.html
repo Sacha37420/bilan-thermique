@@ -1,0 +1,115 @@
+<div class="rf-page">
+  <p class="rf-eyebrow">Fiche bâtiment</p>
+  <h1>Fiche et provenance</h1>
+  <p class="rf-sub">
+    Chaque valeur dit d'où elle vient : <span class="rf-badge m-mesure">mesuré</span>
+    <span class="rf-badge m-document">document</span> <span class="rf-badge m-declare">déclaré</span>
+    <span class="rf-badge m-infere">inféré</span> <span class="rf-badge m-defaut">défaut</span>.
+    Corriger une valeur pose une surcharge ; « Revenir à l'automatique » la retire. Rien n'est effacé.
+  </p>
+
+  <section class="rf-card">
+    <div class="rf-row">
+      <label class="rf-field grow">
+        <span>Bâtiment</span>
+        <select [(ngModel)]="buildingId" (ngModelChange)="onBuildingChange()" aria-label="Bâtiment">
+          <option [ngValue]="null">— choisir —</option>
+          @for (b of buildings(); track b.id) { <option [ngValue]="b.id">{{ b.name }}</option> }
+        </select>
+      </label>
+      @if (fiche(); as f) {
+        <div class="scores">
+          <span class="rf-gauge" title="Confiance de la fiche">confiance
+            <span class="rf-gauge-bar" [class]="'rf-gauge-bar ' + gaugeClass(f.confidence)"><i [style.width.%]="f.confidence * 100"></i></span>
+            {{ f.confidence * 100 | number: '1.0-0' }} %</span>
+          <span class="rf-gauge" title="Part de la fiche renseignée autrement que par défaut">complétude
+            <span class="rf-gauge-bar" [class]="'rf-gauge-bar ' + gaugeClass(f.completeness)"><i [style.width.%]="f.completeness * 100"></i></span>
+            {{ f.completeness * 100 | number: '1.0-0' }} %</span>
+        </div>
+      }
+    </div>
+    @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  </section>
+
+  @if (fiche()) {
+    @for (bl of blocks(); track bl.id) {
+      <section class="rf-card" [attr.aria-labelledby]="'bl-' + bl.id">
+        <h2 [id]="'bl-' + bl.id">{{ bl.label }}</h2>
+        <div class="rf-table-wrap">
+          <table class="rf-table facts">
+            <thead><tr><th>Donnée</th><th>Valeur</th><th>Provenance</th><th class="num">Confiance</th><th></th></tr></thead>
+            <tbody>
+              @for (k of bl.keys; track k.key) {
+                @let f = fact(k.key);
+                <tr [class.empty]="!f">
+                  <td>{{ k.label }}</td>
+                  <td class="val">
+                    @if (editing() === k.key) {
+                      <div class="edit">
+                        @switch (k.kind) {
+                          @case ('enum') {
+                            <select [(ngModel)]="editValue" [attr.aria-label]="k.label">
+                              @for (c of (k.choices ?? {}) | keyvalue; track c.key) { <option [ngValue]="c.key">{{ c.value }}</option> }
+                            </select>
+                          }
+                          @case ('bool') { <label class="check"><input type="checkbox" [(ngModel)]="editValue"> oui</label> }
+                          @default {
+                            <input type="number" [(ngModel)]="editValue" [min]="k.min" [max]="k.max" step="any" [attr.aria-label]="k.label">
+                            <span class="unit">{{ k.unit }}</span>
+                          }
+                        }
+                        <select [(ngModel)]="editMethod" aria-label="Méthode">
+                          <option value="declare">déclaré</option>
+                          <option value="mesure">mesuré</option>
+                        </select>
+                        <input type="text" [(ngModel)]="editSource" placeholder="source (facture, visite…)" aria-label="Source">
+                        <button type="button" class="rf-btn primary small" (click)="save(k)" [disabled]="saving()">Enregistrer</button>
+                        <button type="button" class="rf-btn small" (click)="editing.set(null)">Annuler</button>
+                      </div>
+                    } @else {
+                      <strong>{{ display(k, f?.value) }}</strong>
+                      @if (f?.automatic; as a) {
+                        <small class="auto">automatique : {{ display(k, a.value) }} ({{ methodLabels[a.method] }})</small>
+                      }
+                    }
+                  </td>
+                  <td>
+                    @if (f) {
+                      <span class="rf-badge" [class]="'rf-badge m-' + f.method">{{ methodLabels[f.method] }}</span>
+                      <small class="src">{{ f.source }}@if (f.author) { · {{ f.author }} } · {{ f.created_at | date: 'dd/MM/yy' }}</small>
+                    }
+                  </td>
+                  <td class="num">{{ f ? (f.confidence * 100 | number: '1.0-0') + ' %' : '' }}</td>
+                  <td class="acts">
+                    @if (editing() !== k.key) {
+                      <button type="button" class="rf-btn small" (click)="startEdit(k)">Corriger</button>
+                      @if (f && f.mine && (f.method === 'declare' || f.method === 'mesure' || f.method === 'document')) {
+                        <button type="button" class="rf-btn small" (click)="backToAuto(f)">Revenir à l'automatique</button>
+                      }
+                      @if (f) { <button type="button" class="rf-btn small" (click)="showHistory(k)" [attr.aria-label]="'Historique — ' + k.label">⋯</button> }
+                    }
+                  </td>
+                </tr>
+                @if (history()?.key === k.key) {
+                  <tr class="hist"><td colspan="5">
+                    <ul>
+                      @for (h of history()!.rows; track h.id) {
+                        <li [class.off]="h.retired || h.superseded">
+                          {{ h.created_at | date: 'dd/MM/yy HH:mm' }} — {{ display(k, h.value) }}
+                          <span class="rf-badge" [class]="'rf-badge m-' + h.method">{{ methodLabels[h.method] }}</span>
+                          {{ h.source }} @if (h.retired) { (retirée) } @else if (h.superseded) { (remplacée) }
+                        </li>
+                      }
+                    </ul>
+                  </td></tr>
+                }
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    }
+  } @else if (buildingId === null) {
+    <p class="rf-hint">Choisissez un bâtiment, ou ouvrez-le depuis un <a routerLink="/parc">parc</a>.</p>
+  }
+</div>

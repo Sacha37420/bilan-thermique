@@ -685,3 +685,4 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 2 | livré 2026-11-14 | `Lot 2` | Passe végétation comptée et contrôlée dans la vue ; verrou `pg_advisory_xact_lock` + envoi `on_commit` ; jobs bloqués expirés à 6 h ; `Job.owner_sub` ; `api/net.py` (messages fixes, `User-Agent` sans email). 244 → 257 tests. |
 | 3 | livré 2026-11-14 | `Lot 3` | `CalcRun` (historique rechargeable, indicateurs communs aux 3 niveaux), environnements remplacés sans suppression, `nettoyer_brouillons`, ménage SfM. 257 → 268 tests. |
 | 5 | livré 2026-11-14 | `Lot 5` | Service `bilan-thermique-worker`, tests découpés (268 = 268), `lab-module.json`, `README.md`, exception three.js documentée, `npm ci`. |
+| 8 | livré 2026-11-14 | `Lot 8` | `BuildingFact` + catalogue de clés, fiche effective, surcharges réversibles, scores de confiance/complétude, page Fiche. 268 → 282 tests. |

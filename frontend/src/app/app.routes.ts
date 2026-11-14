@@ -26,5 +26,7 @@ export const routes: Routes = [
     path: 'calcul-3d',
     loadComponent: () => import('./pages/calcul-3d/calcul-3d.component').then(m => m.Calcul3DComponent),
   },
+  // ── Refonte : parc, fiche, affinage ──
+  { path: 'fiche', loadComponent: () => import('./pages/fiche/fiche.component').then(m => m.FicheComponent) },
   { path: '**',        redirectTo: 'calcul-1d' },
 ];

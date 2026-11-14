@@ -200,6 +200,11 @@ class Building(models.Model):
 
     sun_visibility = models.JSONField(default=dict, blank=True)
     sun_visibility_stale = models.BooleanField(default=True)
+
+    # Refonte (Lot 8) : scores de la fiche effective (api.facts.scores), tenus à jour à chaque fait.
+    confidence = models.FloatField(default=0.0)
+    completeness = models.FloatField(default=0.0)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -303,3 +308,58 @@ class CalcRun(models.Model):
 
     def __str__(self) -> str:
         return f"{self.level} #{self.pk} bâtiment {self.building_id} [{self.status}]"
+
+
+class Scenario(models.Model):
+    """Variante d'un bâtiment (refonte, principe 4) : ne stocke que ses différences, sous forme de
+    faits rattachés à la variante (`BuildingFact.scenario`). La base (état actuel) n'a pas de ligne."""
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='scenarios')
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='children')
+    # Météo propre à la variante (climat futur…), sinon celle de la base.
+    weather = models.JSONField(default=dict, blank=True)
+    author_sub = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'scenarios'
+        ordering = ['building', 'created_at']
+
+    def __str__(self) -> str:
+        return f"{self.name} (bâtiment {self.building_id})"
+
+
+class BuildingFact(models.Model):
+    """Une valeur d'une clé de la fiche, avec sa provenance (Lot 8, refonte). Voir api.facts."""
+
+    METHODS = [('mesure', 'Mesuré'), ('document', 'Document'), ('declare', 'Déclaré'),
+               ('infere', 'Inféré'), ('defaut', 'Défaut')]
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='facts')
+    scenario = models.ForeignKey(Scenario, null=True, blank=True, on_delete=models.CASCADE, related_name='facts')
+    key = models.CharField(max_length=80)
+    value = models.JSONField(null=True, blank=True)
+    unit = models.CharField(max_length=20, blank=True)
+    method = models.CharField(max_length=10, choices=METHODS)
+    source = models.CharField(max_length=300, blank=True)
+    confidence = models.FloatField(default=0.5)
+    # Personne : `sub` Keycloak (identité) ; `author_name` n'est qu'un affichage.
+    author_sub = models.CharField(max_length=64, blank=True, default='')
+    author_name = models.CharField(max_length=150, blank=True, default='')
+    # Extrait cité (document lu, Lot 21) : {document_id, page, texte}.
+    extract = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    retired_at = models.DateTimeField(null=True, blank=True)
+    retired_by = models.CharField(max_length=64, blank=True, default='')
+    superseded_by = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL,
+                                      related_name='supersedes')
+
+    class Meta:
+        db_table = 'building_facts'
+        ordering = ['building', 'key', '-created_at']
+        indexes = [models.Index(fields=['building', 'key'])]
+
+    def __str__(self) -> str:
+        return f"{self.key}={self.value!r} [{self.method}] bâtiment {self.building_id}"
