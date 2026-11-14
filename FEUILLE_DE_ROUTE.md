@@ -412,6 +412,20 @@ BD TOPO servies par `page.route`, le banc n'ayant pas Internet) : carte affiché
 ajoutées au parc, marqueurs et légende selon l'indicateur, position corrigée au clic et enregistrée ;
 clair et sombre sans erreur console.
 
+## Lot 20 — Multizone / radiatif   ·   statut : livré
+**Objectif :** périmètre tranché par la décision D9 de `refonte.md` : **pas de multizone** dans cette
+refonte ; livrer la part qui sert le confort d'été — une température opérative comparable entre N1 et N2.
+La paroi mitoyenne est au Lot 12.
+**Tâches :**
+- [x] N2 : température radiante moyenne (faces intérieures pondérées par l'aire) et température opérative
+  heure par heure (`t_mrt`, `t_op`), rendues par le calcul 3D et enregistrées dans `CalcRun`
+- [x] Les heures > 26 / 28 °C et les degrés-heures de tous les niveaux se comptent sur la température
+  opérative (`calc_runs.indicators_from` la préfère à la température d'air) ; page Théorie
+- [ ] Multizone (N nœuds d'air, refends) : hors périmètre (D9) — chemin décrit dans le journal, section « Hors scope »
+**Tests à passer avant de clore le lot :**
+- [x] Définition de θ_op, régime d'hiver (θ_rm entre l'air et l'extérieur), indicateurs sur θ_op (`OperativeTemperatureN2Test`)
+**Vérifié le :** 2026-11-14 — 408 tests OK (dont tous les tests du N2 existants, inchangés).
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

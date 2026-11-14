@@ -855,6 +855,14 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     T = np.full(n_dof, float(t_init))
     t_air_series = [float(T[air_idx])]
+    # Refonte (Lot 20) : température radiante moyenne = moyenne des faces intérieures pondérée par
+    # l'aire (approximation usuelle sans facteurs de forme), et température opérative
+    # θ_op = (θ_air + θ_rm) / 2 (air calme, ISO 7730) — même grandeur de confort que le N1.
+    inner_idx = np.array([offsets[i] + systems[i][0]['n_wall_nodes'] - 1 for i in range(len(systems))])
+    inner_w = np.array(areas, dtype=float)
+    inner_w = inner_w / max(inner_w.sum(), 1e-12)
+    t_mrt_series = [float(T[inner_idx] @ inner_w)]
+    t_op_series = [0.5 * (t_air_series[0] + t_mrt_series[0])]
     heating_j = 0.0
     cooling_j = 0.0
     flux_series = []  # flux net (W) de l'enveloppe vers l'intérieur, par heure
@@ -1045,6 +1053,9 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
         T = T_next
         t_air_series.append(float(t_air_next))
+        t_mrt = float(T[inner_idx] @ inner_w)
+        t_mrt_series.append(t_mrt)
+        t_op_series.append(0.5 * (float(t_air_next) + t_mrt))
 
         if progress_cb:
             progress_cb(hour_idx + 1, n_hours_total)
@@ -1078,6 +1089,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         'hours': len(weather),
         'balance': balance,
         't_air': t_air_series,
+        't_mrt': t_mrt_series,
+        't_op': t_op_series,
         't_air_mean': float(t_air_arr.mean()),
         'heating_kwh': heating_j / 3.6e6,
         'cooling_kwh': cooling_j / 3.6e6,

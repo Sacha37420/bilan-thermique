@@ -135,6 +135,8 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
             # où la ligne du nœud d'air est écrasée par Dirichlet.
             'balance': result['balance'],
             't_air': result['t_air'],
+            't_op': result.get('t_op'),
+            't_mrt': result.get('t_mrt'),
             'envelope_flux_w': result['envelope_flux_w'],
             'final_exterior_surface_temp': result['final_exterior_surface_temp'],
             'final_interior_surface_temp': result['final_interior_surface_temp'],

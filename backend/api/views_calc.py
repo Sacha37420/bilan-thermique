@@ -46,7 +46,7 @@ class CalcRunDetailView(APIView):
         return Response(CalcRunDetailSerializer(run).data)
 
 
-SERIES_KEYS = ('t_air', 't_op', 'phi_hc_w', 'envelope_flux_w', 'final_exterior_surface_temp',
+SERIES_KEYS = ('t_air', 't_op', 't_mrt', 'phi_hc_w', 'envelope_flux_w', 'final_exterior_surface_temp',
                'final_interior_surface_temp')
 
 

@@ -705,3 +705,4 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 17 | livré 2026-11-14 | `Lot 17` | Mesures (factures, Linky/Gazpar, sondes, n50), Morris, calage ASHRAE 14 sur météo réelle (19,3 → 5,5 % CV(RMSE) sur station Tours 2023, cas jumeau). 391 → 398 tests. |
 | 18 | livré 2026-11-14 | `Lot 18` | Variantes par bouquets de travaux, comparateur variantes × météos (dont TRACC), points de vigilance. 398 → 402 tests. |
 | 19 | livré 2026-11-14 | `Lot 19` | Leaflet + fonds IGN, carte du parc colorée par indicateur, sélection d'emprises BD TOPO, position d'un bâtiment (U4). 402 → 405 tests. |
+| 20 | livré 2026-11-14 | `Lot 20` | Selon D9 : pas de multizone ; température radiante moyenne et opérative horaires dans le N2, inconfort compté sur θ_op à tous les niveaux. 405 → 408 tests. |
