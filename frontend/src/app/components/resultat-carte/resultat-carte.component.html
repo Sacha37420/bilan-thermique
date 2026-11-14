@@ -11,10 +11,14 @@
   @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
   @if (latest()?.N1; as r) {
     <div class="rf-kpis">
-      <div class="rf-kpi"><small>Besoin de chauffage</small><strong>{{ num(r, 'heating_kwh_m2') | number: '1.0-0' }}</strong><em>kWh/m²·an (N1)</em></div>
+      <div class="rf-kpi"><small>Besoin de chauffage</small><strong>{{ num(r, 'heating_kwh_m2') | number: '1.0-0' }}</strong><em>kWh/m²·an (N1)@if (num(r, 'heating_kwh_m2_p10') !== null) { · {{ num(r, 'heating_kwh_m2_p10') | number: '1.0-0' }}–{{ num(r, 'heating_kwh_m2_p90') | number: '1.0-0' }} }</em></div>
       <div class="rf-kpi"><small>Besoin total</small><strong>{{ num(r, 'heating_kwh') | number: '1.0-0' }}</strong><em>kWh/an</em></div>
       <div class="rf-kpi"><small>Puissance maximale</small><strong>{{ num(r, 'heating_kw_max') | number: '1.1-1' }}</strong><em>kW</em></div>
       <div class="rf-kpi"><small>Heures &gt; 28 °C</small><strong>{{ num(r, 'hours_over_28') | number: '1.0-0' }}</strong><em>température opérative</em></div>
+      @if (num(r, 'primary_kwh_m2') !== null) {
+        <div class="rf-kpi"><small>Énergie primaire</small><strong>{{ num(r, 'primary_kwh_m2') | number: '1.0-0' }}</strong>
+          <em>kWh/m²·an · étiquette modèle {{ r.indicators['dpe_label_model'] }}@if (num(r, 'dpe_gap_pct') !== null) { · écart DPE {{ num(r, 'dpe_gap_pct')! > 0 ? '+' : '' }}{{ num(r, 'dpe_gap_pct') }} % }</em></div>
+      }
       <div class="rf-kpi"><small>Confiance de la fiche</small><strong>{{ (num(r, 'confidence') ?? 0) * 100 | number: '1.0-0' }} %</strong><em>complétude {{ (num(r, 'completeness') ?? 0) * 100 | number: '1.0-0' }} %</em></div>
     </div>
     <div class="cols">

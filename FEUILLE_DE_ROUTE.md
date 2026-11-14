@@ -329,6 +329,26 @@ puis supprimer un sommet, hauteur 9 m, 3 niveaux, deux pans → « enveloppe ré
 « hauteur 6 → 9 m » affiché, calcul « à jour » ; 390 px sans défilement horizontal ; clair et sombre sans
 erreur console (une erreur `NaN` de la vue SVG avant chargement, trouvée par ce contrôle, est corrigée).
 
+## Lot 16 — Systèmes et consommations finales et primaires (B5)   ·   statut : livré
+**Objectif :** passer du besoin à la consommation (énergie finale par énergie, primaire, CO₂, coût) et
+la comparer à l'étiquette DPE affichée (`refonte.md` § B5, D6).
+**Tâches :**
+- [x] `api/engines/systems.py` : rendements génération × émission × distribution × régulation (3CL), PAC à
+  COP horaire selon T ext. et température des émetteurs, ECS, refroidissement, éclairage, auxiliaires
+  (cinq usages), facteurs primaire et CO₂ de l'arrêté DPE 2021, prix indicatifs, étiquette du modèle
+  (double seuil EP / GES), écart à la consommation DPE déclarée
+- [x] Calculs N0/N1 : `results.energy` et indicateurs (finale, primaire, CO₂, coût, étiquette, écart) ;
+  colonnes du tableau de parc et de l'export
+- [x] Onglet « Systèmes » (générateur, émetteurs, régulation, ECS, rendement ; consommations par usage et
+  par énergie) ; énergie primaire et écart au DPE sur la carte Résultat ; page Théorie
+**Tests à passer avant de clore le lot :**
+- [x] Écart à l'étiquette DPE affiché (`CalcWithSystemsTest.test_run_indicators_show_gap_to_dpe`)
+- [x] COP horaire, chaudière à condensation, facteur 2,3, double seuil (`SystemsTest`)
+**Vérifié le :** 2026-11-14 — 391 tests OK ; navigateur réel (banc) : énergie primaire et « écart DPE »
+sur la carte Résultat ; passage à une PAC sur plancher → CO₂ 64 → 5 kg/m²·an, COP saisonnier affiché,
+étiquette du modèle face au DPE affiché « E » ; clair et sombre sans erreur console. COP ramené à une
+fraction de Carnot de 0,40 après relecture (5,0 sur plancher semblait optimiste).
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

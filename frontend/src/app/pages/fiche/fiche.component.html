@@ -73,6 +73,7 @@
     @if (tab() === 'meteo') { <app-meteo-carte [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'geometrie') { <app-geometrie [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'protections') { <app-protections [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
+    @if (tab() === 'systemes') { <app-systemes [buildingId]="buildingId" [refresh]="ficheVersion()" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'donnees') {
     @for (bl of blocks(); track bl.id) {
       <section class="rf-card" [attr.aria-labelledby]="'bl-' + bl.id">

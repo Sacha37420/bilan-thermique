@@ -700,3 +700,4 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 13 | livré 2026-11-14 | `Lot 13` | `WeatherDataset` partagé, stations Météo-France en flux, TRACC (6 scénarios), réanalyse sur période, imports EPW/CSV, comparaison. Sources réelles vérifiées. 348 → 367 tests. |
 | 14 | livré 2026-11-14 | `Lot 14` | Protections fixes/mobiles/vitrage/végétation, paramétrique (N0/N1) et géométrique (N2) cohérents (−70 % / −88 % de degrés-heures), effet été/hiver, fiche en onglets. 367 → 378 tests. |
 | 15 | livré 2026-11-14 | `Lot 15` | Géométrie corrigée (surcharge), toits plat/2/4 pans, enveloppe vérifiée, mitoyenneté recalculée, éditeur SVG, taux de vitrage par façade. 378 → 386 tests. |
+| 16 | livré 2026-11-14 | `Lot 16` | Consommations finales/primaires/CO₂/coût, PAC à COP horaire, étiquette du modèle et écart au DPE, onglet Systèmes. 386 → 391 tests. |

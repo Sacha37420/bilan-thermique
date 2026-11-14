@@ -16,7 +16,7 @@ from .engines import n0, n1
 from .fingerprint import stable_hash
 from .models import CalcRun, Job
 
-ENGINE_VERSION = {'N0': 'n0-1', 'N1': 'n1-1'}
+ENGINE_VERSION = {'N0': 'n0-2', 'N1': 'n1-2'}  # -2 : consommations (Lot 16)
 
 
 class CalcError(ValueError):
@@ -119,12 +119,23 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
         run.status, run.message = Job.ERROR, net.public_message(exc)[:500]
         run.save(update_fields=['status', 'message'])
         raise CalcError(run.message) from exc
+    # Lot 16 : du besoin aux consommations (énergie finale, primaire, CO₂, coût, étiquette du modèle).
+    from .engines import systems
+    t_ext = [w['t_ext'] for w in weather] if res.get('phi_hc_w') else None
+    res['energy'] = systems.evaluate(vals, res['heating_kwh'], res.get('cooling_kwh') or 0.0, p.a_floor, p.volume,
+                                     res.get('phi_hc_w'), t_ext)
     res['inputs_summary'] = {'h_tr_w_k': round(p.h_tr_w + p.h_tr_op_air + p.h_floor, 1),
                              'h_ve_w_k': round(p.h_ve, 1), 'a_floor_m2': round(p.a_floor, 1),
                              'n_vent_vol_h': round(p.n_vent, 3)}
     run.status = Job.DONE
     run.results = res
     run.indicators = calc_runs.indicators_from(res, p.a_floor, level)
+    e = res['energy']
+    run.indicators.update({k: e[k] for k in ('final_kwh_m2', 'primary_kwh_m2', 'co2_kg_m2', 'cost_eur', 'final_kwh',
+                                             'primary_kwh', 'co2_kg') if k in e})
+    run.indicators['dpe_label_model'] = e['dpe_label_model']
+    if 'dpe_gap_pct' in e:
+        run.indicators['dpe_gap_pct'] = e['dpe_gap_pct']
     run.indicators['confidence'] = settings['confidence']
     run.indicators['completeness'] = settings['completeness']
     run.duration_s = round(time.monotonic() - t0, 3)
