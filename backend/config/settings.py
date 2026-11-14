@@ -82,6 +82,12 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
+# Refonte (Lot 11, décision D13) : un seul worker (concurrence 1) écoute `celery` (interactif) puis
+# `parc` (traitement de parc, un bâtiment par tâche). Avec la stratégie « priority » du transport
+# Redis, la file `celery` est toujours consultée d'abord ; une tâche à la fois (prefetch 1).
+CELERY_TASK_ROUTES = {'api.tasks.process_parc_next': {'queue': 'parc'}}
+CELERY_BROKER_TRANSPORT_OPTIONS = {'queue_order_strategy': 'priority'}
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
 # ── Keycloak ───────────────────────────────────────────────────────────────────
 KEYCLOAK_ISSUER_URI = config(

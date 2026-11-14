@@ -32,6 +32,7 @@ export class AppComponent {
   protected closeMobileFn = (): void => this.closeMobile();
 
   readonly navItems: NavItem[] = [
+    { path: '/parc',          label: 'Parcs',            abbr: 'Pc' },
     { path: '/fiche',         label: 'Fiche bâtiment',   abbr: 'Fi' },
     { path: '/calcul-1d',     label: 'Calcul 1D',        abbr: '1D' },
     { path: '/theorie',       label: 'Théorie',          abbr: 'Th' },

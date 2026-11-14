@@ -1,6 +1,7 @@
 from django.urls import path
 from .views_calc import BuildingCalcRunsView, CalcRunDetailView, CalculerView, ResultatView
 from .views_pipeline import InitNewBuildingView, ReinitBuildingView
+from . import views_parc as vp
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
 from .views import (
     MeView, Calcul1DView,
@@ -52,4 +53,16 @@ urlpatterns = [
     # ── Refonte (Lot 9) : fiche initiale automatique ──
     path('batiments/initialiser/', InitNewBuildingView.as_view()),
     path('batiments/<int:pk>/initialiser/', ReinitBuildingView.as_view()),
+    # ── Refonte (Lot 11) : parcs ──
+    path('parcs/', vp.PortfoliosView.as_view()),
+    path('parcs/<int:pk>/', vp.PortfolioDetailView.as_view()),
+    path('parcs/<int:pk>/importer/', vp.ImportView.as_view()),
+    path('parcs/<int:pk>/lancer/', vp.LaunchView.as_view()),
+    path('parcs/<int:pk>/rattacher/', vp.AttachView.as_view()),
+    path('parcs/<int:pk>/tableau/', vp.TableView.as_view()),
+    path('parcs/<int:pk>/export.csv', vp.ExportView.as_view()),
+    path('parcs/<int:pk>/membres/', vp.MembersView.as_view()),
+    path('parcs/<int:pk>/membres/<int:mid>/', vp.MemberDetailView.as_view()),
+    path('parcs/<int:pk>/invitations/', vp.InvitationsView.as_view()),
+    path('invitations/accepter/', vp.AcceptInvitationView.as_view()),
 ]

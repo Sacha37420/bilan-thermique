@@ -22,6 +22,17 @@ from . import elevation
 from . import environment_service
 from . import joblock
 from . import calc_runs
+from . import access
+from rest_framework.exceptions import PermissionDenied
+
+
+def _building(request, pk, manage=False):
+    """Bâtiment visible par l'appelant (404 sinon) ; `manage` : action de gestion (403 sinon).
+    Refonte (Lot 11) : sans effet sur les bâtiments sans parc (tous visibles et gérables, D4)."""
+    b = get_object_or_404(access.visible_buildings(request), pk=pk)
+    if manage and not access.can_manage(request, b):
+        raise PermissionDenied("Action réservée aux gestionnaires de ce bâtiment.")
+    return b
 
 
 def _sub(request):
@@ -74,19 +85,31 @@ class ParoiModelDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class BuildingListCreateView(generics.ListCreateAPIView):
-    """GET/POST /api/batiments/ — bâtiments (enveloppe maillée + assignation de parois)."""
+    """GET/POST /api/batiments/ — bâtiments (enveloppe maillée + assignation de parois).
+    Refonte (Lot 11) : la liste ne montre que les bâtiments visibles (communs + parcs de l'appelant)."""
 
-    queryset         = Building.objects.all()
     serializer_class = BuildingSerializer
+
+    def get_queryset(self):
+        return access.visible_buildings(self.request)
 
 
 class BuildingDetailView(generics.RetrieveUpdateDestroyAPIView):
     """GET/PUT/PATCH/DELETE /api/batiments/<id>/"""
 
-    queryset         = Building.objects.all()
     serializer_class = BuildingSerializer
 
+    def get_queryset(self):
+        return access.visible_buildings(self.request)
+
+    def perform_update(self, serializer):
+        if not access.can_manage(self.request, serializer.instance):
+            raise PermissionDenied("Action réservée aux gestionnaires de ce bâtiment.")
+        serializer.save()
+
     def perform_destroy(self, instance):
+        if not access.can_manage(self.request, instance):
+            raise PermissionDenied("Action réservée aux gestionnaires de ce bâtiment.")
         # Lot 3 (refonte) : le dossier de travail SfM du bâtiment (volume facade-cache) part avec lui.
         import os
         from . import facade_sfm
@@ -280,9 +303,11 @@ class GenerateEnvironmentView(APIView):
         # PrimaryKeyRelatedField rend une instance : Job.params (JSONField) et
         # la sérialisation Celery n'acceptent qu'un identifiant.
         building = params.pop('building_id', None)
+        if building is not None:
+            building = _building(request, building.pk, manage=True)
         params['building_id'] = building.pk if building is not None else None
 
-        job = Job.objects.create(kind='generate_environment', params=params)
+        job = Job.objects.create(kind='generate_environment', params=params, owner_sub=_sub(request))
         tasks.generate_environment.delay(job.id, params)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
@@ -307,16 +332,21 @@ class FetchWeatherView(APIView):
         params['start_date'] = params['start_date'].isoformat()
         params['end_date'] = params['end_date'].isoformat()
 
-        job = Job.objects.create(kind='fetch_weather', params=params)
+        job = Job.objects.create(kind='fetch_weather', params=params, owner_sub=_sub(request))
         tasks.fetch_weather.delay(job.id, params)
         return Response(JobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
 class JobDetailView(generics.RetrieveAPIView):
-    """GET /api/jobs/<id>/ — état d'une tâche asynchrone (polling frontend)."""
+    """GET /api/jobs/<id>/ — état d'une tâche asynchrone (polling frontend).
+    Refonte (Lot 11) : un job lancé par quelqu'un (owner_sub) n'est rendu qu'à lui ; les jobs
+    d'avant la refonte (sans auteur) restent lisibles comme avant."""
 
-    queryset         = Job.objects.all()
     serializer_class = JobSerializer
+
+    def get_queryset(self):
+        from django.db.models import Q
+        return Job.objects.filter(Q(owner_sub='') | Q(owner_sub=_sub(self.request)))
 
 
 class PrecomputeShadowsView(APIView):
@@ -329,7 +359,7 @@ class PrecomputeShadowsView(APIView):
     """
 
     def post(self, request, pk):
-        building = get_object_or_404(Building, pk=pk)
+        building = _building(request, pk, manage=True)
 
         if not building.envelope.get('triangles'):
             return Response({'detail': "Ce bâtiment n'a pas encore de maillage importé."},
@@ -354,7 +384,7 @@ class BuildingRefineView(APIView):
     """
 
     def post(self, request, pk):
-        building = get_object_or_404(Building, pk=pk)
+        building = _building(request, pk, manage=True)
         serializer = RefineMeshRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -391,7 +421,7 @@ class BuildingCalculView(APIView):
     """
 
     def post(self, request, pk):
-        building = get_object_or_404(Building, pk=pk)
+        building = _building(request, pk, manage=True)
         serializer = BuildingCalculRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -463,7 +493,7 @@ class FacadeAnalyseView(APIView):
     """
 
     def post(self, request, pk):
-        building = get_object_or_404(Building, pk=pk)
+        building = _building(request, pk, manage=True)
         if building.georef_lat is None or not building.envelope.get('triangles'):
             return Response({'detail': "Bâtiment sans maillage ou non géoréférencé."},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -484,7 +514,7 @@ class FacadeRecomposeView(APIView):
     """
 
     def post(self, request, pk):
-        building = get_object_or_404(Building, pk=pk)
+        building = _building(request, pk, manage=True)
         if not (building.facades or {}).get('facades'):
             return Response({'detail': "Façades non analysées."}, status=status.HTTP_400_BAD_REQUEST)
         job = joblock.launch_exclusive(
@@ -502,7 +532,7 @@ class FacadeTextureView(APIView):
     def get(self, request, pk, group):
         from django.http import HttpResponse
         from . import facades
-        building = get_object_or_404(Building, pk=pk)
+        building = _building(request, pk, manage=False)
         entry = (building.facades or {}).get('facades', {}).get(group)
         if not entry or not entry.get('texture_key'):
             return Response({'detail': "Pas de texture pour cette façade."}, status=status.HTTP_404_NOT_FOUND)
@@ -528,7 +558,7 @@ class FacadeApplyView(APIView):
 
     def post(self, request, pk):
         from . import facades
-        building = get_object_or_404(Building, pk=pk)
+        building = _building(request, pk, manage=True)
         data_f = building.facades or {}
         base = data_f.get('base') or {
             'vertices': building.envelope['vertices'],

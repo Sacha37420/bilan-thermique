@@ -131,6 +131,38 @@ class Environment(models.Model):
         return self.name
 
 
+class Portfolio(models.Model):
+    """Parc de bâtiments (refonte, Lot 11). Rôles par personne (`sub`) dans `PortfolioMember`."""
+
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    owner_sub = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'portfolios'
+        ordering = ['name']
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PortfolioMember(models.Model):
+    GESTIONNAIRE_PARC, GESTIONNAIRE_BAT, LECTEUR = 'gestionnaire_parc', 'gestionnaire_bat', 'lecteur'
+    ROLES = [(GESTIONNAIRE_PARC, 'Gestionnaire de parc'), (GESTIONNAIRE_BAT, 'Gestionnaire de bâtiment'),
+             (LECTEUR, 'Lecteur')]
+    portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, related_name='members')
+    sub = models.CharField(max_length=64)
+    display_name = models.CharField(max_length=150, blank=True)
+    role = models.CharField(max_length=20, choices=ROLES)
+    added_by = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'portfolio_members'
+        constraints = [models.UniqueConstraint(fields=['portfolio', 'sub'], name='portfolio_member_unique')]
+
+
 class Building(models.Model):
     """Enveloppe d'un bâtiment — maillage triangulaire + assignation d'un
     ParoiModel par triangle.
@@ -159,12 +191,16 @@ class Building(models.Model):
     a changé depuis (voir Building.sun_visibility_stale).
     """
 
-    name = models.CharField(max_length=150, unique=True)
+    # Refonte (Lot 11) : unique par parc, et parmi les bâtiments sans parc (contraintes plus bas).
+    name = models.CharField(max_length=150)
     description = models.TextField(blank=True)
     envelope = models.JSONField(default=dict, blank=True)
     environment = models.ForeignKey(
         Environment, null=True, blank=True, on_delete=models.SET_NULL, related_name='buildings',
     )
+    # Refonte (Lot 11) : parc de rattachement ; vide = bâtiment commun de l'app (comme avant).
+    portfolio = models.ForeignKey('Portfolio', null=True, blank=True, on_delete=models.CASCADE,
+                                  related_name='buildings')
 
     # Géoréférencement (optionnel) — ancre le repère local du bâtiment (0,0 = ce point,
     # +Y = ce cap réel) dans le monde réel, pour que la génération automatique
@@ -218,6 +254,11 @@ class Building(models.Model):
     class Meta:
         db_table = 'buildings'
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(fields=['portfolio', 'name'], name='building_name_per_portfolio'),
+            models.UniqueConstraint(fields=['name'], condition=models.Q(portfolio__isnull=True),
+                                    name='building_name_common'),
+        ]
 
     def __str__(self) -> str:
         return self.name
@@ -385,3 +426,41 @@ class SourceCache(models.Model):
 
     class Meta:
         db_table = 'source_cache'
+
+
+class BuildingAccess(models.Model):
+    """Bâtiment confié à une personne (refonte, Lot 11) : gestionnaire ou occupant (D2)."""
+
+    GESTIONNAIRE, OCCUPANT = 'gestionnaire', 'occupant'
+    ROLES = [(GESTIONNAIRE, 'Gestionnaire du bâtiment'), (OCCUPANT, 'Occupant')]
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='accesses')
+    sub = models.CharField(max_length=64)
+    display_name = models.CharField(max_length=150, blank=True)
+    role = models.CharField(max_length=20, choices=ROLES)
+    added_by = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'building_accesses'
+        constraints = [models.UniqueConstraint(fields=['building', 'sub'], name='building_access_unique')]
+
+
+class Invitation(models.Model):
+    """Invitation par code à un parc ou à un bâtiment (refonte, Lot 11). Aucun annuaire : la personne
+    invitée ouvre le lien avec son compte, et c'est son `sub` qui est enregistré. Seule l'empreinte
+    du code est gardée."""
+
+    portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, related_name='invitations')
+    building = models.ForeignKey(Building, null=True, blank=True, on_delete=models.CASCADE, related_name='invitations')
+    role = models.CharField(max_length=20)
+    token_hash = models.CharField(max_length=64, unique=True)
+    prefix = models.CharField(max_length=12)
+    created_by = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    max_uses = models.PositiveIntegerField(default=1)
+    uses = models.PositiveIntegerField(default=0)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'invitations'

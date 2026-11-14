@@ -162,7 +162,7 @@ code, pre, .mono { font-family: var(--font-mono); }
 .rf-badge.m-declare { background: var(--accent-tint); color: var(--accent); }
 .rf-badge.m-infere { background: var(--warning-tint); color: var(--warning); }
 .rf-badge.m-defaut { background: var(--bg); color: var(--text-mute); }
-.rf-gauge { display: inline-flex; align-items: center; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--text-sm); }
+.rf-gauge { display: inline-flex; align-items: center; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--text-sm); white-space: nowrap; }
 .rf-gauge-bar { width: 96px; height: 8px; border-radius: var(--radius-full); background: var(--border); overflow: hidden; }
 .rf-gauge-bar > i { display: block; height: 100%; background: var(--accent); }
 .rf-gauge-bar.low > i { background: var(--danger); } .rf-gauge-bar.mid > i { background: var(--warning); } .rf-gauge-bar.high > i { background: var(--success); }

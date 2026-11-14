@@ -31,3 +31,28 @@ export interface Fiche {
 export const METHOD_LABELS: Record<Method, string> = {
   mesure: 'mesuré', document: 'document', declare: 'déclaré', infere: 'inféré', defaut: 'défaut',
 };
+
+export interface PortfolioInfo {
+  id: number; name: string; description: string; created_at: string;
+  role: 'gestionnaire_parc' | 'gestionnaire_bat' | 'lecteur' | null;
+  counts: { total: number; en_attente: number; en_cours: number; complet: number; incomplet: number; jamais: number };
+}
+
+export interface ParcRow {
+  id: number; name: string; address: string; rnb_id: string; status: string; lat: number | null; lon: number | null;
+  usage: string | null; surface_m2: number | null; annee: number | null;
+  heating_kwh_m2: number | null; p10: number | null; p90: number | null; heating_kwh: number | null;
+  heating_kw_max: number | null; hours_over_28: number | null; dpe: string | null; dpe_ep_kwh_m2: number | null;
+  final_kwh_m2: number | null; primary_kwh_m2: number | null; model_label: string | null;
+  confidence: number; completeness: number; level: string | null; computed_at: string | null; priority: number | null;
+  errors: Record<string, string>;
+}
+
+export const USAGE_LABELS: Record<string, string> = {
+  maison: 'Maison', logement_collectif: 'Collectif', bureau: 'Bureaux', enseignement: 'Enseignement',
+  commerce: 'Commerce', sante: 'Santé', autre: 'Autre',
+};
+export const ROLE_LABELS: Record<string, string> = {
+  gestionnaire_parc: 'Gestionnaire de parc', gestionnaire_bat: 'Gestionnaire de bâtiment', lecteur: 'Lecteur',
+  gestionnaire: 'Gestionnaire du bâtiment', occupant: 'Occupant',
+};

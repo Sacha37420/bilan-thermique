@@ -212,6 +212,36 @@ valeurs d'archétype posées, en clair et en sombre, sans erreur console.
 mois, bilan ; corriger « U des murs » → « périmé » ; recalcul 173 → 91 kWh/m² ; revenir à l'automatique →
 de nouveau « à jour » sans recalcul ; clair et sombre sans erreur console.
 
+## Lot 11 — Parc : import, file `parc`, tableau, export, partage   ·   statut : livré
+**Objectif :** un gestionnaire importe un parc et obtient, sans saisie, un tableau chiffré avec
+fourchette, confiance et complétude (`refonte.md` § 4, D1-D4, D13).
+**Tâches :**
+- [x] `Portfolio`, `PortfolioMember` (gestionnaire de parc / de bâtiment / lecteur), `BuildingAccess`
+  (gestionnaire / occupant), `Invitation` (lien à usage limité, empreinte seule, aucun annuaire) ;
+  `Building.name` unique par parc et parmi les bâtiments communs
+- [x] Cloisonnement (`api/access.py`) appliqué aux nouvelles routes **et aux anciennes** (liste, détail,
+  précalcul, calcul 3D, façades, génération d'environnement) — sans effet sur les bâtiments sans parc (D4) ;
+  un job n'est rendu qu'à celui qui l'a lancé
+- [x] Import CSV (en-têtes français/anglais, `;` ou `,`, colonnes facultatives → faits **déclarés**),
+  traitement par la file `parc` (un bâtiment par tâche, file interactive consultée d'abord, reprise
+  des bâtiments bloqués), N0 + N1 avec **fourchette P10–P90** (48 tirages vectorisés, `api/uncertainty.py`)
+- [x] Tableau (besoin, fourchette, DPE, heures > 28 °C, confiance, complétude, priorité), export CSV
+  (formules neutralisées), rattacher un bâtiment commun ; pages « Parcs » et « Invitation »
+- [x] Contrôle de cohérence de la surface d'un DPE « maison » (écart > ×2 avec emprise × niveaux)
+- [x] Worker : `-Q celery,parc --prefetch-multiplier=1`, `queue_order_strategy: priority` ; commande `traiter_parc`
+**Tests à passer avant de clore le lot :**
+- [x] Parc de 20 adresses réelles traité sans intervention (recette réelle, ci-dessous ; fichier
+  `backend/api/management/commands/recette_parc20.csv`)
+- [x] Cloisonnement : tiers, lecteur, gestionnaire de bâtiment, occupant, invitations (`ParcAccessTest`, 12 tests)
+**Vérifié le :** 2026-11-14 — 336 tests OK. Recette réelle (`traiter_parc`, conteneur jetable avec Internet,
+base jetable) : **19/20 complets**, 85 s au total, **4,2 s par bâtiment** (réseau, chaîne, N0, N1 à 48 tirages) ;
+le 20ᵉ (« avenue de Sévigné », sans numéro) n'a pas de bâtiment RNB au point géocodé, la raison est affichée.
+Limite de données constatée : un point d'adresse à l'entrée d'un grand site peut désigner la loge
+(musée de Tours, hôtel de ville de Blois : 68–113 m²) — confiance basse, à corriger à l'affinage.
+Navigateur réel (banc, worker `celery,parc`) : création, import de 5 bâtiments, traitement complet par la
+file `parc`, tableau avec 5 fourchettes, export téléchargé, lien d'invitation « occupant » accepté par un
+second compte (une seule ligne visible, pas d'import), tiers sans aucun parc ; clair et sombre sans erreur.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

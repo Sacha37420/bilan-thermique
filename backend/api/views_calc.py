@@ -75,6 +75,8 @@ def scenario_of(building, sid):
 class CalculerView(APIView):
     def post(self, request, pk):
         b = get_object_or_404(visible_buildings(request), pk=pk)
+        if not access.can_declare(request, b):
+            return Response({'detail': 'Lecture seule sur ce bâtiment.'}, status=status.HTTP_403_FORBIDDEN)
         ser = CalculerSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data

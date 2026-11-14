@@ -420,3 +420,16 @@ def after_init(building, job):
     building.pipeline = pipe
     building.save(update_fields=['pipeline'])
     return None
+
+
+@shared_task(bind=True, acks_late=True)
+def process_parc_next(self, portfolio_id, owner_sub=''):
+    """Refonte (Lot 11) : traite UN bâtiment du parc puis se replanifie (file `parc`, D13) — un job
+    interactif en attente sur la file `celery` passe avant le bâtiment suivant."""
+    from . import parc
+    b = parc.next_building(portfolio_id)
+    if b is None:
+        return 'fini'
+    parc.process_one(b, owner_sub=owner_sub)
+    process_parc_next.apply_async(args=[portfolio_id, owner_sub], queue='parc')
+    return b.pk

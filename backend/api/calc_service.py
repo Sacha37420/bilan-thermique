@@ -80,7 +80,8 @@ def is_up_to_date(run):
     return run.inputs_hash == inputs_hash_for(run.building, run.level, run.scenario, (run.weather or {}).get('hash'))
 
 
-def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub='', force=False, job=None):
+def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub='', force=False, job=None,
+              uncertainty=True):
     if level not in ('N0', 'N1'):
         raise CalcError('Niveau inconnu (N0 ou N1).')
     weather, wdesc = resolve_weather(building, weather_spec)
@@ -96,6 +97,7 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
                 'facts': {k: {'value': f.value, 'method': f.method, 'source': f.source, 'confidence': f.confidence}
                           for k, f in eff.items()},
                 'confidence': facts.scores(eff)[0], 'completeness': facts.scores(eff)[1]}
+    settings['uncertainty'] = bool(uncertainty and level == 'N1')
     try:
         with transaction.atomic():
             run = CalcRun.objects.create(building=building, level=level, scenario=scenario, status=Job.RUNNING,
@@ -105,7 +107,10 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
         raise Busy('Un calcul de ce niveau est déjà en cours pour ce bâtiment.') from exc
     t0 = time.monotonic()
     try:
-        res = n1.run_one(p, weather) if level == 'N1' else n0.run(p, weather)
+        if level == 'N1' and uncertainty:
+            res = run_n1_with_range(building, scenario, eff, weather, p)
+        else:
+            res = n1.run_one(p, weather) if level == 'N1' else n0.run(p, weather)
     except Exception as exc:
         from . import net
         run.status, run.message = Job.ERROR, net.public_message(exc)[:500]
@@ -140,3 +145,27 @@ def current_or_latest(building, level, scenario=None):
     match = (CalcRun.objects.filter(building=building, level=level, scenario=scenario, status=Job.DONE, inputs_hash=h)
              .order_by('-created_at').first())
     return match or last
+
+
+def run_n1_with_range(building, scenario, eff, weather, nominal_params):
+    """N1 nominal + fourchette P10–P90 par tirages (api.uncertainty), en un seul passage vectorisé."""
+    import copy
+    from . import uncertainty
+    from .engines import inputs as engine_inputs
+    seed = int(stable_hash(sorted((k, f.value) for k, f in eff.items()))[:8], 16)
+    geom = (building.pipeline or {}).get('geometry')
+    samples = uncertainty.sample_values(eff, seed=seed)
+    params = [nominal_params]
+    from . import shading_service
+    for vals in samples[1:]:
+        q = engine_inputs.from_fiche(vals, geom)
+        shading_service.apply(q, building, scenario)
+        params.append(q)
+    results = n1.run(params, weather, keep_series=False)
+    nominal = n1.run_one(nominal_params, weather)
+    heat = [r['heating_kwh'] for r in results]
+    pc = uncertainty.percentiles(heat)
+    nominal['heating_kwh_p10'] = round(pc[10], 1)
+    nominal['heating_kwh_p90'] = round(pc[90], 1)
+    nominal['n_samples'] = len(results)
+    return nominal

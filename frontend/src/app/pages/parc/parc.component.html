@@ -1,0 +1,133 @@
+<div class="rf-page">
+  <p class="rf-eyebrow">Parc</p>
+  <h1>Analyse d'un parc</h1>
+  <p class="rf-sub">Importez une liste de bâtiments : chacun est identifié, décrit depuis l'open data (RNB, BDNB, DPE,
+    BD TOPO), puis calculé (N0, N1) sans saisie. La fourchette et la confiance disent ce que vaut chaque chiffre.</p>
+
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  @if (info()) { <p class="rf-ok" role="status">{{ info() }}</p> }
+
+  <section class="rf-card">
+    <div class="rf-row">
+      <label class="rf-field grow"><span>Parc</span>
+        <select [ngModel]="current()?.id ?? null" (ngModelChange)="select($event)" aria-label="Parc">
+          <option [ngValue]="null">— choisir —</option>
+          @for (p of portfolios(); track p.id) { <option [ngValue]="p.id">{{ p.name }} ({{ p.counts.total }})</option> }
+        </select></label>
+      <label class="rf-field grow"><span>Nouveau parc</span>
+        <input type="text" [(ngModel)]="newName" placeholder="Nom du parc" (keyup.enter)="create()"></label>
+      <button type="button" class="rf-btn" (click)="create()">Créer</button>
+    </div>
+  </section>
+
+  @if (current(); as p) {
+    <section class="rf-card" aria-labelledby="pc-title">
+      <div class="rf-card-head">
+        <h2 id="pc-title">{{ p.name }}</h2>
+        <span class="rf-badge">{{ roleLabels[p.role ?? ''] ?? 'accès par bâtiment' }}</span>
+      </div>
+      <div class="prog" role="progressbar" [attr.aria-valuenow]="progress()" aria-valuemin="0" aria-valuemax="100"
+           aria-label="Avancement de l'analyse"><i [style.width.%]="progress()"></i></div>
+      <p class="rf-hint">{{ p.counts.total }} bâtiment(s) · {{ p.counts.complet }} complet(s) · {{ p.counts.incomplet }} incomplet(s)
+        · {{ p.counts.en_attente + p.counts.en_cours }} en attente</p>
+      <div class="rf-row">
+        @if (isManager()) {
+          <label class="rf-btn file">Importer un CSV<input type="file" accept=".csv,text/csv" (change)="onFile($event)"></label>
+          <button type="button" class="rf-btn" (click)="launch()">Relancer les incomplets</button>
+          <button type="button" class="rf-btn" (click)="launch(true)">Tout recalculer</button>
+        }
+        <button type="button" class="rf-btn" (click)="exportCsv()">Exporter (CSV)</button>
+      </div>
+      @if (isManager()) {
+        <p class="rf-hint">Colonnes reconnues : <code>adresse</code> ou <code>rnb</code> ou <code>lat</code>+<code>lon</code> ;
+          facultatives : <code>nom</code>, <code>usage</code>, <code>surface</code>, <code>annee</code>, <code>energie</code>, <code>conso</code>.</p>
+      }
+    </section>
+
+    <section class="rf-card" aria-labelledby="tb-title">
+      <div class="rf-card-head"><h2 id="tb-title">Bâtiments</h2></div>
+      <div class="rf-row filters">
+        <label class="rf-field"><span>Recherche</span><input type="text" [ngModel]="search()" (ngModelChange)="search.set($event)" placeholder="nom ou adresse"></label>
+        <label class="rf-field"><span>Usage</span>
+          <select [ngModel]="filterUsage()" (ngModelChange)="filterUsage.set($event)"><option value="">tous</option>
+            @for (u of usageLabels | keyvalue; track u.key) { <option [value]="u.key">{{ u.value }}</option> }</select></label>
+        <label class="rf-field"><span>État</span>
+          <select [ngModel]="filterStatus()" (ngModelChange)="filterStatus.set($event)"><option value="">tous</option>
+            <option value="complet">complet</option><option value="incomplet">incomplet</option>
+            <option value="en_attente">en attente</option><option value="en_cours">en cours</option></select></label>
+      </div>
+      <div class="rf-table-wrap">
+        <table class="rf-table parc">
+          <thead><tr>
+            <th><button type="button" (click)="sort('name')">Bâtiment {{ arrow('name') }}</button></th>
+            <th><button type="button" (click)="sort('usage')">Usage {{ arrow('usage') }}</button></th>
+            <th class="num"><button type="button" (click)="sort('surface_m2')">m² {{ arrow('surface_m2') }}</button></th>
+            <th class="num"><button type="button" (click)="sort('heating_kwh_m2')">Besoin kWh/m²·an {{ arrow('heating_kwh_m2') }}</button></th>
+            <th><button type="button" (click)="sort('dpe')">DPE {{ arrow('dpe') }}</button></th>
+            <th class="num"><button type="button" (click)="sort('hours_over_28')">h &gt; 28 °C {{ arrow('hours_over_28') }}</button></th>
+            <th><button type="button" (click)="sort('confidence')">Confiance {{ arrow('confidence') }}</button></th>
+            <th><button type="button" (click)="sort('completeness')">Complétude {{ arrow('completeness') }}</button></th>
+            <th class="num"><button type="button" (click)="sort('priority')">Priorité {{ arrow('priority') }}</button></th>
+          </tr></thead>
+          <tbody>
+            @for (r of view(); track r.id) {
+              <tr>
+                <td><a [routerLink]="['/fiche']" [queryParams]="{ b: r.id }">{{ r.name }}</a>
+                  <small>{{ r.address }}@if (r.status !== 'complet') { · <span [class.ko]="r.status === 'incomplet'">{{ r.status || 'jamais analysé' }}</span> }</small></td>
+                <td>{{ usageLabels[r.usage ?? ''] ?? '—' }}</td>
+                <td class="num">{{ r.surface_m2 | number: '1.0-0' }}</td>
+                <td class="num">@if (r.heating_kwh_m2 !== null) { <strong>{{ r.heating_kwh_m2 | number: '1.0-0' }}</strong>
+                  @if (r.p10 !== null) { <small>{{ r.p10 | number: '1.0-0' }}–{{ r.p90 | number: '1.0-0' }}</small> } } @else { — }</td>
+                <td>@if (r.dpe) { <span class="dpe" [attr.data-l]="r.dpe">{{ r.dpe }}</span> } @else { — }</td>
+                <td class="num">{{ r.hours_over_28 ?? '—' }}</td>
+                <td><span class="rf-gauge"><span class="rf-gauge-bar" [class]="'rf-gauge-bar ' + gauge(r.confidence)"><i [style.width.%]="r.confidence * 100"></i></span>{{ r.confidence * 100 | number: '1.0-0' }} %</span></td>
+                <td><span class="rf-gauge"><span class="rf-gauge-bar" [class]="'rf-gauge-bar ' + gauge(r.completeness)"><i [style.width.%]="r.completeness * 100"></i></span>{{ r.completeness * 100 | number: '1.0-0' }} %</span></td>
+                <td class="num">{{ r.priority | number: '1.0-0' }}</td>
+              </tr>
+            } @empty { <tr><td colspan="9" class="rf-hint">Aucun bâtiment visible.</td></tr> }
+          </tbody>
+        </table>
+      </div>
+      <p class="rf-hint">Besoin : N1 (horaire), fourchette P10–P90 par tirages selon la provenance des valeurs. Priorité = besoin × (0,5 + 0,5 × confiance).</p>
+    </section>
+
+    @if (isManager()) {
+      <section class="rf-card" aria-labelledby="mb-title">
+        <div class="rf-card-head"><h2 id="mb-title">Partage</h2>
+          @if (!members()) { <button type="button" class="rf-btn" (click)="loadMembers()">Afficher les membres</button> }</div>
+        <p class="rf-hint">Pas d'annuaire : on invite par un lien à usage unique. La personne l'ouvre avec son compte du lab.</p>
+        <div class="rf-row">
+          <label class="rf-field"><span>Rôle</span>
+            <select [(ngModel)]="inviteRole">
+              <option value="lecteur">Lecteur (tout le parc)</option><option value="gestionnaire_bat">Gestionnaire de bâtiment</option>
+              <option value="gestionnaire_parc">Gestionnaire de parc</option><option value="gestionnaire">Gestionnaire d'un bâtiment</option>
+              <option value="occupant">Occupant d'un bâtiment</option></select></label>
+          @if (inviteRole === 'gestionnaire' || inviteRole === 'occupant') {
+            <label class="rf-field grow"><span>Bâtiment</span>
+              <select [(ngModel)]="inviteBuilding"><option [ngValue]="null">— choisir —</option>
+                @for (r of rows(); track r.id) { <option [ngValue]="r.id">{{ r.name }}</option> }</select></label>
+          }
+          <button type="button" class="rf-btn primary" (click)="invite()">Créer le lien</button>
+        </div>
+        @if (inviteCode()) {
+          <p class="rf-hint">Lien (affiché une seule fois, valable 7 jours, un usage) :</p>
+          <input type="text" class="rf-input code" readonly [value]="inviteLink()" aria-label="Lien d'invitation" (focus)="$any($event.target).select()">
+        }
+        @if (members(); as m) {
+          <h3>Membres</h3>
+          <ul class="mlist">
+            @for (x of m.members; track x.id) { <li>{{ x.name }} — {{ roleLabels[x.role] }} @if (!x.me) { <button type="button" class="rf-btn small danger" (click)="removeMember(x.id, 'membre')">Retirer</button> }</li> }
+            @for (x of m.accesses; track x.id) { <li>{{ x.name }} — {{ roleLabels[x.role] }} de « {{ x.building }} » <button type="button" class="rf-btn small danger" (click)="removeMember(x.id, 'acces')">Retirer</button></li> }
+          </ul>
+          @if (m.invitations.length) {
+            <h3>Liens</h3>
+            <ul class="mlist">
+              @for (i of m.invitations; track i.id) { <li><code>{{ i.prefix }}…</code> — {{ roleLabels[i.role] }} · {{ i.uses }}/{{ i.max_uses }}
+                @if (i.active) { <button type="button" class="rf-btn small danger" (click)="removeMember(i.id, 'invitation')">Révoquer</button> } @else { (inactif) }</li> }
+            </ul>
+          }
+        }
+      </section>
+    }
+  }
+</div>

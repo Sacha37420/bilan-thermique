@@ -64,6 +64,9 @@ def indicators_from(result, surface_m2=None, level=CalcRun.N2):
         ind['surface_m2'] = round(surface_m2, 1)
         ind['heating_kwh_m2'] = round(heating / surface_m2, 1)
         ind['cooling_kwh_m2'] = round(cooling / surface_m2, 1)
+        for q in ('p10', 'p90'):
+            if result.get(f'heating_kwh_{q}') is not None:
+                ind[f'heating_kwh_m2_{q}'] = round(result[f'heating_kwh_{q}'] / surface_m2, 1)
     t = result.get('t_op') or result.get('t_air')
     if t and result.get('hours') and len(t) == result['hours'] + 1:
         t = t[1:]  # N2 : la série commence par l'état initial

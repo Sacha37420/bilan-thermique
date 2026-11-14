@@ -339,7 +339,8 @@ class BuildingSerializer(serializers.Serializer):
         return {k: v for k, v in data.items() if k != 'base'}
 
     def validate_name(self, value):
-        qs = Building.objects.filter(name=value)
+        portfolio = self.instance.portfolio_id if self.instance is not None else None
+        qs = Building.objects.filter(name=value, portfolio_id=portfolio)
         if self.instance is not None:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():

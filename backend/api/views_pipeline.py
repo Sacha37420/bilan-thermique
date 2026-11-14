@@ -57,7 +57,7 @@ class InitNewBuildingView(APIView):
 class ReinitBuildingView(APIView):
     def post(self, request, pk):
         b = get_object_or_404(access.visible_buildings(request), pk=pk)
-        if not access.can_declare(request, b):
+        if not access.can_manage(request, b):
             return Response({'detail': 'Action réservée aux gestionnaires de ce bâtiment.'}, status=status.HTTP_403_FORBIDDEN)
         if not (b.address or b.rnb_id or b.georef_lat is not None):
             return Response({'detail': 'Ce bâtiment n’a ni adresse, ni identifiant RNB, ni position.'},

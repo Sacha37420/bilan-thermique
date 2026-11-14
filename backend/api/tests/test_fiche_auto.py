@@ -152,6 +152,22 @@ class PipelineTest(TestCase):
         self.assertGreater(b.confidence, 0.3)
         self.assertGreater(b.completeness, 0.5)
 
+    def test_inconsistent_dpe_surface_is_discarded(self):
+        data = {'groupes': [{**GROUPE, 's_geom_groupe': 900, 'nb_niveau': 3}], 'dpe': [DPE_MAISON]}
+        b = Building.objects.create(name='musee', address='x y z')
+        patches = [mock.patch(k, return_value=(data if k.endswith('bdnb_for_rnb') else v)) for k, v in SOURCES.items()]
+        patches.append(mock.patch('api.pipeline.fetch_footprints', return_value=None))
+        for p in patches:
+            p.start()
+        try:
+            report = pipeline.initialize(b)
+        finally:
+            for p in patches:
+                p.stop()
+        eff = facts.effective(b)
+        self.assertEqual(eff['identite.surface_m2'].value, 2160.0)  # 900 × 3 × 0,8
+        self.assertTrue(any('incohérente' in w for w in report['warnings']))
+
     def test_failed_step_marks_incomplete_but_keeps_archetype(self):
         b = Building.objects.create(name='b', address='1 rue Exemple Tours')
         report = self._run(b, fail=sources.SourceError('BDNB : délai dépassé'))

@@ -425,6 +425,18 @@ def initialize(building, progress=None):
         rows.append(('identite.annee_construction', archetypes.DEFAULT_YEAR, 'defaut', 0.1, 'valeur par défaut'))
     if not usage:
         rows.append(('identite.usage', 'autre', 'defaut', 0.1, 'valeur par défaut'))
+    # Contrôle de cohérence : la surface d'un DPE « maison » peut être celle d'une petite maison
+    # rattachée au même groupe BDNB (loge, conciergerie) — constaté sur un musée à 113 m² le
+    # 2026-11-14. Écartée si elle s'éloigne de plus d'un facteur 2 de emprise × niveaux × 0,8.
+    emprise_k, niveaux_k = known.get('identite.emprise_m2'), known.get('identite.niveaux')
+    if 'identite.surface_m2' in known and emprise_k:
+        est = emprise_k * (niveaux_k or max(1, round((known.get('identite.hauteur_m') or 3) / 3.0))) * 0.8
+        s_dpe = known['identite.surface_m2']
+        if not (0.5 * est <= s_dpe <= 2.0 * est):
+            bdnb_rows = [r for r in bdnb_rows if r[0] != 'identite.surface_m2']
+            known.pop('identite.surface_m2')
+            report['warnings'] = report.get('warnings', []) + [
+                f'Surface du DPE ({s_dpe:.0f} m²) incohérente avec l’emprise ({est:.0f} m² estimés) : écartée.']
     # Surface chauffée : DPE (maison) sinon emprise × niveaux × 0,8.
     if 'identite.surface_m2' not in known:
         emprise = known.get('identite.emprise_m2')
