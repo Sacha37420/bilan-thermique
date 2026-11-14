@@ -241,6 +241,7 @@
               <select [(ngModel)]="groupBoundaryAssignments[g]" name="groupBoundary_{{g}}">
                 <option value="exterior_air">Air extérieur (défaut)</option>
                 <option value="ground">Sol (dallage)</option>
+                <option value="adiabatic">Mitoyen chauffé (adiabatique)</option>
               </select>
               <button type="button" class="btn-secondary" (click)="assignGroupBoundary(g)">Assigner la condition limite</button>
               <select [(ngModel)]="groupShadingAssignments[g]" name="groupShading_{{g}}">

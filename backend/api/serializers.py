@@ -75,7 +75,7 @@ class TriangleInputSerializer(serializers.Serializer):
     # t_ground plutôt qu'avec t_ext — le sol a une température bien plus stable/
     # amortie que l'air extérieur. Défaut 'exterior_air' = comportement historique
     # (mur/toiture face à l'air extérieur), inchangé pour tout maillage existant.
-    boundary = serializers.ChoiceField(choices=['exterior_air', 'ground'], required=False, default='exterior_air')
+    boundary = serializers.ChoiceField(choices=['exterior_air', 'ground', 'adiabatic'], required=False, default='exterior_air')
     # Lot J : dispositif d'occultation mobile (volet/store) éventuellement
     # installé sur ce triangle — indépendant de paroi_model_id (deux fenêtres
     # du même modèle de vitrage peuvent avoir des dispositifs différents, ou

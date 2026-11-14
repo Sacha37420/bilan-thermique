@@ -1,4 +1,4 @@
-export type TriangleBoundary = 'exterior_air' | 'ground';
+export type TriangleBoundary = 'exterior_air' | 'ground' | 'adiabatic';
 
 // Lot J : dispositif d'occultation mobile éventuellement installé sur ce
 // triangle, toujours considéré ENTIÈREMENT fermé quand actif (voir

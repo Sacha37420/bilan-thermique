@@ -694,3 +694,4 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 9 | livré 2026-11-14 | `Lot 9` | Chaîne A1→A6 (BAN, RNB, BDNB/DPE, BD TOPO, archétypes), cache + quota, mitoyenneté et horizon, carte d'initialisation. **10/10 adresses réelles** en ~2 s. 282 → 301 tests. |
 | 10 | livré 2026-11-14 | `Lot 10` | N1 5R1C vectorisé + N0 mensuel, traçabilité des faits, à jour/périmé ; écart N1/N2 −3 / +6 / −15 %. 301 → 313 tests. |
 | 11 | livré 2026-11-14 | `Lot 11` | Parcs, rôles, invitations, cloisonnement (anciennes routes comprises), import CSV, file `parc` prioritaire, fourchette P10–P90, tableau, export. **Recette réelle 19/20 en 85 s.** 313 → 336 tests. |
+| 12 | livré 2026-11-14 | `Lot 12` | Questionnaire (15 questions → faits), classement par sensibilité N1 × incertitude, incohérences, paroi mitoyenne `adiabatic` dans le N2. 336 → 348 tests. |

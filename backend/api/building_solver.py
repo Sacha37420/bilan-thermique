@@ -385,6 +385,8 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
         else:
             e_dir_i, e_dif_i = e_dir, e_dif
         e_glo = e_dir_i * cos_ti + e_dif_i * f_ciel
+        if geom.get('boundary') == 'adiabatic':
+            e_glo = 0.0  # mitoyen (Lot 12) : face extérieure contre le voisin, jamais au soleil
         # Lot AI : réflexion par le sol (albédo relevé), traitée comme du diffus —
         # y compris vis-à-vis d'un store fermé (même facteur que e_dif).
         if ground_reflect_factor is not None and ground_reflect_factor[i]:
@@ -756,6 +758,9 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # résistance du sol, constante dans le temps (ni vent, ni planning).
     is_ground = [tri.get('boundary') == 'ground' for tri in triangles]
     h_ground = h_ground_from_r(payload.get('r_ground', DEFAULT_R_GROUND))
+    # Refonte (Lot 12, E9) : paroi mitoyenne contre un local chauffé — adiabatique : aucun échange
+    # côté extérieur (flux nul), aucun ensoleillement. Elle garde sa capacité et sa conduction.
+    is_adiabatic = [tri.get('boundary') == 'adiabatic' for tri in triangles]
 
     shading_delta_r = []
     shading_fs_dir = []
@@ -940,7 +945,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             # Un triangle 'ground' (Lot AB3) est hors de ces deux mécanismes :
             # ni vent (h_e), ni volet — la terre, pas l'air extérieur.
             h_e_vec = [
-                h_ground if is_ground[i]
+                0.0 if is_adiabatic[i]
+                else h_ground if is_ground[i]
                 else (1.0 / (1.0 / h_e + shading_delta_r[i]) if volet_closed else h_e)
                 for i in range(len(triangles))
             ]

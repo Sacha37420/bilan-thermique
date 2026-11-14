@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { QuestionnaireComponent } from '../../components/questionnaire/questionnaire.component';
 import { ResultatCarteComponent } from '../../components/resultat-carte/resultat-carte.component';
 import { Catalogue, CatalogueKey, Fact, Fiche, METHOD_LABELS, Method } from '../../core/refonte.types';
 
@@ -19,7 +20,7 @@ interface BuildingInfo {
 @Component({
   selector: 'app-fiche',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent],
   templateUrl: './fiche.component.html',
   styleUrl: './fiche.component.scss',
 })
@@ -167,6 +168,11 @@ export class FicheComponent implements OnInit {
       next: fi => { this.fiche.set(fi); this.ficheVersion.update(v => v + 1); },
       error: e => this.error.set(e?.error?.detail ?? 'Impossible de retirer cette valeur.'),
     });
+  }
+
+  onQuestionnaire(): void {
+    this.ficheVersion.update(v => v + 1);
+    if (this.buildingId !== null) this.rf.fiche(this.buildingId).subscribe({ next: f => this.fiche.set(f) });
   }
 
   showHistory(k: CatalogueKey): void {

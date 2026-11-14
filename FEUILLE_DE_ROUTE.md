@@ -242,6 +242,26 @@ Navigateur réel (banc, worker `celery,parc`) : création, import de 5 bâtiment
 file `parc`, tableau avec 5 fourchettes, export téléchargé, lien d'invitation « occupant » accepté par un
 second compte (une seule ligne visible, pas d'import), tiers sans aucun parc ; clair et sombre sans erreur.
 
+## Lot 12 — Formulaires guidés et mitoyenneté (E9)   ·   statut : livré
+**Objectif :** le gestionnaire ou l'occupant répond à des questions simples ; chaque réponse devient un
+fait déclaré, fait bouger le résultat et la confiance (`refonte.md` § B1, E9).
+**Tâches :**
+- [x] `api/questionnaire.py` : 15 questions en langage courant, traduites en faits (U des murs déduit de
+  l'épaisseur d'isolant, +10 % en ITI ; U de toiture ; fenêtres → Uw, g ; ventilation ; étanchéité → n50 ;
+  mitoyenneté) ; une réponse sur l'année ou l'usage recalcule les défauts de l'archétype
+- [x] Classement par **influence × incertitude** : sensibilité N1 vectorisée (±1 écart type de la méthode
+  de chaque valeur), les 3 à 5 questions les plus utiles d'abord ; incohérences signalées (9 règles)
+- [x] `GET /api/batiments/<id>/questions/`, `POST /api/batiments/<id>/questionnaire/` (N0/N1 relancés,
+  avant/après, confiance avant/après) ; carte « Questions » de la fiche
+- [x] Paroi mitoyenne dans le N2 : limite `adiabatic` (flux nul, sans soleil) — sérialiseur, solveur,
+  page Bâtiment (« Mitoyen chauffé ») ; N0/N1 l'avaient déjà par `identite.mitoyennete`
+**Tests à passer avant de clore le lot :**
+- [x] Une réponse fait bouger le résultat et la confiance (`QuestionnaireApiTest.test_answer_moves_result_and_confidence`)
+- [x] Façades mitoyennes : besoin N2 réduit (`PartyWallN2Test`)
+**Vérifié le :** 2026-11-14 — 348 tests OK ; `ng build` OK ; navigateur réel (banc) : 5 questions prioritaires
+avec influence en kWh, « murs isolés par l'extérieur, 14 cm » → besoin 173 → 85 kWh/m²·an, confiance
+14 → 20 %, carte Résultat « à jour » ; clair et sombre sans erreur console.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

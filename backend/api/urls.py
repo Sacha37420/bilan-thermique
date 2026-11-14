@@ -2,6 +2,7 @@ from django.urls import path
 from .views_calc import BuildingCalcRunsView, CalcRunDetailView, CalculerView, ResultatView
 from .views_pipeline import InitNewBuildingView, ReinitBuildingView
 from . import views_parc as vp
+from .views_questionnaire import QuestionsView, QuestionnaireView
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
 from .views import (
     MeView, Calcul1DView,
@@ -53,6 +54,8 @@ urlpatterns = [
     # ── Refonte (Lot 9) : fiche initiale automatique ──
     path('batiments/initialiser/', InitNewBuildingView.as_view()),
     path('batiments/<int:pk>/initialiser/', ReinitBuildingView.as_view()),
+    path('batiments/<int:pk>/questions/', QuestionsView.as_view()),
+    path('batiments/<int:pk>/questionnaire/', QuestionnaireView.as_view()),
     # ── Refonte (Lot 11) : parcs ──
     path('parcs/', vp.PortfoliosView.as_view()),
     path('parcs/<int:pk>/', vp.PortfolioDetailView.as_view()),
