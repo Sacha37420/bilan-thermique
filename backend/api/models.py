@@ -635,3 +635,28 @@ class FactProposal(models.Model):
     class Meta:
         db_table = 'fact_proposals'
         ordering = ['run', 'key']
+
+
+class McpToken(models.Model):
+    """Jeton personnel du serveur MCP (refonte, Lot 22) — modèle d'App Builder `0ff4e4e` (`McpToken`),
+    identité par le `sub`. Seule l'empreinte sha256 est gardée ; `prefix` (« btt_ » + 8 caractères) le
+    reconnaît dans la liste. Lié à un bâtiment ou à un parc, il ne voit que lui."""
+
+    owner_sub = models.CharField(max_length=64, db_index=True)
+    owner_name = models.CharField(max_length=150, blank=True)
+    name = models.CharField(max_length=80)
+    prefix = models.CharField(max_length=12)
+    token_hash = models.CharField(max_length=64, unique=True)
+    scope = models.CharField(max_length=10, default='lire')          # lire | ecrire
+    building = models.ForeignKey(Building, null=True, blank=True, on_delete=models.CASCADE, related_name='mcp_tokens')
+    portfolio = models.ForeignKey(Portfolio, null=True, blank=True, on_delete=models.CASCADE, related_name='mcp_tokens')
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'mcp_tokens'
+
+    def __str__(self):
+        return f'{self.prefix}…'

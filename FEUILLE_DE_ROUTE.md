@@ -448,6 +448,25 @@ physique ; rien n'entre dans la fiche sans validation ; chaque utilisateur paie 
   acceptation → provenance « document », estimation avant envoi
 **Vérifié le :** 2026-11-15 — 423 tests OK ; aucun appel réel à un fournisseur (tous simulés).
 
+## Lot 22 — Serveur MCP et jetons personnels   ·   statut : livré
+**Objectif :** la voie « abonnement » : le Claude Code ou le Mistral Vibe de l'utilisateur pilote la fiche par
+le serveur MCP de l'app, avec un jeton personnel ; l'app n'appelle aucune IA (refonte § B8).
+**Tâches :**
+- [x] `McpToken` : préfixe `btt_`, seule l'empreinte sha256 gardée, 90 jours au plus, révocable, portée
+  `lire` / `ecrire`, liaison facultative à un bâtiment ou à un parc, identité par `sub`
+- [x] `POST /api/mcp/` (JSON-RPC 2.0 sans état, modèle App Builder `0ff4e4e`) : n'accepte que `btt_` ; un `btt_`
+  n'ouvre rien d'autre ; journal sans arguments ni jeton
+- [x] Outils : lister_batiments, lire_catalogue, lire_fiche, lire_resultats, lister_documents, lire_document,
+  lister_propositions, proposer_faits, lancer_calcul, comparer_scenarios, appliquer_propositions
+- [x] Page « Intelligence artificielle » : créer (jeton affiché une fois), commandes Claude Code / Vibe, révoquer
+**Tests à passer avant de clore le lot :**
+- [x] `api/tests/test_mcp.py` (13) : expiré, révoqué, inconnu (même message), jeton d'autrui, Keycloak refusé sur
+  `/api/mcp/`, `btt_` refusé ailleurs, portée `lire` sans outil d'écriture, jeton lié à un bâtiment, droits du
+  titulaire (parc d'autrui, document d'autrui, lecteur), membre retiré, proposer puis appliquer
+- [x] Navigateur (banc, clair et sombre) + appel MCP réel par HTTP : initialize, tools/list, lire_fiche,
+  dernier usage, révocation → 401
+**Vérifié le :** 2026-11-15 — 436 tests OK. Non éprouvé : un vrai Claude Code relié (aucun abonnement utilisé).
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

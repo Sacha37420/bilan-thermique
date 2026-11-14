@@ -9,6 +9,7 @@ from . import views_mesures as vme
 from . import views_scenarios as vsc
 from .views_carte import AreaBuildingsView, AddPointsView
 from . import views_ia as via
+from . import mcp as mcp_views
 from .views_questionnaire import QuestionsView, QuestionnaireView
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
 from .views import (
@@ -106,6 +107,11 @@ urlpatterns = [
     path('documents/<int:pk>/extraire/', via.ExtractView.as_view()),
     path('batiments/<int:pk>/propositions/', via.ProposalsView.as_view()),
     path('propositions/<int:pk>/decision/', via.DecisionView.as_view()),
+    # ── Refonte (Lot 22) : serveur MCP et jetons personnels btt_ ──
+    path('mcp-tokens/', mcp_views.McpTokenListCreateView.as_view()),
+    path('mcp-tokens/<int:pk>/', mcp_views.McpTokenDetailView.as_view()),
+    path('mcp/info/', mcp_views.McpInfoView.as_view()),
+    path('mcp/', mcp_views.McpView.as_view()),
     # ── Refonte (Lot 19) : carte ──
     path('carte/batiments/', AreaBuildingsView.as_view()),
     path('parcs/<int:pk>/ajouter/', AddPointsView.as_view()),

@@ -32,7 +32,39 @@
       <h2>Avec votre abonnement : Claude Code ou Mistral Vibe</h2>
       <p class="rf-hint">Un jeton d'abonnement Claude (<code>sk-ant-oat…</code>) n'est pas accepté ici : les conditions d'Anthropic le
         réservent à Claude Code. Pour utiliser votre abonnement, reliez votre Claude Code ou votre Vibe au serveur MCP de l'app
-        avec un jeton personnel (section ci-dessous).</p>
+        avec un jeton personnel : votre assistant lit la fiche, les résultats et les documents, lance les calculs et
+        <strong>propose</strong> des valeurs ; il ne les applique qu'avec un jeton « lire et proposer » et votre accord.</p>
+      <div class="rf-row">
+        <label class="rf-field"><span>Nom du jeton</span><input type="text" [(ngModel)]="tokName" maxlength="80" aria-label="Nom du jeton"></label>
+        <label class="rf-field"><span>Portée</span><select [(ngModel)]="tokScope" aria-label="Portée du jeton">
+          <option value="lire">lire seulement</option><option value="ecrire">lire, calculer, proposer et appliquer</option></select></label>
+        <label class="rf-field" style="min-width: 6rem"><span>Durée (jours, 90 au plus)</span>
+          <input type="number" min="1" max="90" [(ngModel)]="tokDays" aria-label="Durée du jeton en jours"></label>
+        <button type="button" class="rf-btn primary" (click)="createToken()" [disabled]="!tokName.trim()">Créer un jeton</button>
+      </div>
+      @if (newToken()) {
+        <div class="rf-card" role="status">
+          <p><strong>Copiez ce jeton maintenant : il ne sera plus jamais affiché.</strong></p>
+          <code class="rf-code" style="word-break: break-all">{{ newToken() }}</code>
+        </div>
+      }
+      @if (info(); as i) {
+        <p class="rf-hint">Adresse du serveur : <code>{{ i.url }}</code></p>
+        <p class="rf-hint">Claude Code :</p><pre class="rf-code" style="white-space: pre-wrap; word-break: break-all">{{ withToken(i.claude) }}</pre>
+        <p class="rf-hint">Mistral Vibe :</p><pre class="rf-code" style="white-space: pre-wrap; word-break: break-all">{{ withToken(i.vibe) }}</pre>
+      }
+      @if (tokens().length) {
+        <div class="rf-table-wrap"><table class="rf-table">
+          <thead><tr><th>Jeton</th><th>Portée</th><th>Expire</th><th>Dernier usage</th><th></th></tr></thead>
+          <tbody>
+            @for (t of tokens(); track t.id) {
+              <tr><td>{{ t.name }} <code>{{ t.prefix }}…</code></td><td>{{ t.scope === 'ecrire' ? 'lire et proposer' : 'lire' }}</td>
+                <td>{{ t.expires_at | date:'dd/MM/yyyy' }}</td><td>{{ t.last_used_at ? (t.last_used_at | date:'dd/MM/yyyy HH:mm') : 'jamais' }}</td>
+                <td>@if (t.revoked) { <span class="rf-badge m-defaut">révoqué</span> }
+                  @else { <button type="button" class="rf-btn danger" (click)="revoke(t)" [attr.aria-label]="'Révoquer ' + t.name">Révoquer</button> }</td></tr>
+            }
+          </tbody></table></div>
+      }
     </section>
   }
 </div>

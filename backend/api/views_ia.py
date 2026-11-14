@@ -265,17 +265,23 @@ class DecisionView(APIView):
         if not access.can_see_personal(request, p.building, p.run.owner_sub) or not access.can_declare(request, p.building):
             return Response(status=status.HTTP_404_NOT_FOUND)
         decision = request.data.get('decision')
-        if decision not in ('acceptee', 'rejetee') or p.decision != 'en_attente':
-            return Response({'detail': 'Décision attendue (acceptee ou rejetee) sur une proposition en attente.'},
-                            status=status.HTTP_400_BAD_REQUEST)
-        if decision == 'acceptee':
-            if p.control not in documents.ACCEPTABLE:
-                return Response({'detail': 'Proposition écartée par le contrôle automatique.'}, status=status.HTTP_400_BAD_REQUEST)
-            src = f'document « {p.run.document.filename} »' + (f' p. {p.page}' if p.page else '')
-            f = facts.record(p.building, p.key, p.value, 'document', source=src, author_sub=access.sub_of(request),
-                             author_name=access.name_of(request),
-                             extract={'document_id': p.run.document_id, 'page': p.page, 'texte': p.extract[:300]})
-            p.fact = f
-        p.decision, p.decided_by, p.decided_at = decision, access.sub_of(request), timezone.now()
-        p.save(update_fields=['decision', 'decided_by', 'decided_at', 'fact'])
+        try:
+            decide(p, decision, access.sub_of(request), access.name_of(request))
+        except documents.DocumentError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(_prop(p))
+
+
+def decide(p, decision, sub, name, via=''):
+    """Décision sur une proposition (interface ou MCP). Acceptée ⇒ fait `document` avec extrait et page."""
+    if decision not in ('acceptee', 'rejetee') or p.decision != 'en_attente':
+        raise documents.DocumentError('Décision attendue (acceptee ou rejetee) sur une proposition en attente.')
+    if decision == 'acceptee':
+        if p.control not in documents.ACCEPTABLE:
+            raise documents.DocumentError('Proposition écartée par le contrôle automatique.')
+        src = f'document « {p.run.document.filename} »' + (f' p. {p.page}' if p.page else '') + via
+        p.fact = facts.record(p.building, p.key, p.value, 'document', source=src, author_sub=sub, author_name=name,
+                              extract={'document_id': p.run.document_id, 'page': p.page, 'texte': p.extract[:300]})
+    p.decision, p.decided_by, p.decided_at = decision, sub, timezone.now()
+    p.save(update_fields=['decision', 'decided_by', 'decided_at', 'fact'])
+    return p

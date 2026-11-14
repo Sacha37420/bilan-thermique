@@ -141,6 +141,8 @@ code, pre, .mono { font-family: var(--font-mono); }
 .rf-hint { color: var(--text-mute); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
 .rf-error { color: var(--danger); font-size: var(--text-sm); }
 .rf-ok { color: var(--success); font-size: var(--text-sm); }
+.rf-code { display: block; font-family: var(--font-mono); font-size: var(--text-xs); background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); color: var(--text); margin: 0; }
 .rf-row { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end; }
 .rf-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-sm); min-width: 10rem; }
 .rf-field > span { color: var(--text-mute); font-size: var(--text-xs); }
