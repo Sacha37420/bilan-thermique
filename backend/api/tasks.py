@@ -482,3 +482,41 @@ def list_weather_stations(self, job_id, params):
         job.set_state(status=Job.DONE, progress=100, message=f'{len(stations)} station(s) à moins de {ws.STATION_MAX_KM} km.')
     except Exception as exc:
         job.set_state(status=Job.ERROR, message=net.public_message(exc, 'Stations indisponibles.'))
+
+
+@shared_task(bind=True)
+def calibrate_building(self, job_id, building_id, measurement_id, dataset_id=None):
+    """Refonte (Lot 17) : calage sur factures (météo réelle de la période). Rend une proposition ;
+    rien n'est écrit dans la fiche avant que la personne ne l'applique."""
+    from datetime import date as _date
+    from . import calibration, geometry_service, weather_service as ws
+    from .models import Measurement, WeatherDataset
+    job = Job.objects.get(pk=job_id)
+    try:
+        job.set_state(status=Job.RUNNING, progress=5, message='Météo réelle de la période facturée…')
+        b = Building.objects.get(pk=building_id)
+        m = Measurement.objects.get(pk=measurement_id, building=b)
+        bills = m.values
+        start, end = calibration.period_bounds(bills)
+        chosen = b.weather_dataset if (not dataset_id and b.weather_dataset_id and b.weather_dataset.kind in
+                                         ('reel', 'station', 'import') and b.weather_dataset.meta.get('start')) else None
+        if chosen is not None and not (chosen.meta['start'] <= start.isoformat() and
+                                       (chosen.meta.get('end') or '9999') >= end.isoformat()):
+            chosen = None  # la météo retenue ne couvre pas la période facturée
+        if dataset_id or chosen is not None:
+            ds = chosen or WeatherDataset.objects.get(pk=dataset_id)
+            weather = ws.slice_period(ds.series, start.isoformat(), end.isoformat(), ds)
+            wlabel = ds.label
+        else:
+            ds = ws.from_reanalysis(b.georef_lat, b.georef_lon, start, end, job.owner_sub)
+            weather, wlabel = ds.series, ds.label
+        job.set_state(progress=25, message='Sensibilité (Morris) puis optimisation…')
+        report = calibration.calibrate(b, bills, m.energy or 'gaz', weather, geom=geometry_service.effective_summary(b))
+        report['weather'] = wlabel
+        report['measurement_id'] = m.pk
+        job.result = report
+        job.save(update_fields=['result'])
+        msg = ('Calage conforme (ASHRAE 14)' if report.get('ok') else 'Calage hors critères') if report.get('after') else report.get('reason', '')
+        job.set_state(status=Job.DONE, progress=100, message=msg)
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=net.public_message(exc, 'Calage impossible.'))

@@ -535,3 +535,24 @@ class GeometryEdit(models.Model):
     class Meta:
         db_table = 'geometry_edits'
         ordering = ['-created_at']
+
+
+class Measurement(models.Model):
+    """Mesure d'un bâtiment (refonte, Lot 17 — api.calibration) : factures, courbe de charge, sonde, test.
+    Donnée personnelle : visible de son auteur et des gestionnaires du bâtiment de parc. Le fichier
+    d'origine n'est pas gardé (seules les valeurs lues le sont, `DEMANDES_LAB.md` DL-2)."""
+
+    KINDS = [('facture', 'Factures'), ('courbe', 'Courbe de charge'), ('sonde', 'Sonde'), ('test', 'Test')]
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='measurements')
+    owner_sub = models.CharField(max_length=64)
+    kind = models.CharField(max_length=10, choices=KINDS)
+    energy = models.CharField(max_length=12, blank=True)
+    label = models.CharField(max_length=150, blank=True)
+    values = models.JSONField(default=list)
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'measurements'
+        ordering = ['-created_at']

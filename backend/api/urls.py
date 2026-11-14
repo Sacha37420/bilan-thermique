@@ -5,6 +5,7 @@ from . import views_parc as vp
 from . import views_meteo as vm
 from . import views_protections as vpr
 from .views_geometrie import GeometryView
+from . import views_mesures as vme
 from .views_questionnaire import QuestionsView, QuestionnaireView
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
 from .views import (
@@ -71,6 +72,11 @@ urlpatterns = [
     path('batiments/<int:pk>/protections/effet/', vpr.EffectView.as_view()),
     path('protections/<int:pk>/', vpr.DeviceDetailView.as_view()),
     path('batiments/<int:pk>/geometrie/', GeometryView.as_view()),
+    path('batiments/<int:pk>/mesures/', vme.MeasurementsView.as_view()),
+    path('mesures/<int:pk>/', vme.MeasurementDetailView.as_view()),
+    path('batiments/<int:pk>/sensibilite/', vme.SensitivityView.as_view()),
+    path('batiments/<int:pk>/calage/', vme.CalibrateView.as_view()),
+    path('batiments/<int:pk>/calage/appliquer/', vme.ApplyCalibrationView.as_view()),
     # ── Refonte (Lot 11) : parcs ──
     path('parcs/', vp.PortfoliosView.as_view()),
     path('parcs/<int:pk>/', vp.PortfolioDetailView.as_view()),

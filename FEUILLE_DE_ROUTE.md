@@ -349,6 +349,33 @@ sur la carte Résultat ; passage à une PAC sur plancher → CO₂ 64 → 5 kg/m
 étiquette du modèle face au DPE affiché « E » ; clair et sombre sans erreur console. COP ramené à une
 fraction de Carnot de 0,40 après relecture (5,0 sur plancher semblait optimiste).
 
+## Lot 17 — Mesures, calage, sensibilité, fourchettes (B6, § 6.4)   ·   statut : livré
+**Objectif :** caler le modèle sur des consommations réelles avec des critères reconnus, classer les
+paramètres par influence, afficher des fourchettes (`refonte.md` § B6, § 6.4, D7, D23).
+**Tâches :**
+- [x] `Measurement` (factures, courbe Linky/Gazpar CSV agrégée par mois, sonde, test d'étanchéité →
+  fait « mesuré » `ventilation.n50`) ; données personnelles visibles de leur auteur et des gestionnaires
+  du bâtiment de parc seulement ; fichier d'origine non gardé (DL-2)
+- [x] `api/calibration.py` : criblage de **Morris** (effets élémentaires, un passage N1 vectorisé) ;
+  **calage** sur la météo réelle de la période facturée (météo datée retenue si elle couvre la période,
+  sinon réanalyse), optimisation bornée L-BFGS-B (± 2 écarts types) des 4 paramètres les plus influents
+  parmi les valeurs **non déclarées** et hors géométrie, gradient par différences finies calculé en un
+  seul passage vectorisé ; critères **ASHRAE 14** mensuels (CV(RMSE) ≤ 15 %, |NMBE| ≤ 5 %) ; proposition
+  appliquée seulement à la demande, en « inféré par calage »
+- [x] Fourchettes P10–P90 : en place depuis le Lot 11 (D23)
+- [x] Routes `…/mesures/`, `…/sensibilite/`, `…/calage/`, `…/calage/appliquer/` ; onglet « Mesures et calage »
+**Tests à passer avant de clore le lot :**
+- [x] Calage mensuel conforme aux critères (`MorrisAndCalibrationTest.test_twin_calibration_meets_ashrae_criteria`)
+- [x] Déclarations jamais calées ; mesures privées ; application par l'auteur du calage seulement
+**Vérifié le :** 2026-11-14 — 398 tests OK. Cas réel de météo : station Météo-France TOURS 2023 (lue en
+flux), factures de gaz mensuelles produites par le modèle avec des valeurs cachées (U murs 0,6, n50 4,
+consigne 20 °C) et un bruit de 3 % — **aucune facture réelle n'était disponible** : CV(RMSE) 19,3 → 5,5 %,
+NMBE −14,0 → +1,9 %, conforme, 29 s, 130 simulations. Les valeurs retrouvées ne sont pas les valeurs
+cachées (équifinalité) : c'est dit dans l'interface. Calage d'abord 10 fois trop lent (529 s pour la
+suite du lot) : gradient vectorisé. Navigateur réel (banc) : Morris, calage conforme, application,
+provenance « calage sur factures » ; un autre compte ne voit pas les factures ; clair et sombre sans
+erreur. Défaut trouvé par le navigateur (booléen numpy non sérialisable dans `Job.result`) : corrigé, testé.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

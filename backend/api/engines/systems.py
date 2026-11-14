@@ -92,6 +92,7 @@ def evaluate(values, heating_kwh, cooling_kwh, a_floor, volume, heat_series_w=No
         'final_kwh': round(final, 0), 'primary_kwh': round(primary, 0), 'co2_kg': round(co2, 0), 'cost_eur': round(cost, 0),
         'final_kwh_m2': round(final / a, 1), 'primary_kwh_m2': round(primary / a, 1), 'co2_kg_m2': round(co2 / a, 1),
         'by_usage_kwh': {u: round(k, 0) for u, (k, _) in by_usage.items()},
+        'by_usage_energy': {u: en for u, (_k, en) in by_usage.items()},
         'by_energy_kwh': {e: round(k, 0) for e, k in by_energy.items()},
         'efficiency': {'emission': eta_e, 'distribution': eta_d, 'regulation': eta_r},
         'dpe_label_model': dpe_label(primary / a, co2 / a),

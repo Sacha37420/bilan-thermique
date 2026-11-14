@@ -1,0 +1,93 @@
+<section class="rf-card" aria-labelledby="me-title">
+  <div class="rf-card-head"><h2 id="me-title">Mesures</h2></div>
+  <p class="rf-hint">Factures, courbes de charge (Linky, Gazpar : CSV date;kWh), sondes (date;°C), test d'étanchéité.
+    Ces données sont personnelles : elles ne sont visibles que de vous (et des gestionnaires d'un bâtiment de parc).</p>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  @if (ok()) { <p class="rf-ok" role="status">{{ ok() }}</p> }
+  <ul class="list">
+    @for (m of list(); track m.id) {
+      <li><span class="rf-badge">{{ kinds[m.kind] }}</span> {{ energies[m.energy] ?? '' }} {{ m.label }}
+        <small>{{ m.period_start | date: 'dd/MM/yyyy' }} → {{ m.period_end | date: 'dd/MM/yyyy' }} · {{ m.n_values }} valeur(s)</small>
+        <button type="button" class="rf-btn small danger" (click)="remove(m)">Supprimer</button></li>
+    } @empty { <li class="rf-hint">Aucune mesure.</li> }
+  </ul>
+  <details>
+    <summary>Saisir des factures</summary>
+    <label class="rf-field"><span>Énergie</span>
+      <select [(ngModel)]="energy">@for (e of ['gaz', 'electricite', 'fioul', 'bois', 'reseau']; track e) { <option [value]="e">{{ energies[e] }}</option> }</select></label>
+    @for (r of rows; track $index) {
+      <div class="rf-row bill">
+        <label class="rf-field"><span>Du</span><input type="date" [(ngModel)]="r.start"></label>
+        <label class="rf-field"><span>Au</span><input type="date" [(ngModel)]="r.end"></label>
+        <label class="rf-field"><span>kWh</span><input type="number" [(ngModel)]="r.kwh"></label>
+        <button type="button" class="rf-btn small" (click)="removeRow($index)" aria-label="Retirer la ligne">×</button>
+      </div>
+    }
+    <div class="rf-row"><button type="button" class="rf-btn" (click)="addRow()">Ajouter une période</button>
+      <button type="button" class="rf-btn primary" (click)="saveBills()">Enregistrer les factures</button></div>
+  </details>
+  <div class="rf-row imports">
+    <label class="rf-btn file">Importer une courbe de charge<input type="file" accept=".csv,text/csv" (change)="onCurve($event, 'courbe')"></label>
+    <label class="rf-btn file">Importer une sonde<input type="file" accept=".csv,text/csv" (change)="onCurve($event, 'sonde')"></label>
+    <label class="rf-field"><span>Test d'étanchéité n50 (vol/h)</span><input type="number" step="0.1" [(ngModel)]="n50"></label>
+    <button type="button" class="rf-btn" (click)="saveN50()">Enregistrer</button>
+  </div>
+</section>
+
+<section class="rf-card" aria-labelledby="se-title">
+  <div class="rf-card-head"><h2 id="se-title">Sensibilité</h2>
+    <button type="button" class="rf-btn" (click)="sensitivity()">Calculer (méthode de Morris)</button></div>
+  <p class="rf-hint">Quels paramètres font le plus varier le besoin, compte tenu de leur incertitude actuelle (μ*) ;
+    σ élevé = effet qui dépend des autres paramètres.</p>
+  @if (ranking(); as rk) {
+    <table class="rf-table">
+      @for (r of rk; track r.key) {
+        <tr><td>{{ r.label }} <small class="rf-badge" [class]="'rf-badge m-' + r.method">{{ r.method }}</small></td>
+          <td class="bar"><i [style.width.%]="(r.mu_star / maxMu()) * 100"></i></td>
+          <td class="num">μ* {{ r.mu_star | number: '1.0-0' }} kWh</td><td class="num">σ {{ r.sigma | number: '1.0-0' }}</td></tr>
+      }
+    </table>
+  }
+</section>
+
+<section class="rf-card" aria-labelledby="ca-title">
+  <div class="rf-card-head"><h2 id="ca-title">Calage sur les consommations</h2></div>
+  <p class="rf-hint">Sur la météo réelle de la période facturée, on ajuste les paramètres les plus influents qui ne
+    sont pas vos déclarations, dans leurs bornes d'incertitude. Critères ASHRAE 14 au pas mensuel :
+    CV(RMSE) ≤ 15 %, NMBE ± 5 %. Rien n'entre dans la fiche avant « Appliquer ».</p>
+  <div class="rf-row">
+    <label class="rf-field grow"><span>Mesures</span>
+      <select [(ngModel)]="calMeasure"><option [ngValue]="null">— choisir —</option>
+        @for (m of list(); track m.id) { @if (m.kind === 'facture' || m.kind === 'courbe') {
+          <option [ngValue]="m.id">{{ kinds[m.kind] }} {{ energies[m.energy] }} {{ m.period_start | date: 'MM/yyyy' }} → {{ m.period_end | date: 'MM/yyyy' }}</option> } }
+      </select></label>
+    <button type="button" class="rf-btn primary" (click)="calibrate()" [disabled]="!calMeasure">Lancer le calage</button>
+  </div>
+  @if (jobMsg()) { <p class="rf-hint" role="status">{{ jobMsg() }}</p> }
+  @if (report(); as r) {
+    @if (r.reason) { <p class="rf-hint">{{ r.reason }}</p> }
+    @if (r.after) {
+      <div class="rf-kpis">
+        <div class="rf-kpi"><small>Avant calage</small><strong>{{ r.before.cv_rmse_pct }} %</strong><em>CV(RMSE) · NMBE {{ r.before.nmbe_pct }} %</em></div>
+        <div class="rf-kpi"><small>Après calage</small><strong [class.good]="r.after.ok">{{ r.after.cv_rmse_pct }} %</strong>
+          <em>CV(RMSE) · NMBE {{ r.after.nmbe_pct }} % · {{ r.after.ok ? 'conforme' : 'hors critères' }}</em></div>
+      </div>
+      <table class="rf-table"><thead><tr><th>Paramètre ajusté</th><th class="num">Avant</th><th class="num">Après</th></tr></thead>
+        <tbody>@for (p of r.parameters ?? []; track p.key) { <tr><td>{{ p.label }}</td><td class="num">{{ p.from }}</td><td class="num">{{ p.to }}</td></tr> }</tbody></table>
+      <figure class="cmp" aria-label="Consommation mesurée et modélisée par période">
+        <figcaption>Mesuré <i class="k m"></i> · modèle avant <i class="k b"></i> · modèle calé <i class="k a"></i></figcaption>
+        <div class="groups">
+          @for (v of r.measured; track $index) {
+            <div class="g"><span class="m" [style.height.%]="(v / barsMax(r)) * 100"></span>
+              <span class="b" [style.height.%]="(r.model_before[$index] / barsMax(r)) * 100"></span>
+              <span class="a" [style.height.%]="((r.model_after ?? [])[$index] / barsMax(r)) * 100"></span></div>
+          }
+        </div>
+      </figure>
+      <p class="rf-hint">Météo : {{ r.weather }}. Les valeurs calées reproduisent les consommations ; elles ne sont
+        pas uniques (plusieurs combinaisons expliquent les mêmes factures). Une mesure (test d'étanchéité, épaisseur
+        d'isolant relevée) vaut mieux qu'un calage, et prime toujours sur lui.</p>
+      <button type="button" class="rf-btn primary" (click)="apply()">Appliquer le calage</button>
+    }
+  }
+</section>
