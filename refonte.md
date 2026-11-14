@@ -714,3 +714,73 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 20 | livré 2026-11-14 | `Lot 20` | Selon D9 : pas de multizone ; température radiante moyenne et opérative horaires dans le N2, inconfort compté sur θ_op à tous les niveaux. 405 → 408 tests. |
 | 21 | livré 2026-11-15 | `Lot 21` | Coffre de clés par `sub` (copie d'App Builder `0ff4e4e`), registre fermé Claude/Mistral/Albert, `sk-ant-oat…` refusé ; documents (PDF par `pypdf`, XML DPE sans IA, texte), estimation avant envoi, extraction par la clé de l'auteur seulement, propositions contrôlées à valider ; pages « Intelligence artificielle » et onglet « Documents ». Fournisseurs simulés dans tous les tests. 408 → 423 tests. |
 | 22 | livré 2026-11-15 | `Lot 22` | Serveur MCP (`POST /api/mcp/`, JSON-RPC sans état, modèle App Builder) et jetons `btt_` (sha256, 90 j au plus, révocables, portée, liaison bâtiment/parc) ; 11 outils ; gestion dans la page « Intelligence artificielle ». Appel MCP réel par HTTP sur le banc. 423 → 436 tests. |
+
+## 17. Rapport de fin de session (2026-11-15)
+
+### Lots livrés
+Prérequis 2, 3, 5, puis 8 à 22 : **18 lots**, un commit par lot sur `refonte-parc` (du `4d77a55` au `512f644`
+pour les lots, plus le commit de ce rapport), poussés, jamais sur `main`, jamais en force. Aucune branche
+`auto/…` ni PR de nuit ouverte sur le dépôt de l'app au moment des poussées.
+
+### Vérifications finales (code définitif)
+| Contrôle | Résultat |
+| --- | --- |
+| Tests backend | **436 OK** (244 avant la refonte ; aucun supprimé — découpage du Lot 5 : 268 = 268) |
+| Build Angular | vert |
+| Navigateur réel (banc : Keycloak simulé, API et worker réels, Chromium du runner), clair et sombre | **145/145** sur 15 écrans (lots 3 à 22). Un script du Lot 15 était devenu faux (sommet sous le bas de la fenêtre depuis l'onglet « Documents ») : script corrigé, application inchangée |
+| `cloisonnement.spec.ts` | non modifié |
+| `scripts/validate-app.sh bilan-thermique --quality-only` | code 0 |
+| `scripts/lab-modules.sh show bilan-thermique --check` | « rien ne manque » |
+| Fournisseurs d'IA | tous simulés ; aucune vraie clé, aucun abonnement utilisé |
+
+### Mesures réelles
+- **Parc de 20 adresses réelles** (zones LiDAR HD, Tours/Blois/Orléans/Chinon/Amboise), initialisé et calculé sans
+  aucune saisie : **19/20 complets, 94 s, 4,7 s par bâtiment** ; chaque ligne porte le besoin N1, la fourchette
+  P10–P90, la confiance et la complétude. Échec attendu : lycée Grandmont (aucun bâtiment RNB ni emprise BD TOPO au
+  point d'adresse — se corrige par la position sur la carte, Lot 19).
+- Initialisation d'une adresse : ~2 s (10/10). N1 : 0,5–0,9 s ; N2 : ~2,2 s.
+- Écart N1/N2 sur trois cas : −3,4 / +6,0 / −15,3 % (tolérance D12 : 20 %) ; N0/N2 : +5 / +33 / −1 %.
+- Protections solaires : −69,6 % (N1) contre −87,6 % (N2) de degrés-heures d'inconfort.
+- Météo : 15 stations Météo-France à moins de 60 km en 9 s ; année horaire Tours 2023 en 8 s ; TRACC en 1 s.
+- Calage (cas jumeau, météo réelle Tours 2023) : CV(RMSE) 19,3 → 5,5 %, NMBE −14 → +1,9 %, 29 s.
+
+### Limites constatées (ouvertes)
+- L'usage inféré d'un grand bâtiment public sans DPE peut être faux (bibliothèque centrale classée « maison ») :
+  la confiance basse le signale (0,25) ; une ligne de questionnaire suffit à le corriger. Piste : archétypes BD TOPO
+  « nature » plus fins.
+- Grands sites à plusieurs bâtiments : la chaîne prend le bâtiment au point d'adresse.
+- Document scanné (sans texte) : non lu (D16 révisée).
+- Non éprouvés : un vrai appel Claude/Mistral/Albert avec outil, un vrai Claude Code relié au serveur MCP,
+  le dépôt dans `storage` (DL-2).
+
+### Non déployé
+Le déploiement est autorisé « par le moteur uniquement » ; cette session n'a pas d'accès au moteur (aucun jeton).
+**À faire par le propriétaire** : lab-admin → bilan-thermique → « Déployer » sur `512f644` (ou le commit de ce
+rapport), après fusion ou depuis la branche selon l'usage du lab. Les migrations 0014 à 0025 sont additives
+(les bâtiments existants deviennent des bâtiments sans parc).
+
+### Demandes au lab en attente (`DEMANDES_LAB.md`)
+- **DL-1** : `VAULT_ENCRYPTION_KEY` (clé Fernet neuve, par `env_set`, à ne jamais régénérer) ;
+  `STORAGE_DOCUMENTS_ENABLED=True` seulement après DL-2.
+- **DL-2** : ajouter `bilan-thermique` à `KEYCLOAK_TRUSTED_CLIENTS` de `storage`, puis `app-restart.sh storage`.
+- **DL-3** : pointeur du sous-module dans le dépôt du lab après fusion.
+- Le serveur MCP ne demande rien au lab.
+
+### Rejouer la recette
+Depuis `deploiement/bilan-thermique/` (base jetable, jamais la base de service) :
+```bash
+# tests backend (PostgreSQL jetable, réseau fermé)
+bash ../../chantiers/tests/essai.sh bilan-thermique
+# contrôle de sûreté et module
+bash ../../scripts/validate-app.sh bilan-thermique --quality-only
+bash ../../scripts/lab-modules.sh show bilan-thermique --check
+# recette parc (accès Internet, base jetable) — dans l'image construite de l'app
+docker run --rm --network <réseau avec une base jetable et Internet> -e DB_HOST=… -e DB_NAME=… \
+  -e DB_USER=… -e DB_PASSWORD=… -e DB_SCHEMA=bilan_thermique -e SECRET_KEY=x -v "$PWD/backend:/app:ro" -w /app \
+  bilan-thermique-backend sh -c "python manage.py migrate -v0 && python manage.py seed_paroi_catalogue && \
+  python manage.py traiter_parc api/management/commands/recette_parc20.csv --nom 'Recette'"
+# initialisation seule d'une liste d'adresses
+python manage.py initialiser_adresses <fichier d'adresses>
+```
+Après déploiement : `run_tests` du moteur (cloisonnement), puis le parcours de la page « Parcs » avec le même CSV
+(`recette_parc20.csv`, import dans un parc neuf).

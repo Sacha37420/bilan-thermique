@@ -11,6 +11,7 @@ L'app fonctionne **sans** ces changements : la partie concernée est désactivé
 
 | Clé | Valeur | Pourquoi | Effet si absente |
 | --- | --- | --- | --- |
+| `STORAGE_DOCUMENTS_ENABLED` | `True` — **seulement après DL-2** | Conserver l'original des documents dans l'espace `storage` de l'utilisateur (Lot 21) | Seul le texte lu est gardé ; l'interface le dit |
 | `VAULT_ENCRYPTION_KEY` | une clé Fernet neuve (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`) | Coffre des clés d'IA des utilisateurs (Lot 21, § B8) — jamais dérivée de `SECRET_KEY` | Page « Intelligence artificielle » : enregistrement refusé (« coffre non configuré ») ; rien d'autre ne change |
 
 - Cohérence : clé propre à l'app, non gérée par le lab (`DB_*`, `KEYCLOAK_*`, `SECRET_KEY`, `DOMAIN`,
@@ -46,3 +47,9 @@ L'app fonctionne **sans** ces changements : la partie concernée est désactivé
 - Après fusion de la branche `refonte-parc` dans `main` du dépôt de l'app : mettre à jour le pointeur
   `deploiement/bilan-thermique` du dépôt du lab (commit « chore: pointeur bilan-thermique »).
 - Aucun autre fichier du lab.
+
+## Sans demande au lab — serveur MCP (Lot 22)
+
+`POST /bilan-thermique-api/api/mcp/` passe par le chemin Caddy existant `/bilan-thermique-api` : aucun
+changement de Caddy, de Keycloak ni de `.env`. L'adresse affichée aux utilisateurs vient de `DOMAIN` et
+`SCRIPT_NAME`, déjà posés par le lab.
