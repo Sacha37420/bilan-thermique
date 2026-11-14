@@ -87,6 +87,8 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
               uncertainty=True):
     if level not in ('N0', 'N1'):
         raise CalcError('Niveau inconnu (N0 ou N1).')
+    if not weather_spec and scenario is not None and (scenario.weather or {}).get('dataset_id'):
+        weather_spec = {'dataset_id': scenario.weather['dataset_id']}  # météo propre à la variante (Lot 18)
     weather, wdesc = resolve_weather(building, weather_spec)
     p, vals = params_for(building, scenario)
     inputs_hash = inputs_hash_for(building, level, scenario, wdesc.get('hash'), vals)

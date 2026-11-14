@@ -703,3 +703,4 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 15 | livré 2026-11-14 | `Lot 15` | Géométrie corrigée (surcharge), toits plat/2/4 pans, enveloppe vérifiée, mitoyenneté recalculée, éditeur SVG, taux de vitrage par façade. 378 → 386 tests. |
 | 16 | livré 2026-11-14 | `Lot 16` | Consommations finales/primaires/CO₂/coût, PAC à COP horaire, étiquette du modèle et écart au DPE, onglet Systèmes. 386 → 391 tests. |
 | 17 | livré 2026-11-14 | `Lot 17` | Mesures (factures, Linky/Gazpar, sondes, n50), Morris, calage ASHRAE 14 sur météo réelle (19,3 → 5,5 % CV(RMSE) sur station Tours 2023, cas jumeau). 391 → 398 tests. |
+| 18 | livré 2026-11-14 | `Lot 18` | Variantes par bouquets de travaux, comparateur variantes × météos (dont TRACC), points de vigilance. 398 → 402 tests. |

@@ -376,6 +376,23 @@ suite du lot) : gradient vectorisé. Navigateur réel (banc) : Morris, calage co
 provenance « calage sur factures » ; un autre compte ne voit pas les factures ; clair et sombre sans
 erreur. Défaut trouvé par le navigateur (booléen numpy non sérialisable dans `Job.result`) : corrigé, testé.
 
+## Lot 18 — Scénarios et comparateur (B7)   ·   statut : livré
+**Objectif :** comparer l'état actuel et des variantes de travaux, sous la météo actuelle et un climat
+futur, avec les points de vigilance non thermiques (`refonte.md` § B7, principe 4).
+**Tâches :**
+- [x] Variantes (`Scenario`) : faits, protections solaires, géométrie et météo propres ; la base ne change
+  jamais ; 10 bouquets de travaux (ITE, ITI, combles, menuiseries, triple vitrage, VMC hygro, double flux,
+  PAC, stores et casquettes au sud) traduits par le questionnaire ; points de vigilance par bouquet
+- [x] Comparateur : N1 avec fourchette et consommations pour chaque variante × météo (jusqu'à 5 × 3) ;
+  la météo propre à une variante est reprise par les calculs
+- [x] Routes `…/scenarios/`, `/api/scenarios/bouquets/`, `…/comparer/` ; onglet « Scénarios »
+**Tests à passer avant de clore le lot :**
+- [x] Base et 2 scénarios comparés (`ScenarioTest.test_base_and_two_scenarios_compared`)
+- [x] Une variante ne touche pas la base ; climat futur et protections ; validations et droits
+**Vérifié le :** 2026-11-14 — 402 tests OK. Navigateur réel (banc) : deux variantes créées par bouquets, comparaison
+base + 2 variantes × (année type, TRACC +4 °C) = 6 lignes, besoin décroissant de l'état actuel à la
+rénovation globale, points de vigilance ; clair et sombre sans erreur console.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports
