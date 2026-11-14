@@ -180,3 +180,8 @@ code, pre, .mono { font-family: var(--font-mono); }
 .rf-tabs button { min-height: 44px; padding: 0 var(--space-4); border-radius: var(--radius-full); border: 1px solid var(--border);
   background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
 .rf-tabs button.active { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
+/* Carte (Lot 19) : fond Leaflet aux couleurs du thème, contrôles lisibles en sombre. */
+.leaflet-container { background: var(--bg); font-family: var(--font-ui); }
+.leaflet-bar a, .leaflet-control-layers { background: var(--card); color: var(--text); border-color: var(--border); }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--card); color: var(--text); }
+.leaflet-popup-content a { color: var(--accent); }

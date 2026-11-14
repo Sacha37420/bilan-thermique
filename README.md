@@ -51,8 +51,11 @@ Toutes installées **dans les images Docker** (aucun script d'installation sur l
 | Angular 21 | interface | MIT |
 | keycloak-js 22 | connexion | Apache-2.0 |
 | three | vues 3D | MIT |
+| leaflet 1.9.4 (refonte, Lot 19) | cartes : parc, sélection d'emprises, position d'un bâtiment ; fonds IGN Géoplateforme sans clé | BSD-2-Clause, ~150 Ko |
+| @types/leaflet 1.9.22 (développement) | types TypeScript | MIT |
 
-Les dépendances ajoutées par la refonte sont listées ici au lot qui les introduit.
+Les dépendances ajoutées par la refonte sont listées ici au lot qui les introduit. Côté backend, la refonte
+n'a ajouté **aucune** dépendance (N0, N1, Morris, calage, protections solaires : numpy et scipy déjà présents).
 
 ## Couleurs en dur — exception documentée
 

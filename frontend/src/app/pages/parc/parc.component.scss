@@ -21,3 +21,7 @@
 h3 { font-size: var(--text-base); margin: var(--space-4) 0 var(--space-2); }
 code { font-family: var(--font-mono); }
 .parc td:first-child { min-width: 11rem; }
+.legend { list-style: none; display: flex; gap: var(--space-3); padding: 0; margin: 0; font-size: var(--text-sm); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: var(--space-1); vertical-align: middle; }
+.map-actions { margin-top: var(--space-3); align-items: center; }
+.rf-card-head .rf-tabs { margin: 0; }

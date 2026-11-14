@@ -45,7 +45,9 @@
     </section>
 
     <section class="rf-card" aria-labelledby="tb-title">
-      <div class="rf-card-head"><h2 id="tb-title">Bâtiments</h2></div>
+      <div class="rf-card-head"><h2 id="tb-title">Bâtiments</h2>
+        <nav class="rf-tabs" aria-label="Vue"><button type="button" [class.active]="view_() === 'table'" (click)="view_.set('table')">Tableau</button>
+          <button type="button" [class.active]="view_() === 'carte'" (click)="view_.set('carte')">Carte</button></nav></div>
       <div class="rf-row filters">
         <label class="rf-field"><span>Recherche</span><input type="text" [ngModel]="search()" (ngModelChange)="search.set($event)" placeholder="nom ou adresse"></label>
         <label class="rf-field"><span>Usage</span>
@@ -56,6 +58,26 @@
             <option value="complet">complet</option><option value="incomplet">incomplet</option>
             <option value="en_attente">en attente</option><option value="en_cours">en cours</option></select></label>
       </div>
+      @if (view_() === 'carte') {
+        <div class="rf-row">
+          <label class="rf-field"><span>Couleur selon</span>
+            <select [ngModel]="colorBy()" (ngModelChange)="colorBy.set($event)">
+              <option value="besoin">besoin de chauffage</option><option value="confiance">confiance</option>
+              <option value="chaleur">heures &gt; 28 °C</option><option value="etiquette">étiquette</option></select></label>
+          <ul class="legend">@for (l of legend(); track l[1]) { <li><i [style.background]="l[0]"></i>{{ l[1] }}</li> }</ul>
+        </div>
+        <app-carte [points]="mapPoints()" [polygons]="polys()" (bboxChanged)="onBbox($event)" (polygonClicked)="togglePoly($event)"
+                   ariaLabel="Carte des bâtiments du parc" />
+        @if (isManager()) {
+          <div class="rf-row map-actions">
+            <button type="button" class="rf-btn" (click)="loadArea()">Afficher les bâtiments de la zone</button>
+            @if (area().length) {
+              <span class="rf-hint">{{ area().length }} emprise(s) : cliquez pour sélectionner.</span>
+              <button type="button" class="rf-btn primary" (click)="addPicked()" [disabled]="!picked().size">Ajouter {{ picked().size }} bâtiment(s) au parc</button>
+            }
+          </div>
+        }
+      } @else {
       <div class="rf-table-wrap">
         <table class="rf-table parc">
           <thead><tr>
@@ -88,6 +110,7 @@
           </tbody>
         </table>
       </div>
+      }
       <p class="rf-hint">Besoin : N1 (horaire), fourchette P10–P90 par tirages selon la provenance des valeurs. Priorité = besoin × (0,5 + 0,5 × confiance).</p>
     </section>
 

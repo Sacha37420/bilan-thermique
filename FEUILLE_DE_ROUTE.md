@@ -393,6 +393,25 @@ futur, avec les points de vigilance non thermiques (`refonte.md` § B7, principe
 base + 2 variantes × (année type, TRACC +4 °C) = 6 lignes, besoin décroissant de l'état actuel à la
 rénovation globale, points de vigilance ; clair et sombre sans erreur console.
 
+## Lot 19 — Carte (U4) et vue parc cartographique   ·   statut : livré
+**Objectif :** voir le parc sur une carte, y sélectionner des bâtiments, et corriger la position d'un
+bâtiment à la carte (`refonte.md` § 4.1, § 4.3, U4, D15).
+**Tâches :**
+- [x] Dépendance **Leaflet 1.9.4** (épinglée ; types résolus au 2026-10-31), fonds IGN Plan v2 et
+  orthophotos de la Géoplateforme (sans clé, aucun jeton joint) ; composant `app-carte` réutilisable,
+  couleurs par jetons Foyer lus à l'exécution
+- [x] Parc : vue « Carte » (couleur selon besoin, confiance, heures > 28 °C ou étiquette, légende, fiche
+  en un clic) ; sélection d'emprises BD TOPO de la zone affichée (`POST /api/carte/batiments/`, zone de
+  800 m de côté au plus, en cache) et ajout au parc (`POST /api/parcs/<id>/ajouter/`, analyse par la file `parc`)
+- [x] U4 : carte « Position » de l'onglet Géométrie (clic → nouvelle position, enregistrement par la route
+  existante, chaîne automatique rejouable)
+**Tests à passer avant de clore le lot :**
+- [x] Sélection de bâtiments à la carte (`MapTest.test_select_buildings_on_map_adds_them_to_parc`, navigateur réel)
+**Vérifié le :** 2026-11-14 — 405 tests OK ; `ng build` OK ; navigateur réel (banc ; tuiles IGN et emprises
+BD TOPO servies par `page.route`, le banc n'ayant pas Internet) : carte affichée, 2 emprises sélectionnées et
+ajoutées au parc, marqueurs et légende selon l'indicateur, position corrigée au clic et enregistrée ;
+clair et sombre sans erreur console.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

@@ -2,6 +2,8 @@ import { Component, Input, OnChanges, computed, inject, output, signal } from '@
 import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { ApiService } from '../../core/api.service';
+import { CarteComponent, MapPoint } from '../../components/carte/carte.component';
 
 type Pt = [number, number];
 interface GeoPayload {
@@ -17,7 +19,7 @@ interface GeoPayload {
 @Component({
   selector: 'app-geometrie',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, DatePipe],
+  imports: [FormsModule, DecimalPipe, DatePipe, CarteComponent],
   templateUrl: './geometrie.component.html',
   styleUrl: './geometrie.component.scss',
 })
@@ -33,6 +35,39 @@ export class GeometrieComponent implements OnChanges {
   eave = 6; levels = 2; roof = 'terrasse'; pitch = 35; regen = false;
   ratios: Record<string, number> = { N: 15, E: 15, S: 15, O: 15 };
   private drag: number | null = null;
+  private api = inject(ApiService);
+  pos = signal<MapPoint[]>([]);
+  center = signal<[number, number] | null>(null);
+  newPos = signal<{ lat: number; lon: number } | null>(null);
+
+  loadPosition(): void {
+    this.api.getBuilding(this.buildingId).subscribe({ next: b => {
+      const x = b as { georef_lat: number | null; georef_lon: number | null; name: string };
+      if (x.georef_lat !== null && x.georef_lon !== null) {
+        this.center.set([x.georef_lat, x.georef_lon]);
+        this.pos.set([{ id: 'b', lat: x.georef_lat, lon: x.georef_lon, label: x.name }]);
+      }
+    } });
+  }
+
+  pick(e: { lat: number; lon: number }): void {
+    this.newPos.set(e);
+    this.pos.set([...this.pos().filter(p => p.id === 'b'), { id: 'n', lat: e.lat, lon: e.lon, label: 'Nouvelle position', selected: true }]);
+  }
+
+  savePosition(reinit: boolean): void {
+    const p = this.newPos();
+    if (!p) return;
+    this.api.updateBuilding(this.buildingId, { georef_lat: Math.round(p.lat * 1e6) / 1e6, georef_lon: Math.round(p.lon * 1e6) / 1e6 }).subscribe({
+      next: () => {
+        this.newPos.set(null); this.loadPosition();
+        if (reinit) this.rf.post(`/batiments/${this.buildingId}/initialiser/`, {}).subscribe({ next: () => this.ok.set('Position enregistrée ; chaîne automatique relancée.') });
+        else this.ok.set('Position enregistrée.');
+        this.changed.emit();
+      },
+      error: e => this.error.set(e?.error?.detail ?? 'Position refusée.'),
+    });
+  }
 
   area = computed(() => { const p = this.pts(); let a = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length]; a += x1 * y2 - x2 * y1; } return Math.abs(a) / 2; });
   perimeter = computed(() => { const p = this.pts(); let l = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length]; l += Math.hypot(x2 - x1, y2 - y1); } return l; });
@@ -46,7 +81,7 @@ export class GeometrieComponent implements OnChanges {
     return { x: cx - half, y: -(cy + half), s: 2 * half };
   });
 
-  ngOnChanges(): void { this.load(); }
+  ngOnChanges(): void { this.load(); this.loadPosition(); }
 
   load(): void {
     this.rf.get<GeoPayload>(`/batiments/${this.buildingId}/geometrie/`).subscribe({ next: d => this.set(d) });

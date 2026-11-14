@@ -61,3 +61,17 @@
   </div>
   <button type="button" class="rf-btn" (click)="saveRatios()">Enregistrer les taux de vitrage</button>
 </section>
+
+<section class="rf-card" aria-labelledby="pos-title">
+  <div class="rf-card-head"><h2 id="pos-title">Position</h2></div>
+  <p class="rf-hint">Cliquez sur la carte pour corriger la position du bâtiment (point d'adresse mal placé, grand site) ;
+    la chaîne automatique peut ensuite être rejouée à ce point.</p>
+  <app-carte [points]="pos()" [center]="center()" [zoom]="18" (clicked)="pick($event)" ariaLabel="Position du bâtiment" />
+  @if (newPos(); as p) {
+    <div class="rf-row pos-actions">
+      <span class="rf-hint">Nouvelle position : {{ p.lat | number: '1.5-5' }}, {{ p.lon | number: '1.5-5' }}</span>
+      <button type="button" class="rf-btn" (click)="savePosition(false)">Enregistrer</button>
+      <button type="button" class="rf-btn primary" (click)="savePosition(true)">Enregistrer et rejouer la chaîne</button>
+    </div>
+  }
+</section>

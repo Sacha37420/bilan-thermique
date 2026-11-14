@@ -7,6 +7,7 @@ from . import views_protections as vpr
 from .views_geometrie import GeometryView
 from . import views_mesures as vme
 from . import views_scenarios as vsc
+from .views_carte import AreaBuildingsView, AddPointsView
 from .views_questionnaire import QuestionsView, QuestionnaireView
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
 from .views import (
@@ -95,4 +96,7 @@ urlpatterns = [
     path('parcs/<int:pk>/membres/<int:mid>/', vp.MemberDetailView.as_view()),
     path('parcs/<int:pk>/invitations/', vp.InvitationsView.as_view()),
     path('invitations/accepter/', vp.AcceptInvitationView.as_view()),
+    # ── Refonte (Lot 19) : carte ──
+    path('carte/batiments/', AreaBuildingsView.as_view()),
+    path('parcs/<int:pk>/ajouter/', AddPointsView.as_view()),
 ]

@@ -6,6 +6,7 @@ import { HttpClient } from '@angular/common/http';
 import { RefonteApiService } from '../../core/refonte-api.service';
 import { apiUrl, labEnv } from '../../core/env';
 import { ParcRow, PortfolioInfo, ROLE_LABELS, USAGE_LABELS } from '../../core/refonte.types';
+import { CarteComponent, MapPoint, MapPolygon } from '../../components/carte/carte.component';
 
 type SortKey = 'name' | 'usage' | 'surface_m2' | 'heating_kwh_m2' | 'hours_over_28' | 'confidence' | 'completeness' | 'priority' | 'dpe';
 interface Members {
@@ -18,7 +19,7 @@ interface Members {
 @Component({
   selector: 'app-parc',
   standalone: true,
-  imports: [FormsModule, RouterLink, DecimalPipe, KeyValuePipe],
+  imports: [FormsModule, RouterLink, DecimalPipe, KeyValuePipe, CarteComponent],
   templateUrl: './parc.component.html',
   styleUrl: './parc.component.scss',
 })
@@ -48,6 +49,76 @@ export class ParcComponent implements OnInit, OnDestroy {
   inviteBuilding: number | null = null;
   inviteCode = signal('');
   private timer?: ReturnType<typeof setInterval>;
+
+  // ── Lot 19 : carte du parc ──
+  view_ = signal<'table' | 'carte'>('table');
+  colorBy = signal<'besoin' | 'confiance' | 'chaleur' | 'etiquette'>('besoin');
+  area = signal<(MapPolygon & { lat: number; lon: number })[]>([]);
+  picked = signal<Set<number | string>>(new Set());
+  private bbox: [number, number, number, number] | null = null;
+
+  private tok(n: string): string { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+  colorOf(r: ParcRow): string {
+    const ok = this.tok('--success'), mid = this.tok('--warning'), bad = this.tok('--danger'), none = this.tok('--text-mute');
+    switch (this.colorBy()) {
+      case 'besoin': return r.heating_kwh_m2 === null ? none : r.heating_kwh_m2 <= 80 ? ok : r.heating_kwh_m2 <= 180 ? mid : bad;
+      case 'confiance': return r.confidence < 0.35 ? bad : r.confidence < 0.65 ? mid : ok;
+      case 'chaleur': return r.hours_over_28 === null ? none : r.hours_over_28 < 50 ? ok : r.hours_over_28 < 300 ? mid : bad;
+      default: { const l = r.model_label ?? r.dpe; return !l ? none : 'AB'.includes(l) ? ok : 'CD'.includes(l) ? mid : bad; }
+    }
+  }
+
+  legend(): [string, string][] {
+    const ok = this.tok('--success'), mid = this.tok('--warning'), bad = this.tok('--danger');
+    switch (this.colorBy()) {
+      case 'besoin': return [[ok, '≤ 80 kWh/m²'], [mid, '80–180'], [bad, '> 180']];
+      case 'confiance': return [[bad, '< 35 %'], [mid, '35–65 %'], [ok, '> 65 %']];
+      case 'chaleur': return [[ok, '< 50 h > 28 °C'], [mid, '50–300 h'], [bad, '> 300 h']];
+      default: return [[ok, 'A–B'], [mid, 'C–D'], [bad, 'E–G']];
+    }
+  }
+
+  mapPoints(): MapPoint[] {
+    return this.view().filter(r => r.lat !== null && r.lon !== null).map(r => ({
+      id: r.id, lat: r.lat as number, lon: r.lon as number, color: this.colorOf(r), label: r.name,
+      html: `<strong>${this.esc(r.name)}</strong><br>${r.heating_kwh_m2 !== null ? Math.round(r.heating_kwh_m2) + ' kWh/m²·an' : 'non calculé'}`
+        + ` · confiance ${Math.round(r.confidence * 100)} %<br><a href="fiche?b=${r.id}">Ouvrir la fiche</a>`,
+    }));
+  }
+
+  private esc(s: string): string { return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string)); }
+
+  onBbox(b: [number, number, number, number]): void { this.bbox = b; }
+
+  loadArea(): void {
+    if (!this.bbox) return;
+    const [lat_min, lon_min, lat_max, lon_max] = this.bbox;
+    this.error.set('');
+    this.rf.post<{ results: { id: number; lat: number; lon: number; ring: [number, number][]; area_m2: number }[] }>(
+      '/carte/batiments/', { lat_min, lon_min, lat_max, lon_max }).subscribe({
+      next: r => { this.area.set(r.results.map(x => ({ id: x.id, ring: x.ring, lat: x.lat, lon: x.lon, label: `${x.area_m2} m²` }))); this.picked.set(new Set()); },
+      error: e => this.error.set(e?.error?.detail ?? 'Emprises indisponibles.'),
+    });
+  }
+
+  polys(): MapPolygon[] { const p = this.picked(); return this.area().map(a => ({ ...a, selected: p.has(a.id) })); }
+
+  togglePoly(g: MapPolygon): void {
+    const s = new Set(this.picked());
+    if (s.has(g.id)) s.delete(g.id); else s.add(g.id);
+    this.picked.set(s);
+  }
+
+  addPicked(): void {
+    const p = this.current();
+    if (!p) return;
+    const points = this.area().filter(a => this.picked().has(a.id)).map(a => ({ lat: a.lat, lon: a.lon }));
+    this.rf.post<{ created: number[] }>(`/parcs/${p.id}/ajouter/`, { points }).subscribe({
+      next: r => { this.info.set(`${r.created.length} bâtiment(s) ajouté(s) depuis la carte, analyse lancée.`); this.area.set([]); this.refresh(); },
+      error: e => this.error.set(e?.error?.detail ?? 'Ajout refusé.'),
+    });
+  }
 
   view = computed(() => {
     const k = this.sortKey(), d = this.sortDesc() ? -1 : 1, u = this.filterUsage(), st = this.filterStatus();
