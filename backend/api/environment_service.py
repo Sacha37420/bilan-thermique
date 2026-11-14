@@ -271,6 +271,20 @@ def replace_object(env, obj_id, vertices, triangles, name='', up_axis='auto', sc
 
 # ── Génération ─────────────────────────────────────────────────────────────────
 
+def mark_previous_replaced(new_env, building):
+    """Lot 3 (refonte, L6) : les environnements générés auparavant pour ce bâtiment sont marqués
+    remplacés par le nouveau (jamais supprimés : ils peuvent porter des retraits d'objets faits à
+    la main). Rend leurs identifiants."""
+    from django.db.models import Q
+    olds = (Environment.objects.filter(replaced_by__isnull=True)
+            .filter(Q(scene_objects__contains=[{'building_id': building.pk}]) | Q(pk=building.environment_id))
+            .exclude(pk=new_env.pk).exclude(generation={}))
+    ids = list(olds.values_list('pk', flat=True))
+    if ids:
+        Environment.objects.filter(pk__in=ids).update(replaced_by=new_env)
+    return ids
+
+
 def generate(params, building=None, progress_cb=None):
     """Génère et ENREGISTRE un environnement. Retourne (env, summary).
 
@@ -394,8 +408,11 @@ def generate(params, building=None, progress_cb=None):
             building.georef_ground_z = ground_z
             building.save(update_fields=['georef_ground_z'])
 
+    replaced = mark_previous_replaced(env, building) if building is not None else []
+
     summary = {
         'environment_id': env.pk, 'source': source, 'stats': stats, 'warnings': warnings,
+        'replaced_environment_ids': replaced,
         'n_objects': len(objects), 'n_triangles': len(env.envelope['triangles']),
     }
     return env, summary

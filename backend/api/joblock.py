@@ -34,16 +34,21 @@ def _lock():
 
 
 def expire_stale_jobs():
+    from . import calc_runs
     limit = timezone.now() - STALE_AFTER
-    return Job.objects.filter(status__in=ACTIVE, updated_at__lt=limit).update(
+    stale = list(Job.objects.filter(status__in=ACTIVE, updated_at__lt=limit).values_list('pk', flat=True))
+    if stale:
+        calc_runs.expire_for_jobs(stale)
+    return Job.objects.filter(pk__in=stale).update(
         status=Job.ERROR, message="Calcul interrompu (worker redémarré ?) — relancez-le.")
 
 
-def launch_exclusive(kind, params, enqueue, *, blocking_kinds=None, owner_sub=''):
+def launch_exclusive(kind, params, enqueue, *, blocking_kinds=None, owner_sub='', on_created=None):
     """Crée et envoie un job si aucun job actif ne bloque, sinon rend None.
 
     blocking_kinds : None = tout job actif bloque (calculs lourds) ; sinon seuls ces types.
     enqueue(job) : appelé après validation de la transaction (envoi Celery).
+    on_created(job) : appelé DANS la transaction (objets liés au job, ex. `CalcRun`).
     """
     with transaction.atomic():
         _lock()
@@ -54,5 +59,7 @@ def launch_exclusive(kind, params, enqueue, *, blocking_kinds=None, owner_sub=''
         if active.exists():
             return None
         job = Job.objects.create(kind=kind, params=params, owner_sub=owner_sub or '')
+        if on_created is not None:
+            on_created(job)
         transaction.on_commit(lambda: enqueue(job))
     return job

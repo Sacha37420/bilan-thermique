@@ -196,3 +196,23 @@ export interface Job {
   created_at: string;
   updated_at: string;
 }
+
+/** Un calcul enregistré (refonte, Lot 3) — `GET /api/batiments/<id>/calculs/`. */
+export interface CalcRunSummary {
+  id: number;
+  building: number;
+  level: 'N0' | 'N1' | 'N2';
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'ERROR';
+  message: string;
+  indicators: Record<string, number | string | null>;
+  weather: { n_hours?: number; source?: string; t_ext_mean?: number | null; [k: string]: unknown };
+  settings: Record<string, unknown>;
+  inputs_hash: string;
+  duration_s: number | null;
+  created_at: string;
+  job: number | null;
+}
+
+export interface CalcRunDetail extends CalcRunSummary {
+  results: Record<string, unknown> | null;
+}

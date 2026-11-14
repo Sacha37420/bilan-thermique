@@ -1,4 +1,5 @@
 from django.urls import path
+from .views_calc import BuildingCalcRunsView, CalcRunDetailView
 from .views import (
     MeView, Calcul1DView,
     ParoiModelListCreateView, ParoiModelDetailView,
@@ -36,4 +37,7 @@ urlpatterns = [
     path('meteo/recuperer/',  FetchWeatherView.as_view()),
     path('altitude/',         GroundAltitudeView.as_view()),
     path('jobs/<int:pk>/',    JobDetailView.as_view()),
+    # ── Refonte (Lot 3) : historique des calculs ──
+    path('batiments/<int:pk>/calculs/', BuildingCalcRunsView.as_view()),
+    path('calculs/<int:pk>/', CalcRunDetailView.as_view()),
 ]

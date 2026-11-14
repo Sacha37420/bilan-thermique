@@ -39,6 +39,14 @@ import numpy as np
 from . import facades as F
 
 SFM_DIR = os.path.join(F.CACHE_DIR, 'sfm')
+
+
+def cleanup_workdir(path):
+    """Supprime un dossier de travail SfM, seulement s'il est sous SFM_DIR (Lot 3, refonte)."""
+    import shutil
+    real = os.path.realpath(path)
+    if real.startswith(os.path.realpath(SFM_DIR) + os.sep) and os.path.isdir(real):
+        shutil.rmtree(real, ignore_errors=True)
 SFM_WIDTH = 4096
 MASK_PITCH = (-25.0, 50.0)
 GPS_INLIER_M = 4.0

@@ -55,17 +55,27 @@ pas en même temps. Prérequis de la refonte (`refonte.md`, § 11).
 PostgreSQL jetable sur réseau interne (copie locale de `chantiers/tests/essai.sh`) : **257 tests OK**
 (244 avant le lot, aucun supprimé). Aucun écran touché.
 
-## Lot 3 — Historique des calculs et ménage   ·   statut : à faire
+## Lot 3 — Historique des calculs et ménage   ·   statut : livré
 **Objectif :** revoir un résultat sans recalculer ; ne plus accumuler d'objets orphelins (points U3, L6, L7).
 **Tâches :**
-- [ ] Liste des calculs passés par bâtiment, avec un résultat rechargeable (U3)
-- [ ] Environnements : purger ou marquer « lié » à chaque génération (L6)
-- [ ] Bâtiment incomplet laissé par un mode simplifié abandonné : nettoyage (L7)
-- [ ] Dossier `sfm/<id>` du volume `facade-cache` jamais nettoyé (Lot AM)
+- [x] Liste des calculs passés par bâtiment, avec un résultat rechargeable (U3) : modèle `CalcRun`
+  (niveau N0/N1/N2, empreinte des entrées, indicateurs, résultat complet, `owner_sub`), créé dans la
+  transaction du job, terminé par la tâche ; `GET /api/batiments/<id>/calculs/`, `GET /api/calculs/<id>/` ;
+  panneau « Calculs précédents » + « Revoir » dans Calcul 3D ; au plus un calcul actif par (bâtiment, niveau)
+- [x] Environnements (L6) : régénérer pour un bâtiment marque les anciens `replaced_by` (rien supprimé :
+  ils peuvent porter des retraits faits à la main) ; ils sortent de la liste sauf s'ils sont encore liés
+  à un bâtiment ; `?tous=1` les rend tous
+- [x] Bâtiment incomplet laissé par un mode simplifié abandonné (L7) : commande
+  `nettoyer_brouillons` (liste par défaut, `--appliquer` pour supprimer — jamais automatique)
+- [x] Dossier `sfm/<id>` du volume `facade-cache` : supprimé après le calcul des poses et à la
+  suppression du bâtiment (`facade_sfm.cleanup_workdir`, borné à `SFM_DIR`)
 **Tests à passer avant de clore le lot :**
-- [ ] Un résultat se revoit après avoir quitté la page, sans recalcul
-- [ ] Régénérer 3 fois l'environnement en laisse 1
-**Vérifié le :**
+- [x] Un résultat se revoit après avoir quitté la page, sans recalcul (`CalcHistoryTest.test_result_reviewed_after_leaving_page_without_recalc`)
+- [x] Régénérer 3 fois l'environnement en laisse 1 (`EnvironmentReplacedTest.test_regenerating_three_times_leaves_one`)
+**Vérifié le :** 2026-11-14 — `python manage.py test` (image de l'app, base jetable) : **268 tests OK**.
+`ng build` OK. Navigateur réel (Chromium de l'image `runner-runner`, banc d'essai jetable : API réelle
+sur base jetable, Keycloak simulé, réseau interne) : Calcul 3D → bâtiment → « Calculs précédents » →
+« Revoir » affiche le résultat de 48 h, en clair et en sombre, sans erreur console.
 
 ## Lot 4 — Mode d'emploi   ·   statut : à faire
 **Objectif :** un nouvel utilisateur sait par où commencer. Il n'existe aucune doc d'usage : la page

@@ -21,6 +21,7 @@ from . import geodata
 from . import elevation
 from . import environment_service
 from . import joblock
+from . import calc_runs
 
 
 def _sub(request):
@@ -85,6 +86,14 @@ class BuildingDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset         = Building.objects.all()
     serializer_class = BuildingSerializer
 
+    def perform_destroy(self, instance):
+        # Lot 3 (refonte) : le dossier de travail SfM du bâtiment (volume facade-cache) part avec lui.
+        import os
+        from . import facade_sfm
+        pk = instance.pk
+        instance.delete()
+        facade_sfm.cleanup_workdir(os.path.join(facade_sfm.SFM_DIR, str(pk)))
+
 
 class SearchNearbyBuildingsView(APIView):
     """
@@ -138,7 +147,14 @@ class EnvironmentListCreateView(generics.ListCreateAPIView):
     La liste est un résumé sans maillage (Lot AH : un environnement observé pèse
     plusieurs Mo) ; le détail complet est sur /api/environnements/<id>/."""
 
-    queryset         = Environment.objects.all()
+    def get_queryset(self):
+        # Lot 3 (refonte, L6) : un environnement remplacé par une régénération sort de la liste,
+        # sauf s'il est encore celui d'un bâtiment ; `?tous=1` les rend tous.
+        from django.db.models import Q
+        qs = Environment.objects.all()
+        if self.request.query_params.get('tous') != '1':
+            qs = qs.filter(Q(replaced_by__isnull=True) | Q(buildings__isnull=False)).distinct()
+        return qs
 
     def get_serializer_class(self):
         return EnvironmentSummarySerializer if self.request.method == 'GET' else EnvironmentSerializer
@@ -411,7 +427,8 @@ class BuildingCalculView(APIView):
         job = joblock.launch_exclusive(
             'building_calcul', {'building_id': building.pk},
             lambda j: tasks.run_building_calcul.delay(j.id, building.pk, payload),
-            owner_sub=_sub(request))
+            owner_sub=_sub(request),
+            on_created=lambda j: calc_runs.create_n2_run(building, j, payload, _sub(request)))
         if job is None:
             return Response({'detail': "Un calcul est déjà en cours pour le lab — réessayez plus tard."},
                              status=status.HTTP_409_CONFLICT)

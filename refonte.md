@@ -672,6 +672,8 @@ Format : date — question — choix — raison — pour revenir en arrière.
 | D14 | 2026-11-14 | Archétypes de composition | **Table embarquée dans le code** (`api/archetypes.py`) : périodes de construction françaises (TABULA-FR simplifiée) × matériau de mur, U et inertie par défaut ; valeurs marquées `defaut`/`infere`, confiance faible. | Pas de téléchargement au build ni à l'exécution ; la table se relit et se teste. | Remplacer la table par un import de données plus riche. |
 | D15 | 2026-11-14 | Bibliothèque cartographique (U4, Lot 19) | **Leaflet 1.9.4** (BSD-2, ~150 Ko) avec fond **IGN Plan v2** (Géoplateforme, sans clé). | Le plus léger, sans clé, sans compte. | Retirer la dépendance et la page carte. |
 | D16 | 2026-11-14 | Lecture des PDF (Lot 21) | **`pypdf`** (BSD-3, pur Python) pour le texte ; aucune OCR locale (pas de Tesseract dans l'image). Une page sans texte n'est envoyée à l'IA (vision) qu'après confirmation. | Pur Python, image légère. | Retirer la dépendance : seul le XML DPE reste lisible sans IA. |
+| D18 | 2026-11-14 | Lot 5 « en cours » alors que l'ordre impose 2 → 3 → 5 | Lot 5 repassé « à faire » (tâches cochées conservées) | Règle « un seul lot en cours ». | Aucun. |
+| D19 | 2026-11-14 | L6 : purger ou marquer les environnements régénérés ? | **Marquer** (`replaced_by`), jamais supprimer automatiquement ; L7 : commande manuelle `nettoyer_brouillons` | Un environnement peut porter des retraits d'objets faits à la main ; une suppression automatique serait irréversible. | Effacer le champ `replaced_by`. |
 | D17 | 2026-11-14 | Fichiers des utilisateurs sans `storage` joignable dans les tests | Client `storage` simulé dans les tests ; en service, appels par compte de service `bilan-thermique-admin` → **demande au lab** (client compagnon + `KEYCLOAK_SERVICE_WRITE_SHARES`). En attendant, le dépôt de document passe par le **jeton de l'utilisateur** transmis à `storage` (variante `carto-lab`), ce qui demande seulement que `bilan-thermique` soit dans `KEYCLOAK_TRUSTED_CLIENTS` de `storage` — demande au lab également. | Aucune route de `storage` ne change. | — |
 
 ## 16. Avancement de la refonte
@@ -680,4 +682,5 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 
 | Lot | Statut | Commit | Résumé |
 | --- | --- | --- | --- |
-| 2 | livré 2026-11-14 | (ce commit) | Passe végétation comptée et contrôlée dans la vue ; verrou `pg_advisory_xact_lock` + envoi `on_commit` ; jobs bloqués expirés à 6 h ; `Job.owner_sub` ; `api/net.py` (messages fixes, `User-Agent` sans email). 244 → 257 tests. |
+| 2 | livré 2026-11-14 | `Lot 2` | Passe végétation comptée et contrôlée dans la vue ; verrou `pg_advisory_xact_lock` + envoi `on_commit` ; jobs bloqués expirés à 6 h ; `Job.owner_sub` ; `api/net.py` (messages fixes, `User-Agent` sans email). 244 → 257 tests. |
+| 3 | livré 2026-11-14 | `Lot 3` | `CalcRun` (historique rechargeable, indicateurs communs aux 3 niveaux), environnements remplacés sans suppression, `nettoyer_brouillons`, ménage SfM. 257 → 268 tests. |

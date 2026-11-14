@@ -114,6 +114,11 @@ class Environment(models.Model):
     # Compte rendu de génération : source (lidar / repli BD TOPO-OSM), dalles et
     # dates d'acquisition LiDAR, statistiques, avertissements.
     generation = models.JSONField(default=dict, blank=True)
+    # Lot 3 (refonte, point L6) : régénérer l'environnement d'un bâtiment ne laisse plus
+    # s'accumuler les anciens. L'ancien n'est pas supprimé (il peut porter des retraits ou
+    # remplacements d'objets faits à la main) : il est marqué remplacé et sort de la liste.
+    replaced_by = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name='replaces')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -249,3 +254,52 @@ class Job(models.Model):
 
     def __str__(self) -> str:
         return f"{self.kind} #{self.pk} [{self.status}]"
+
+
+class CalcRun(models.Model):
+    """Un calcul passé, rechargeable sans recalcul (Lot 3, refonte — point U3).
+
+    Un par calcul terminé ou en cours, quel que soit le niveau :
+    - N0 : bilan statique mensuel (Lot 10) ; N1 : horaire réduit 5R1C (Lot 10) ;
+    - N2 : FEM par triangle (`building_solver`, existant, lancé par Calcul 3D).
+
+    `inputs_hash` : empreinte des entrées (fiche effective + météo + réglages) — dit si un résultat
+    est à jour et évite de refaire un calcul identique. `indicators` : les chiffres du tableau de
+    parc (petits, indexables) ; `results` : le résultat complet (séries horaires comprises), lu
+    seulement sur la fiche d'un calcul.
+    """
+
+    N0, N1, N2 = 'N0', 'N1', 'N2'
+    LEVEL_CHOICES = [(N0, 'N0 — statique mensuel'), (N1, 'N1 — horaire réduit'), (N2, 'N2 — FEM 3D')]
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='calc_runs')
+    level = models.CharField(max_length=2, choices=LEVEL_CHOICES)
+    status = models.CharField(max_length=10, choices=Job.STATUS_CHOICES, default=Job.PENDING)
+    job = models.ForeignKey(Job, null=True, blank=True, on_delete=models.SET_NULL, related_name='calc_runs')
+    # Météo : description (source, lieu, période, empreinte de la série).
+    weather = models.JSONField(default=dict, blank=True)
+    inputs_hash = models.CharField(max_length=64, blank=True, db_index=True)
+    # Réglages du calcul (sans la série météo, qui peut peser plusieurs Mo).
+    settings = models.JSONField(default=dict, blank=True)
+    indicators = models.JSONField(default=dict, blank=True)
+    results = models.JSONField(null=True, blank=True)
+    message = models.CharField(max_length=500, blank=True)
+    duration_s = models.FloatField(null=True, blank=True)
+    owner_sub = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'calc_runs'
+        ordering = ['-created_at']
+        constraints = [
+            # Verrou du § 8 : au plus un calcul actif par (bâtiment, variante, niveau).
+            models.UniqueConstraint(
+                fields=['building', 'level'],
+                condition=models.Q(status__in=['PENDING', 'RUNNING']),
+                name='calc_run_one_active',
+            ),
+        ]
+        indexes = [models.Index(fields=['building', 'level', '-created_at'])]
+
+    def __str__(self) -> str:
+        return f"{self.level} #{self.pk} bâtiment {self.building_id} [{self.status}]"

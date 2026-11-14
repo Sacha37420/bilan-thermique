@@ -7,6 +7,7 @@ from . import building_solver
 from . import geodata
 from . import weather_source
 from . import net
+from . import calc_runs
 
 
 def _environment_ground(environment):
@@ -74,6 +75,9 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
     job.celery_task_id = self.request.id
     job.save(update_fields=['celery_task_id'])
 
+    import time as _time
+    started = _time.monotonic()
+    calc_runs.mark_running(job_id)
     try:
         job.set_state(status=Job.RUNNING, progress=0, message="Assemblage du système…")
         building = Building.objects.get(pk=building_id)
@@ -129,15 +133,16 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
             'final_interior_surface_temp': result['final_interior_surface_temp'],
         }
         job.save(update_fields=['result'])
+        # Lot 3 (refonte) : le résultat reste consultable après avoir quitté la page.
+        calc_runs.finish(job_id, job.result, started, surface_m2=building.surface_ref_m2)
         job.set_state(
             status=Job.DONE, progress=100,
             message=f"Calcul terminé — {result['hours']}h, "
                     f"chauffage {result['heating_kwh']:.0f} kWh, clim {result['cooling_kwh']:.0f} kWh.",
         )
-    except building_solver.BuildingSimulationError as exc:
-        job.set_state(status=Job.ERROR, message=net.public_message(exc))
     except Exception as exc:
         job.set_state(status=Job.ERROR, message=net.public_message(exc))
+        calc_runs.fail(job_id, net.public_message(exc))
 
 
 @shared_task(bind=True)

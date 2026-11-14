@@ -1072,9 +1072,15 @@ def analyse(building_id, vertices, triangles, frame, env_objects, progress_cb=No
     elif sfm_set:
         from . import facade_sfm as FS
         report(f"Photogrammétrie de {len(sfm_set)} photo(s)…", 10)
-        poses, sfm_report = FS.solve_poses(
-            sfm_set, os.path.join(FS.SFM_DIR, str(building_id)), ground_at,
-            progress=lambda m, f: report(f"Photogrammétrie : {m.lower()}…", 10 + int(20 * f)))
+        sfm_workdir = os.path.join(FS.SFM_DIR, str(building_id))
+        try:
+            poses, sfm_report = FS.solve_poses(
+                sfm_set, sfm_workdir, ground_at,
+                progress=lambda m, f: report(f"Photogrammétrie : {m.lower()}…", 10 + int(20 * f)))
+        finally:
+            # Lot 3 (refonte) : dossier de travail de la photogrammétrie (photos, base COLMAP) —
+            # inutile une fois les poses calculées, jamais nettoyé jusqu'ici.
+            FS.cleanup_workdir(sfm_workdir)
         for pid, pose in poses.items():
             head, pit = FS.pose_angles(pose['R'], north)
             registered[pid] = {**pose, 'heading': head, 'pitch': pit, 'score': None, 'score_gps': None,
