@@ -724,6 +724,7 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 24 | livré 2026-11-15 | `Lot 24` | Onglet « Calculs » : liste (état, variante), détail (entrées figées par famille avec provenance, entrées propres au moteur, résultats complets, courbes journalières), comparaison de deux calculs (`GET /api/calculs/<a>/comparer/<b>/`). 452 → 457 tests. |
 | 25 | livré 2026-11-15 | `Lot 25` | Onglet « Simulation » : niveau, variante, météo, entrées exactes du calcul avec provenance, entrées décisives (influence × incertitude), dispersion et verdict, durée estimée, blocages, lancement puis ouverture du calcul (`GET /api/batiments/<id>/simulation/`). 457 → 462 tests. |
 | 26 | livré 2026-11-15 | `Lot 26` | Gestes experts → fiche : enveloppe assignée → faits déduits (U, g, taux de vitrage, mitoyenneté, emprise), environnement relié → horizon de N0/N1, façades analysées → propositions dans l'onglet Documents. 462 → 469 tests. |
+| 27 | livré 2026-11-15 | `Lot 27` | Fiche unique : onglets Maillage 3D et Environnement, `/batiment?id=` → fiche, mode simplifié retiré (→ Parcs), Calcul 3D gardé comme outil avancé, navigation réordonnée, `migrer_fiches`. 469 → 470 tests. |
 
 ## 17. Rapport de fin de session (2026-11-15)
 

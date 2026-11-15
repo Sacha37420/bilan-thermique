@@ -551,17 +551,26 @@ Navigateur réel (banc), clair et sombre : U des murs « déclaré · enveloppe 
 les tests et corrigés avant livraison : une toiture plate (inclinaison 0) comptée comme un mur (`or 90`), et
 l'enveloppe écrite par `vertices`/`triangles` (pas `envelope`, en lecture seule) non détectée.
 
-## Lot 27 — Fiche unique et anciennes pages   ·   statut : à faire
+## Lot 27 — Fiche unique et anciennes pages   ·   statut : livré
 **Objectif :** une seule entrée par bâtiment ; les pages d'avant deviennent des onglets ou des outils.
 **Tâches :**
-- [ ] Onglets « Géométrie 3D » (vue et assignation de l'ancienne page Bâtiment) et « Environnement » dans la fiche
-- [ ] Anciennes routes `batiment`, `calcul-3d`, `mode-simplifie`, `environnement` redirigées vers l'onglet
-  (`?b=`) ; Calcul 1D et Parois restent des outils, liés depuis la fiche ; navigation simplifiée
-- [ ] Commande `migrer_fiches` : tout bâtiment reçoit une fiche (idempotente, `--check`)
+- [x] Onglets « Maillage 3D » (vue et assignation de l'ancienne page Bâtiment) et « Environnement » dans la fiche,
+  chargés à la demande (`@defer`) ; les deux pages gardent leur mode autonome
+- [x] `/batiment?id=…` → fiche, onglet Maillage 3D ; `/mode-simplifie` → Parcs (page supprimée : l'adresse → fiche
+  automatique → calcul la couvre) ; `/batiment` (sans bâtiment) reste l'outil « Importer un maillage » et
+  `/environnement` l'outil « Environnement d'un quartier » ; **Calcul 3D reste un outil expert** (« Calcul 3D avancé ») :
+  il garde des réglages absents de la Simulation (planning horaire, régime imposé ou libre, ombrage temps réel, vent) et
+  l'annonce en tête de page ; Calcul 1D, Parois et Calcul 3D liés depuis l'onglet Calculs ; navigation réordonnée
+- [x] Commande `migrer_fiches` : tout bâtiment reçoit une fiche (idempotente, `--check`)
 **Tests à passer avant de clore le lot :**
-- [ ] Navigateur réel, clair et sombre : chaque ancienne adresse arrive au bon onglet
-- [ ] `migrer_fiches --check` rend 0 sur la base de service après passage
-**Vérifié le :**
+- [x] Navigateur réel, clair et sombre : chaque ancienne adresse arrive au bon onglet
+- [x] `migrer_fiches --check` rend 0 sur la base de service après passage
+**Vérifié le :** 2026-11-15 — 470 tests OK (1 nouveau, `api/tests/test_fiche_unique.py`). Navigateur réel (banc),
+clair et sombre, 24 contrôles : `/batiment?id=1` arrive sur l'onglet Maillage 3D (vue 3D, sans liste, renvoi vers la
+Simulation) ; onglet Environnement sans liste, génération autour du bâtiment ; `/mode-simplifie` → `/parc` ; Calcul 3D
+annonce la fiche ; navigation sans « Mode simplifié » ; outils liés depuis Calculs ; aucune erreur console. Recette
+complète des Lots 23 à 27 rejouée sur banc neuf : 105 contrôles, 0 échec. `migrer_fiches --check` sur la base de service :
+à jouer après déploiement (le seul bâtiment en service a déjà une fiche).
 
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant

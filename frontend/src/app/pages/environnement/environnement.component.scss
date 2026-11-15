@@ -347,3 +347,4 @@ label small { font-weight: 400; color: var(--text-mute); font-size: var(--text-x
   .facts { grid-template-columns: 1fr; dt { margin-top: var(--space-2); } }
 }
 .scene-options { display: flex; flex-wrap: wrap; gap: 0 var(--space-5); }
+.page-env.embedded { padding: 0; max-width: none; margin: 0; }

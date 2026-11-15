@@ -72,6 +72,8 @@
     }
     @if (tab() === 'simulation') { <app-simulation [buildingId]="buildingId" [refresh]="ficheVersion()" (launched)="showRun($event)" /> }
     @if (tab() === 'meteo') { <app-meteo-carte [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
+    @if (tab() === 'maillage') { @defer { <app-batiment [embedId]="buildingId" /> } @placeholder { <p class="rf-hint">Chargement de la vue 3D…</p> } }
+    @if (tab() === 'environnement') { @defer { <app-environnement [embedBuildingId]="buildingId" /> } @placeholder { <p class="rf-hint">Chargement de l'environnement…</p> } }
     @if (tab() === 'geometrie') { <app-geometrie [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'protections') { <app-protections [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'systemes') { <app-systemes [buildingId]="buildingId" [refresh]="ficheVersion()" (changed)="onQuestionnaire()" /> }

@@ -1,5 +1,6 @@
 import { Component, Input, OnChanges, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe, UpperCasePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { RefonteApiService } from '../../core/refonte-api.service';
 import { Catalogue, CatalogueKey } from '../../core/refonte.types';
 import { SerieJourComponent } from '../serie-jour/serie-jour.component';
@@ -47,7 +48,7 @@ const BALANCE: Record<string, string> = {
 @Component({
   selector: 'app-calculs',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, UpperCasePipe, SerieJourComponent],
+  imports: [DatePipe, DecimalPipe, UpperCasePipe, RouterLink, SerieJourComponent],
   templateUrl: './calculs.component.html',
   styleUrl: './calculs.component.scss',
 })

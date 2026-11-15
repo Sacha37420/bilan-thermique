@@ -1,6 +1,6 @@
-import { Component, OnInit, ViewChild, inject, signal } from '@angular/core';
+import { Component, OnInit, ViewChild, inject, signal, Input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { parseMeshFile } from '../../core/mesh-import';
 import { generateBoxEnvelope } from '../../core/box-generator';
@@ -38,6 +38,7 @@ const SERIES_COLOR_VARS = [
 export class BatimentComponent implements OnInit {
   private api = inject(ApiService);
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
 
   @ViewChild(MeshViewerComponent) viewer?: MeshViewerComponent;
 
@@ -88,15 +89,24 @@ export class BatimentComponent implements OnInit {
 
   private modelColorMap = new Map<number, string>();
 
+  /** Lot 27 (refonte) : intégré à la fiche — ce bâtiment est chargé d'office, sans liste ni en-tête. */
+  @Input() embedId: number | null = null;
+
   ngOnInit(): void {
     this.refreshParoiModels();
     this.refreshBuildings();
+    if (this.embedId) {
+      this.loadBuilding({ id: this.embedId });
+      return;
+    }
     // Lot AH : /batiment?id=… ouvre directement un bâtiment — lien donné par la
     // page Environnement après création du bâtiment étudié.
+    // Lot 27 (refonte) : un bâtiment existant s'ouvre dans sa fiche (onglet Maillage 3D) ; cette page sert
+    // à en créer un depuis un maillage, une recherche ou une boîte.
     this.route.queryParamMap.subscribe(params => {
       const id = Number(params.get('id'));
-      if (Number.isInteger(id) && id > 0 && id !== this.currentBuildingId()) {
-        this.loadBuilding({ id });
+      if (Number.isInteger(id) && id > 0) {
+        void this.router.navigate(['/fiche'], { queryParams: { b: id, onglet: 'maillage' }, replaceUrl: true });
       }
     });
   }

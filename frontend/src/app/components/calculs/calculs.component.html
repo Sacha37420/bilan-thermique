@@ -9,6 +9,8 @@
     <button type="button" class="rf-btn" [disabled]="picked().length !== 2" (click)="compare()">
       Comparer les 2 calculs cochés</button>
   </div>
+  <p class="rf-hint tools">Outils experts : <a routerLink="/calcul-1d">tester une paroi (Calcul 1D)</a> ·
+    <a routerLink="/parois">modèles de paroi</a> · <a routerLink="/calcul-3d">Calcul 3D avancé</a></p>
   @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
   @if (!runs().length) {
     <p class="rf-hint">Aucun calcul pour ce bâtiment. Lancez-en un depuis la Synthèse.</p>
