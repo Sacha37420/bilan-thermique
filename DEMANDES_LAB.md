@@ -5,9 +5,16 @@ l'app elle-même : chaque demande attend l'architecte du lab (le propriétaire).
 pourquoi, diff exact, fichiers, apps impactées, cohérence avec le lab, test de non-régression.
 L'app fonctionne **sans** ces changements : la partie concernée est désactivée et le dit.
 
+**État au 2026-11-15 : DL-1, DL-2 et DL-3 appliquées** (statut et preuve sous chaque demande).
+
 ---
 
 ## DL-1 — Variables `.env` à poser par `env_set` (moteur)
+
+> **Appliquée le 2026-11-15.** `VAULT_ENCRYPTION_KEY` générée dans le conteneur et posée par
+> `scripts/app-env.sh set` (valeur passée sur l'entrée standard, jamais affichée), puis
+> `scripts/app-restart.sh bilan-thermique` (mêmes images) : `vault_open()` rend `True`.
+> `STORAGE_DOCUMENTS_ENABLED=True` posée **après** DL-2. Ne jamais régénérer la clé.
 
 | Clé | Valeur | Pourquoi | Effet si absente |
 | --- | --- | --- | --- |
@@ -21,6 +28,12 @@ L'app fonctionne **sans** ces changements : la partie concernée est désactivé
 - Test : `GET /bilan-thermique-api/api/ai-keys/` rend `"vault": true`.
 
 ## DL-2 — `storage` : faire confiance au client `bilan-thermique`
+
+> **Appliquée le 2026-11-15.** `bilan-thermique` ajouté en fin de `KEYCLOAK_TRUSTED_CLIENTS` dans
+> `storage/.env`, puis `scripts/app-restart.sh storage` (mêmes images). Non-régression :
+> `jouer-gestes.sh --deploye` 25/25. Preuve : un dépôt réel (compte `e2e_member`, bâtiment de service)
+> a rendu `stored: true` et l'original est arrivé sous `bilan-thermique/batiment-<id>/…` dans l'espace
+> de l'utilisateur ; l'essai a ensuite été supprimé des deux côtés.
 
 - **Quoi** : ajouter `bilan-thermique` à `KEYCLOAK_TRUSTED_CLIENTS` dans `storage/.env`.
   ```diff
@@ -43,6 +56,8 @@ L'app fonctionne **sans** ces changements : la partie concernée est désactivé
   et l'interface le dit (« original non conservé : storage non relié »).
 
 ## DL-3 — Pointeur du sous-module dans le dépôt du lab
+
+> **Appliquée** : refonte (pointeur `e899157`), puis lots 23 à 27 (Sacha37420/sso-lab#12, pointeur `edea728`).
 
 - Après fusion de la branche `refonte-parc` dans `main` du dépôt de l'app : mettre à jour le pointeur
   `deploiement/bilan-thermique` du dépôt du lab (commit « chore: pointeur bilan-thermique »).
