@@ -1,0 +1,52 @@
+<figure class="sj">
+  <figcaption>{{ title }}</figcaption>
+  @if (days().length) {
+    <div class="plot">
+      <svg #svg [attr.viewBox]="'0 0 ' + W + ' ' + H" role="img" [attr.aria-label]="title"
+           (mousemove)="onMove($event, svg)" (mouseleave)="hover.set(null)">
+        @for (t of ticks(); track t) {
+          <line class="grid" [attr.x1]="L" [attr.x2]="W - R" [attr.y1]="y(t)" [attr.y2]="y(t)" />
+          <text class="tick" [attr.x]="L - 6" [attr.y]="y(t) + 4" text-anchor="end">{{ t | number: '1.0-1' }}</text>
+        }
+        @for (m of months(); track m.label) {
+          <text class="tick" [attr.x]="m.x + 2" [attr.y]="H - 8">{{ m.label }}</text>
+        }
+        @if (band()) { <path class="band" [attr.d]="band()" /> }
+        <path class="line" [attr.d]="line()" />
+        @if (hover(); as h) {
+          <line class="cross" [attr.x1]="hoverX()" [attr.x2]="hoverX()" [attr.y1]="T" [attr.y2]="H - B" />
+          <circle class="dot" [attr.cx]="hoverX()" [attr.cy]="y(mode === 'max' ? h.max : h.mean)" r="4" />
+        }
+        <rect class="hit" [attr.x]="L" [attr.y]="T" [attr.width]="W - L - R" [attr.height]="H - T - B" />
+      </svg>
+      @if (hover(); as h) {
+        <div class="tip" [style.left.%]="tipLeft()" role="status">
+          <strong>{{ dayLabel(h.i) }}</strong>
+          @if (mode === 'max') { <span>max {{ h.max | number: '1.1-1' }} {{ unit }}</span> }
+          @else {
+            <span>moyenne {{ h.mean | number: '1.1-1' }} {{ unit }}</span>
+            <span>min {{ h.min | number: '1.1-1' }} · max {{ h.max | number: '1.1-1' }}</span>
+          }
+        </div>
+      }
+    </div>
+    <p class="note">{{ mode === 'max' ? 'Maximum de chaque jour.' : 'Trait : moyenne du jour ; bande : minimum et maximum du jour.' }}</p>
+    @if (monthly().length) {
+      <details>
+        <summary>Valeurs par mois</summary>
+        <table class="rf-table">
+          <thead><tr><th>Mois</th>@if (mode !== 'max') { <th class="num">Min</th><th class="num">Moyenne</th> }<th class="num">Max</th></tr></thead>
+          <tbody>
+            @for (m of monthly(); track m.label) {
+              <tr><td>{{ m.label }}</td>
+                @if (mode !== 'max') { <td class="num">{{ m.min | number: '1.1-1' }}</td><td class="num">{{ m.mean | number: '1.1-1' }}</td> }
+                <td class="num">{{ m.max | number: '1.1-1' }} {{ unit }}</td></tr>
+            }
+          </tbody>
+        </table>
+      </details>
+    }
+  } @else {
+    <p class="note">Aucune série horaire pour ce calcul.</p>
+  }
+</figure>

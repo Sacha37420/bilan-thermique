@@ -719,6 +719,7 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 21 | livré 2026-11-15 | `Lot 21` | Coffre de clés par `sub` (copie d'App Builder `0ff4e4e`), registre fermé Claude/Mistral/Albert, `sk-ant-oat…` refusé ; documents (PDF par `pypdf`, XML DPE sans IA, texte), estimation avant envoi, extraction par la clé de l'auteur seulement, propositions contrôlées à valider ; pages « Intelligence artificielle » et onglet « Documents ». Fournisseurs simulés dans tous les tests. 408 → 423 tests. |
 | 22 | livré 2026-11-15 | `Lot 22` | Serveur MCP (`POST /api/mcp/`, JSON-RPC sans état, modèle App Builder) et jetons `btt_` (sha256, 90 j au plus, révocables, portée, liaison bâtiment/parc) ; 11 outils ; gestion dans la page « Intelligence artificielle ». Appel MCP réel par HTTP sur le banc. 423 → 436 tests. |
 | 23 | livré 2026-11-15 | `Lot 23` | N2 calculé depuis la fiche (enveloppe, baies, mitoyenneté, parois au U de la fiche, obstacles), en tâche de fond, « à jour / périmé », entrées figées (`CalcRun.inputs`) ; bouton et suivi dans la carte Résultat. Écart N1/N2 : −5 / −0,1 / −0,6 %. 436 → 452 tests. |
+| 24 | livré 2026-11-15 | `Lot 24` | Onglet « Calculs » : liste (état, variante), détail (entrées figées par famille avec provenance, entrées propres au moteur, résultats complets, courbes journalières), comparaison de deux calculs (`GET /api/calculs/<a>/comparer/<b>/`). 452 → 457 tests. |
 
 ## 17. Rapport de fin de session (2026-11-15)
 

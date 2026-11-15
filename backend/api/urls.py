@@ -1,5 +1,5 @@
 from django.urls import path
-from .views_calc import BuildingCalcRunsView, CalcRunDetailView, CalculerView, ResultatView
+from .views_calc import BuildingCalcRunsView, CalcRunCompareView, CalcRunDetailView, CalculerView, ResultatView
 from .views_pipeline import InitNewBuildingView, ReinitBuildingView
 from . import views_parc as vp
 from . import views_meteo as vm
@@ -52,6 +52,7 @@ urlpatterns = [
     # ── Refonte (Lot 3) : historique des calculs ──
     path('batiments/<int:pk>/calculs/', BuildingCalcRunsView.as_view()),
     path('calculs/<int:pk>/', CalcRunDetailView.as_view()),
+    path('calculs/<int:a>/comparer/<int:b>/', CalcRunCompareView.as_view()),
     path('batiments/<int:pk>/calculer/', CalculerView.as_view()),
     path('batiments/<int:pk>/resultat/', ResultatView.as_view()),
     # ── Refonte (Lot 8) : fiche et provenance ──

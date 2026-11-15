@@ -493,17 +493,24 @@ un occupant voit le résultat sans bouton N2 ; aucune erreur console. Le solveur
 puissance (`phi_hc_w`) — ajout pur. La page Calcul 3D reste en place (Lot 27) ; ses N2 sont marqués « lancé depuis
 Calcul 3D » (pas d'état « à jour »).
 
-## Lot 24 — Page « Calculs » : historique, détail, comparaison   ·   statut : à faire
+## Lot 24 — Page « Calculs » : historique, détail, comparaison   ·   statut : livré
 **Objectif :** pour chaque calcul, voir l'ensemble des entrées utilisées et l'ensemble des résultats.
 **Tâches :**
-- [ ] API : liste filtrable (niveau, variante), détail avec entrées figées (`inputs`), séries horaires à la demande,
+- [x] API : liste filtrable (niveau, variante) avec état « à jour / périmé » et mode, détail avec entrées figées (`inputs`)
+  et séries horaires (lues seulement à l'ouverture d'un calcul),
   `GET /api/calculs/<a>/comparer/<b>/` (entrées qui diffèrent, écart des indicateurs)
-- [ ] Onglet « Calculs » de la fiche : liste ; détail (entrées par famille avec provenance, météo, indicateurs,
+- [x] Onglet « Calculs » de la fiche : liste ; détail (entrées par famille avec provenance, météo, indicateurs,
   mois, bilan par poste, courbes horaires) ; comparaison de deux calculs
 **Tests à passer avant de clore le lot :**
-- [ ] Détail invisible pour qui ne voit pas le bâtiment ; comparaison de deux calculs du même bâtiment seulement
-- [ ] Navigateur réel, clair et sombre : liste, détail N1 et N2, comparaison
-**Vérifié le :**
+- [x] Détail invisible pour qui ne voit pas le bâtiment ; comparaison de deux calculs du même bâtiment seulement
+- [x] Navigateur réel, clair et sombre : liste, détail N1 et N2, comparaison
+**Vérifié le :** 2026-11-15 — 457 tests OK (5 nouveaux, `api/tests/test_calculs_page.py`). Navigateur réel (banc),
+clair et sombre, 34 contrôles : liste de 5 calculs avec les périmés signalés ; détail N2 (résultats, entrées par famille
+avec provenance, géométrie, taux de vitrage de la fiche et modélisé, parois et couches, limites) ; courbes journalières
+de température opérative et de puissance avec info-bulle au survol (« 23 juin · moyenne 21,6 °C · min 19,3 · max 24,2 ») ;
+détail N1 (paramètres du modèle) ; comparaison de deux N1 nommant « U des murs » et l'écart des résultats ; aucune erreur
+console. Courbes : une série par graphique, couleur d'accent validée en clair et en sombre (`validate_palette.js`), tableau
+mensuel en complément.
 
 ## Lot 25 — Page « Simulation » : préparer, juger la fiabilité, lancer   ·   statut : à faire
 **Objectif :** avant de lancer, savoir ce qui sera calculé, avec quelles entrées et quelle fiabilité.

@@ -13,6 +13,7 @@ import { ProtectionsComponent } from '../../components/protections/protections.c
 import { MeteoCarteComponent } from '../../components/meteo-carte/meteo-carte.component';
 import { QuestionnaireComponent } from '../../components/questionnaire/questionnaire.component';
 import { ResultatCarteComponent } from '../../components/resultat-carte/resultat-carte.component';
+import { CalculsComponent } from '../../components/calculs/calculs.component';
 import { Catalogue, CatalogueKey, Fact, Fiche, METHOD_LABELS, Method } from '../../core/refonte.types';
 
 interface BuildingSummary { id: number; name: string; }
@@ -27,7 +28,7 @@ interface BuildingInfo {
 @Component({
   selector: 'app-fiche',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent, ProtectionsComponent, GeometrieComponent, SystemesComponent, MesuresComponent, ScenariosComponent, DocumentsComponent],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent, ProtectionsComponent, GeometrieComponent, SystemesComponent, MesuresComponent, ScenariosComponent, DocumentsComponent, CalculsComponent],
   templateUrl: './fiche.component.html',
   styleUrl: './fiche.component.scss',
 })
@@ -45,7 +46,7 @@ export class FicheComponent implements OnInit {
   saving = signal(false);
   ficheVersion = signal(0);
   tab = signal('synthese');
-  tabs: [string, string][] = [['synthese', 'Synthèse'], ['meteo', 'Météo'], ['geometrie', 'Géométrie'], ['protections', 'Protections solaires'], ['systemes', 'Systèmes'], ['mesures', 'Mesures et calage'], ['scenarios', 'Scénarios'], ['documents', 'Documents'],
+  tabs: [string, string][] = [['synthese', 'Synthèse'], ['meteo', 'Météo'], ['geometrie', 'Géométrie'], ['protections', 'Protections solaires'], ['systemes', 'Systèmes'], ['mesures', 'Mesures et calage'], ['scenarios', 'Scénarios'], ['calculs', 'Calculs'], ['documents', 'Documents'],
     ['donnees', 'Données et provenance']];
 
   setTab(t: string): void {

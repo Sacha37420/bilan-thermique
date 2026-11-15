@@ -76,6 +76,7 @@
     @if (tab() === 'systemes') { <app-systemes [buildingId]="buildingId" [refresh]="ficheVersion()" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'mesures') { <app-mesures [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'scenarios') { <app-scenarios [buildingId]="buildingId" /> }
+    @if (tab() === 'calculs') { <app-calculs [buildingId]="buildingId" [refresh]="ficheVersion()" /> }
     @if (tab() === 'documents') { <app-documents [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'donnees') {
     @for (bl of blocks(); track bl.id) {

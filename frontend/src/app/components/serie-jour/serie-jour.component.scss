@@ -1,0 +1,16 @@
+.sj { margin: 0; }
+figcaption { font-weight: 600; margin-bottom: var(--space-2, .5rem); }
+.plot { position: relative; }
+svg { display: block; width: 100%; height: auto; }
+.grid { stroke: var(--border); stroke-width: 1; }
+.tick { fill: var(--text-mute); font-size: 12px; font-family: var(--font-mono, monospace); }
+.band { fill: var(--accent-tint); stroke: none; }
+.line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.cross { stroke: var(--text-mute); stroke-width: 1; stroke-dasharray: 3 3; }
+.dot { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.hit { fill: transparent; cursor: crosshair; }
+.tip { position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; display: flex; flex-direction: column;
+  gap: 2px; padding: 6px 10px; background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+  font-size: var(--text-xs, 12px); color: var(--text); white-space: nowrap; }
+.note { color: var(--text-mute); font-size: var(--text-xs, 12px); margin: .25rem 0; }
+details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--text-mute); }
