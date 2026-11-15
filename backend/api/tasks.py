@@ -155,6 +155,39 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
 
 
 @shared_task(bind=True)
+def run_n2_fiche(self, job_id):
+    """N2 depuis la fiche (Lot 23) : le `CalcRun` a été créé avec le job ; ses entrées sont reconstruites
+    ici depuis la fiche (calc_service.run_n2)."""
+    from . import calc_service
+    job = Job.objects.get(pk=job_id)
+    job.celery_task_id = self.request.id
+    job.save(update_fields=['celery_task_id'])
+    run = calc_runs.for_job(job_id)
+    if run is None:
+        job.set_state(status=Job.ERROR, message='Calcul introuvable.')
+        return
+    import time as _time
+    last = [0.0]
+
+    def say(pct, msg):
+        now = _time.monotonic()
+        if pct >= 99 or now - last[0] > 2.0:
+            last[0] = now
+            job.set_state(progress=min(pct, 99), message=msg)
+    try:
+        calc_runs.mark_running(job_id)
+        job.set_state(status=Job.RUNNING, progress=1, message='Préparation des entrées depuis la fiche…')
+        run = calc_service.run_n2(run, say)
+        job.result = {'calc_run_id': run.pk, 'heating_kwh': run.results['heating_kwh']}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100,
+                      message=f"N2 terminé — chauffage {run.results['heating_kwh']:.0f} kWh.")
+    except Exception as exc:  # noqa: BLE001
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
+        calc_runs.fail(job_id, net.public_message(exc))
+
+
+@shared_task(bind=True)
 def generate_environment(self, job_id, params):
     """Génère ET enregistre un environnement (Lot AH) : bâtiments, arbres et
     terrain reconstruits depuis le LiDAR HD croisé avec la BD TOPO, avec repli

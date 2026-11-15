@@ -855,6 +855,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     T = np.full(n_dof, float(t_init))
     t_air_series = [float(T[air_idx])]
+    phi_hc_series = []  # Lot 23 (refonte) : puissance de chauffage (+) / froid (−) par heure, W
     # Refonte (Lot 20) : température radiante moyenne = moyenne des faces intérieures pondérée par
     # l'aire (approximation usuelle sans facteurs de forme), et température opérative
     # θ_op = (θ_air + θ_rm) / 2 (air calme, ISO 7730) — même grandeur de confort que le N1.
@@ -1051,6 +1052,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             ) * DT_SECONDS
             balance_j['hvac'] += hvac * DT_SECONDS
 
+        phi_hc_series.append(float(hvac))
         T = T_next
         t_air_series.append(float(t_air_next))
         t_mrt = float(T[inner_idx] @ inner_w)
@@ -1099,4 +1101,5 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         'envelope_flux_w': flux_series,
         'flux_positive_kwh': positive_kwh,
         'flux_negative_kwh': negative_kwh,
+        'phi_hc_w': phi_hc_series,
     }

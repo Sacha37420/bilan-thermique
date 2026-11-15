@@ -2,7 +2,8 @@
 
 GET /api/batiments/<id>/calculs/   liste (sans séries), plus récent d'abord ; `?niveau=N1`
 GET /api/calculs/<id>/             un calcul complet (séries comprises) : rechargeable sans recalcul
-POST /api/batiments/<id>/calculer/ {niveaux: ['N0','N1'], scenario?, meteo?, force?} — N0/N1 synchrones (Lot 10)
+POST /api/batiments/<id>/calculer/ {niveaux: ['N0','N1','N2'], scenario?, meteo?, force?} — N0/N1 synchrones (Lot 10) ;
+    N2 en tâche de fond, gestionnaire seulement (Lot 23) : la réponse porte le calcul en attente et son `job`
 GET /api/batiments/<id>/resultat/  dernier N0 / N1 / N2 terminé, avec « à jour » ou « périmé » (Lot 10)
 """
 
@@ -21,7 +22,7 @@ MAX_LIST = 50
 class CalcRunSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = CalcRun
-        fields = ['id', 'building', 'level', 'status', 'message', 'indicators', 'weather', 'settings',
+        fields = ['id', 'building', 'scenario', 'level', 'status', 'message', 'indicators', 'weather', 'settings',
                   'inputs_hash', 'duration_s', 'created_at', 'job']
 
 
@@ -37,6 +38,9 @@ class BuildingCalcRunsView(APIView):
         level = request.query_params.get('niveau')
         if level in ('N0', 'N1', 'N2'):
             qs = qs.filter(level=level)
+        sc = request.query_params.get('scenario')
+        if sc is not None:   # Lot 23 : « scenario= » vide = l'état actuel (base)
+            qs = qs.filter(scenario__isnull=True) if sc in ('', 'base') else qs.filter(scenario_id=int(sc) if sc.isdigit() else -1)
         return Response({'results': CalcRunSummarySerializer(qs[:MAX_LIST], many=True).data})
 
 
@@ -59,7 +63,7 @@ def compact(run):
 
 
 class CalculerSerializer(serializers.Serializer):
-    niveaux = serializers.ListField(child=serializers.ChoiceField(choices=['N0', 'N1']), min_length=1, max_length=2,
+    niveaux = serializers.ListField(child=serializers.ChoiceField(choices=['N0', 'N1', 'N2']), min_length=1, max_length=3,
                                     default=['N0', 'N1'])
     scenario = serializers.IntegerField(required=False, allow_null=True, default=None)
     meteo = serializers.DictField(required=False, default=dict)
@@ -84,11 +88,18 @@ class CalculerView(APIView):
         if d['scenario'] is not None and sc is None:
             return Response({'detail': 'Variante inconnue.'}, status=status.HTTP_400_BAD_REQUEST)
         meteo = {k: v for k, v in d['meteo'].items() if k in ('dataset_id', 'start', 'end')}
+        levels = list(dict.fromkeys(d['niveaux']))
+        if 'N2' in levels and not access.can_manage(request, b):
+            return Response({'detail': 'Le N2 est réservé aux gestionnaires du bâtiment.'}, status=status.HTTP_403_FORBIDDEN)
         runs = []
         try:
-            for lvl in d['niveaux']:
-                run, fresh = calc_service.run_level(b, lvl, scenario=sc, weather_spec=meteo or None,
-                                                    owner_sub=access.sub_of(request), force=d['force'])
+            for lvl in levels:
+                if lvl == 'N2':
+                    run, fresh = calc_service.start_n2(b, scenario=sc, weather_spec=meteo or None,
+                                                       owner_sub=access.sub_of(request), force=d['force'])
+                else:
+                    run, fresh = calc_service.run_level(b, lvl, scenario=sc, weather_spec=meteo or None,
+                                                        owner_sub=access.sub_of(request), force=d['force'])
                 runs.append({**compact(run), 'fresh': fresh})
         except calc_service.Busy as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_409_CONFLICT)
@@ -108,6 +119,8 @@ class ResultatView(APIView):
                 out[lvl] = None
                 continue
             d = compact(run)
-            d['up_to_date'] = calc_service.is_up_to_date(run) if lvl != 'N2' else None
+            d['up_to_date'] = calc_service.is_up_to_date(run)
+            d['from_fiche'] = calc_service.from_fiche(run)
             out[lvl] = d
+        out['can_n2'] = access.can_manage(request, b)  # Lot 23 : le N2 est réservé aux gestionnaires
         return Response(out)

@@ -36,9 +36,10 @@ def signature(building, scenario=None):
 
 # ── Obstacles géométriques pour le N2 ───────────────────────────────────────
 
-def _facade_windows(building, orientation, glazing_ids):
-    """Rectangles (dans le repère local) des groupes de vitrage des murs d'une orientation."""
-    env = building.envelope or {}
+def _facade_windows(building, orientation, glazing_ids, envelope=None):
+    """Rectangles (dans le repère local) des groupes de vitrage des murs d'une orientation.
+    `envelope` : enveloppe à utiliser à la place de celle du bâtiment (N2 depuis la fiche, Lot 23)."""
+    env = (envelope if envelope is not None else building.envelope) or {}
     V = env.get('vertices') or []
     north = building.georef_north_offset_deg or 0.0
     target = (ORIENT_AZ[orientation] - north) % 360
@@ -72,19 +73,21 @@ def _quad(a, b, c, d, verts, tris):
     tris += [{'v': [i, i + 1, i + 2]}, {'v': [i, i + 2, i + 3]}]
 
 
-def geometric_occluders(building, scenario=None):
-    """Enveloppe d'obstacles {'vertices', 'triangles'} des protections fixes en mode géométrique."""
+def geometric_occluders(building, scenario=None, envelope=None):
+    """Enveloppe d'obstacles {'vertices', 'triangles'} des protections fixes en mode géométrique.
+    `envelope` : celle du calcul si elle n'est pas `building.envelope` (N2 depuis la fiche, Lot 23)."""
     from .models import ParoiModel
     devs = [d for d in devices_of(building, scenario) if d['mode'] == 'geometrique']
     if not devs:
         return None
     glazing_ids = set(ParoiModel.objects.filter(is_glazing=True).values_list('pk', flat=True)) | \
-        {pid for pid, layers in ParoiModel.objects.values_list('pk', 'layers') if any((l.get('tau') or 0) > 0 for l in layers)}
+        {pid for pid, layers in ParoiModel.objects.values_list('pk', 'layers') if any((l.get('tau') or 0) > 0 for l in layers)} | \
+        {'fiche:vitrage'}
     verts, tris = [], []
     for dev in devs:
         p = dev['params'] or {}
         for o in (['N', 'E', 'S', 'O'] if dev['orientation'] == 'all' else [dev['orientation']]):
-            for w in _facade_windows(building, o, glazing_ids):
+            for w in _facade_windows(building, o, glazing_ids, envelope):
                 (nx, ny), (tx, ty) = w['n'], w['t']
 
                 def pt(u, d, z):

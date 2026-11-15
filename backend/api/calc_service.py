@@ -1,4 +1,4 @@
-"""Calculs N0/N1 d'un bâtiment depuis sa fiche (Lot 10, refonte — étapes A7 à A9).
+"""Calculs N0/N1/N2 d'un bâtiment depuis sa fiche (Lot 10, refonte — étapes A7 à A9 ; N2 : Lot 23).
 
 `run_level(building, 'N1')` : fiche effective → paramètres → moteur → `CalcRun` terminé, avec
 indicateurs, et la liste des faits utilisés (traçabilité, § 9). Un calcul dont l'empreinte des
@@ -12,11 +12,11 @@ from django.db import IntegrityError, transaction
 
 from . import calc_runs, facts, sources, weather_source
 from .engines import inputs as engine_inputs
-from .engines import n0, n1
+from .engines import n0, n1, n2_inputs
 from .fingerprint import stable_hash
 from .models import CalcRun, Job
 
-ENGINE_VERSION = {'N0': 'n0-2', 'N1': 'n1-2'}  # -2 : consommations (Lot 16)
+ENGINE_VERSION = {'N0': 'n0-2', 'N1': 'n1-2', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16)
 
 
 class CalcError(ValueError):
@@ -72,21 +72,68 @@ def params_for(building, scenario=None, values=None):
     return p, vals
 
 
+def n2_context_hash(building, scenario):
+    """Ce dont dépend le N2 en plus de la fiche : géométrie, voisins, environnement, enveloppe experte."""
+    from . import geometry_service
+    from .models import ParoiModel
+    edit = geometry_service.active_edit(building, scenario) or (
+        geometry_service.active_edit(building) if scenario is not None else None)
+    env = building.environment
+    pipeline = building.pipeline or {}
+    parts = [[edit.pk, edit.created_at.isoformat()] if edit else None, pipeline.get('footprint_xy'),
+             pipeline.get('neighbours'), building.georef_north_offset_deg,
+             [env.pk, env.updated_at.isoformat()] if env else None]
+    if n2_inputs._expert_envelope(building) or not (edit or pipeline.get('footprint_xy')):
+        ids = sorted({t.get('paroi_model_id') for t in (building.envelope or {}).get('triangles') or []
+                      if isinstance(t.get('paroi_model_id'), int)})
+        parts += [building.envelope, [[p.pk, p.layers, p.frame_u, p.frame_fraction]
+                                      for p in ParoiModel.objects.filter(pk__in=ids).order_by('pk')]]
+    return stable_hash(*parts)
+
+
 def inputs_hash_for(building, level, scenario, weather_hash, values=None):
     from . import geometry_service, shading_service
     vals = values if values is not None else facts.effective_values(building, scenario)
+    extra = n2_context_hash(building, scenario) if level == 'N2' else None
     return stable_hash(level, ENGINE_VERSION[level], stable_hash(sorted(vals.items())), weather_hash,
-                       shading_service.signature(building, scenario), geometry_service.effective_summary(building, scenario))
+                       shading_service.signature(building, scenario), geometry_service.effective_summary(building, scenario),
+                       *([extra] if extra else []))
+
+
+def from_fiche(run):
+    """Vrai pour un calcul lancé depuis la fiche (tous les N0/N1 ; un N2 du Lot 23). Faux pour un N2 de
+    la page Calcul 3D, dont les réglages viennent du formulaire et dont on ne sait pas dire s'il est à jour."""
+    return run.level != 'N2' or (run.settings or {}).get('engine') == n2_inputs.ENGINE_VERSION
 
 
 def is_up_to_date(run):
+    if not from_fiche(run):
+        return None
     return run.inputs_hash == inputs_hash_for(run.building, run.level, run.scenario, (run.weather or {}).get('hash'))
+
+
+def facts_used(eff):
+    return {k: {'value': f.value, 'method': f.method, 'source': f.source, 'confidence': f.confidence}
+            for k, f in eff.items()}
+
+
+def params_snapshot(p):
+    """Paramètres N0/N1 lisibles (entrées figées d'un calcul)."""
+    return {'surface_m2': round(p.a_floor, 1), 'volume_m3': round(p.volume, 1),
+            'murs': {o: {k: round(v, 3) for k, v in w.items()} for o, w in p.walls.items()},
+            'toiture': {'surface_m2': round(p.roof_area, 1), 'u': p.u_roof},
+            'plancher': {'surface_m2': round(p.floor_area, 1), 'u': p.u_floor},
+            'baies': {'g': p.g_window, 'part_vitree': p.frame_factor}, 'absorptance': p.absorptance,
+            'inertie': {'c_m_j_k_m2': p.c_m, 'a_m': p.a_m_factor}, 'renouvellement_vol_h': round(p.n_vent, 3),
+            'apports_w_m2': p.gains_w_m2, 'consigne_chauffage_c': p.t_heat, 'consigne_froid_c': p.t_cool,
+            'occupation': 'logement (constante)' if p.residential else 'tertiaire : 8 h–19 h, lundi–vendredi',
+            'horizon_deg': p.horizon, 'protections': [{k: d[k] for k in ('kind', 'orientation', 'mode')} for d in p.devices]}
 
 
 def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub='', force=False, job=None,
               uncertainty=True):
     if level not in ('N0', 'N1'):
-        raise CalcError('Niveau inconnu (N0 ou N1).')
+        raise CalcError('Niveau inconnu (N0 ou N1) — le N2 passe par start_n2.')
     if not weather_spec and scenario is not None and (scenario.weather or {}).get('dataset_id'):
         weather_spec = {'dataset_id': scenario.weather['dataset_id']}  # météo propre à la variante (Lot 18)
     weather, wdesc = resolve_weather(building, weather_spec)
@@ -98,16 +145,17 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
         if done is not None:
             return done, False
     eff = facts.effective(building, scenario)
-    settings = {'engine': ENGINE_VERSION[level],
-                'facts': {k: {'value': f.value, 'method': f.method, 'source': f.source, 'confidence': f.confidence}
-                          for k, f in eff.items()},
+    settings = {'engine': ENGINE_VERSION[level], 'facts': facts_used(eff),
                 'confidence': facts.scores(eff)[0], 'completeness': facts.scores(eff)[1]}
+    from . import geometry_service
+    inputs = {'engine': ENGINE_VERSION[level], 'facts': settings['facts'], 'params': params_snapshot(p),
+              'geometry': geometry_service.effective_summary(building, scenario)}
     settings['uncertainty'] = bool(uncertainty and level == 'N1')
     try:
         with transaction.atomic():
             run = CalcRun.objects.create(building=building, level=level, scenario=scenario, status=Job.RUNNING,
                                          owner_sub=owner_sub or '', inputs_hash=inputs_hash, weather=wdesc,
-                                         settings=settings, job=job)
+                                         settings=settings, inputs=inputs, job=job)
     except IntegrityError as exc:
         raise Busy('Un calcul de ce niveau est déjà en cours pour ce bâtiment.') from exc
     t0 = time.monotonic()
@@ -154,7 +202,7 @@ def current_or_latest(building, level, scenario=None):
     """Le calcul terminé qui correspond à la fiche actuelle s'il existe (revenir à l'automatique
     rend le résultat précédent sans recalcul), sinon le plus récent."""
     last = latest(building, level, scenario)
-    if last is None or level == 'N2' or is_up_to_date(last):
+    if last is None or not from_fiche(last) or is_up_to_date(last):
         return last
     wh = (last.weather or {}).get('hash')
     h = inputs_hash_for(building, level, scenario, wh)
@@ -186,3 +234,112 @@ def run_n1_with_range(building, scenario, eff, weather, nominal_params):
     nominal['heating_kwh_p90'] = round(pc[90], 1)
     nominal['n_samples'] = len(results)
     return nominal
+
+
+# ── N2 depuis la fiche (Lot 23) ─────────────────────────────────────────────
+
+def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=False):
+    """Lance le N2 en tâche de fond (verrou du lab : un calcul lourd à la fois).
+
+    Rend `(run, False)` si un N2 terminé a exactement les mêmes entrées (rien n'est relancé), sinon
+    `(run, True)` avec un calcul en attente. Lève `Busy` si un calcul lourd tourne déjà."""
+    if not weather_spec and scenario is not None and (scenario.weather or {}).get('dataset_id'):
+        weather_spec = {'dataset_id': scenario.weather['dataset_id']}
+    _weather, wdesc = resolve_weather(building, weather_spec)
+    vals = facts.effective_values(building, scenario)
+    inputs_hash = inputs_hash_for(building, 'N2', scenario, wdesc.get('hash'), vals)
+    if not force:
+        done = CalcRun.objects.filter(building=building, level='N2', scenario=scenario, status=Job.DONE,
+                                      inputs_hash=inputs_hash).first()
+        if done is not None:
+            return done, False
+    try:
+        built = n2_inputs.build(building, scenario, vals)   # erreurs de géométrie avant de prendre le verrou
+    except n2_inputs.N2InputError as exc:
+        raise CalcError(str(exc)) from exc
+    eff = facts.effective(building, scenario)
+    used = facts_used(eff)
+    conf, compl = facts.scores(eff)
+    settings = {'engine': n2_inputs.ENGINE_VERSION, 'mode': built['snapshot']['mode'], 'facts': used,
+                'confidence': conf, 'completeness': compl,
+                'weather_spec': {k: v for k, v in (weather_spec or {}).items() if k in ('dataset_id', 'start', 'end')}}
+    inputs = {**built['snapshot'], 'facts': used}
+    holder = {}
+
+    def created(job):
+        try:
+            with transaction.atomic():
+                holder['run'] = CalcRun.objects.create(
+                    building=building, level='N2', scenario=scenario, status=Job.PENDING, job=job,
+                    owner_sub=owner_sub or '', inputs_hash=inputs_hash, weather=wdesc, settings=settings, inputs=inputs)
+        except IntegrityError as exc:
+            raise Busy('Un N2 est déjà en cours pour ce bâtiment.') from exc
+
+    from . import joblock, tasks
+    job = joblock.launch_exclusive(
+        'n2_fiche', {'building_id': building.pk, 'scenario_id': scenario.pk if scenario else None},
+        lambda j: tasks.run_n2_fiche.delay(j.id), owner_sub=owner_sub, on_created=created)
+    if job is None:
+        raise Busy('Un calcul lourd est déjà en cours sur le lab — réessayez dans quelques minutes.')
+    return holder['run'], True
+
+
+def run_n2(run, progress_cb=None):
+    """Exécute un N2 préparé par `start_n2` (appelé par la tâche Celery). Termine le `CalcRun`."""
+    from . import shadow
+    from .engines import systems
+    from .building_solver import run_building_simulation
+    t0 = time.monotonic()
+    building, scenario = run.building, run.scenario
+    say = progress_cb or (lambda pct, msg: None)
+    vals = facts.effective_values(building, scenario)
+    built = n2_inputs.build(building, scenario, vals)
+    weather, _wdesc = resolve_weather(building, (run.settings or {}).get('weather_spec') or None)
+    w = n2_inputs.weather_for_n2(weather, building.georef_north_offset_deg or 0.0, built['residential'])
+    envelope, env = built['envelope'], built['environment']
+    if built['snapshot']['mode'] == 'experte' and not building.sun_visibility_stale and \
+            building.sun_visibility.get('per_triangle'):
+        sunvis = building.sun_visibility
+    else:
+        say(2, 'Ombrage : visibilité du soleil…')
+        sunvis = shadow.compute_visibility_grid(envelope, env)
+        say(12, 'Ombrage : vue du ciel…')
+        sunvis['sky_view_factor'] = shadow.compute_sky_view_factors(envelope, env)
+    payload = {**built['payload'], 'weather': w}
+
+    def cb(done, total):
+        say(15 + int(done * 84 / total), f'Résolution heure par heure… {done}/{total}')
+    res = run_building_simulation(envelope, built['layers'], sunvis, payload, environment_envelope=env,
+                                  progress_cb=cb, paroi_frame_by_id=built['frames'])
+    a_floor = built['a_floor']
+    phi = res.get('phi_hc_w') or []
+    heat = [max(x, 0.0) for x in phi]
+    months = n1.MONTH_HOURS[n1.MONTH_HOURS <= len(heat)].tolist()
+    if months[-1] != len(heat):
+        months.append(len(heat))
+    keep = ('hours', 'heating_kwh', 'cooling_kwh', 't_air_mean', 'balance', 'flux_positive_kwh', 'flux_negative_kwh')
+    out = {k: res[k] for k in keep}
+    out.update({
+        'level': 'N2',
+        't_air': [round(x, 2) for x in res['t_air'][1:]], 't_op': [round(x, 2) for x in res['t_op'][1:]],
+        'phi_hc_w': [round(x, 1) for x in phi],
+        'heating_kw_max': round(max(heat) / 1000.0, 2) if heat else 0.0,
+        't_op_max': round(max(res['t_op'][1:]), 2) if len(res['t_op']) > 1 else None,
+        'monthly_heating_kwh': [round(sum(heat[a:b]) / 1000.0, 1) for a, b in zip(months[:-1], months[1:])],
+    })
+    t_ext = [p['t_ext'] for p in w]
+    out['energy'] = systems.evaluate(vals, out['heating_kwh'], out['cooling_kwh'] or 0.0, a_floor,
+                                     a_floor * engine_inputs.CEILING_H, phi, t_ext)
+    ind = calc_runs.indicators_from(out, a_floor, 'N2')
+    e = out['energy']
+    ind.update({k: e[k] for k in ('final_kwh_m2', 'primary_kwh_m2', 'co2_kg_m2', 'cost_eur', 'final_kwh',
+                                  'primary_kwh', 'co2_kg') if k in e})
+    ind['dpe_label_model'] = e.get('dpe_label_model')
+    if 'dpe_gap_pct' in e:
+        ind['dpe_gap_pct'] = e['dpe_gap_pct']
+    ind['confidence'] = run.settings.get('confidence')
+    ind['completeness'] = run.settings.get('completeness')
+    run.status, run.results, run.indicators = Job.DONE, out, ind
+    run.duration_s = round(time.monotonic() - t0, 2)
+    run.save(update_fields=['status', 'results', 'indicators', 'duration_s'])
+    return run

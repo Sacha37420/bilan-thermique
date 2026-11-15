@@ -133,9 +133,9 @@ cloisonnement `ok` par le moteur le 2026-11-01 (`<LAB_STATE_DIR>/tests/bilan-the
 ## Lot 7 — Pistes écartées ou différées   ·   statut : à faire
 **Objectif :** mémoire des pistes. Rien à faire sans décision du propriétaire.
 **Tâches :**
-- [ ] U4 : choisir les coordonnées sur une carte (aucune bibliothèque cartographique dans le frontend)
+- [x] U4 : choisir les coordonnées sur une carte — fait au Lot 19 (Leaflet)
 - [ ] Texture des bâtiments voisins
-- [ ] Écartés par décision : Lot Z3 (saisonnalité de la végétation), paroi mitoyenne
+- [x] Lot Z3 (saisonnalité de la végétation) : repris en protection paramétrique (D8) ; paroi mitoyenne : faite au Lot 12
 **Tests à passer avant de clore le lot :**
 - [ ] À définir avec chaque tâche retenue
 **Vérifié le :**
@@ -466,6 +466,79 @@ le serveur MCP de l'app, avec un jeton personnel ; l'app n'appelle aucune IA (re
 - [x] Navigateur (banc, clair et sombre) + appel MCP réel par HTTP : initialize, tools/list, lire_fiche,
   dernier usage, révocation → 401
 **Vérifié le :** 2026-11-15 — 436 tests OK. Non éprouvé : un vrai Claude Code relié (aucun abonnement utilisé).
+
+## Lot 23 — N2 calculé depuis la fiche   ·   statut : livré
+**Objectif :** une seule source de vérité. Le N2 (FEM par triangle) se lance depuis la fiche comme N0/N1,
+sans retourner sur les pages expertes ; il dit « à jour » ou « périmé » ; scénarios et comparaison N0/N1/N2
+portent sur le même bâtiment (décisions D34 à D37 de `refonte.md`).
+**Tâches :**
+- [x] `api/engines/n2_inputs.py` : fiche effective → enveloppe (emprise corrigée ou automatique, toiture,
+  baies par façade d'après `baies.ratio_*`), parois reconstituées dont le U **égale** celui de la fiche (murs,
+  toiture, plancher, vitrages), réglages (ventilation, consignes, apports), voisins de la chaîne en obstacles
+- [x] Mode « géométrie experte » : une enveloppe entièrement assignée à la main est prise telle quelle
+  (D35) ; ventilation, consignes, apports et météo viennent toujours de la fiche
+- [x] `run_level(…, 'N2')` en tâche de fond (verrou du lab), empreinte des entrées, `CalcRun.inputs`
+  (entrées figées : faits, géométrie, parois par groupe, réglages, météo) ; `up_to_date` calculé pour N2
+- [x] `POST /api/batiments/<id>/calculer/` accepte `N2` (gestionnaire seulement, jamais en lot) ; carte
+  « Résultat » : bouton N2 et état
+**Tests à passer avant de clore le lot :**
+- [x] U des parois reconstituées = U de la fiche (à 1 % près) ; enveloppe fermée ; taux de vitrage par façade
+- [x] Écart N1 / N2-fiche sous 20 % sur les trois cas de recette ; changer un fait rend le N2 périmé
+- [x] Mode expert : parois assignées conservées ; un occupant ne lance pas N2 ; entrées figées enregistrées
+**Vérifié le :** 2026-11-15 — 452 tests OK (16 nouveaux, `api/tests/test_n2_fiche.py`). Écart N1 / N2-fiche sur les trois
+cas de recette : boîte −5,3 %, maison −0,1 %, collectif −0,6 % (N2 : 2 à 10 s, 12 à 108 triangles). Navigateur réel
+(banc : Keycloak simulé, API et worker réels), clair et sombre : N1 puis N2 lancés depuis la fiche, progression suivie,
+N2 « à jour », +1 % par rapport à N1 ; une correction le rend « périmé », revenir à l'automatique le rend « à jour » ;
+un occupant voit le résultat sans bouton N2 ; aucune erreur console. Le solveur N2 rend en plus sa série horaire de
+puissance (`phi_hc_w`) — ajout pur. La page Calcul 3D reste en place (Lot 27) ; ses N2 sont marqués « lancé depuis
+Calcul 3D » (pas d'état « à jour »).
+
+## Lot 24 — Page « Calculs » : historique, détail, comparaison   ·   statut : à faire
+**Objectif :** pour chaque calcul, voir l'ensemble des entrées utilisées et l'ensemble des résultats.
+**Tâches :**
+- [ ] API : liste filtrable (niveau, variante), détail avec entrées figées (`inputs`), séries horaires à la demande,
+  `GET /api/calculs/<a>/comparer/<b>/` (entrées qui diffèrent, écart des indicateurs)
+- [ ] Onglet « Calculs » de la fiche : liste ; détail (entrées par famille avec provenance, météo, indicateurs,
+  mois, bilan par poste, courbes horaires) ; comparaison de deux calculs
+**Tests à passer avant de clore le lot :**
+- [ ] Détail invisible pour qui ne voit pas le bâtiment ; comparaison de deux calculs du même bâtiment seulement
+- [ ] Navigateur réel, clair et sombre : liste, détail N1 et N2, comparaison
+**Vérifié le :**
+
+## Lot 25 — Page « Simulation » : préparer, juger la fiabilité, lancer   ·   statut : à faire
+**Objectif :** avant de lancer, savoir ce qui sera calculé, avec quelles entrées et quelle fiabilité.
+**Tâches :**
+- [ ] `GET /api/batiments/<id>/simulation/?niveau=&scenario=` : entrées par famille (valeur, provenance,
+  confiance), les entrées les plus influentes et incertaines, fourchette attendue, durée estimée, blocages
+- [ ] Onglet « Simulation » : choix du niveau, de la variante et de la météo, tableau des entrées, fiabilité,
+  liens « corriger », bouton lancer ; la carte « Résultat » y renvoie
+**Tests à passer avant de clore le lot :**
+- [ ] Les entrées listées sont exactement celles que le calcul enregistre ensuite
+- [ ] Navigateur réel, clair et sombre
+**Vérifié le :**
+
+## Lot 26 — Gestes experts → faits   ·   statut : à faire
+**Objectif :** ce qui se fait sur les pages expertes améliore la fiche, donc tous les niveaux.
+**Tâches :**
+- [ ] Parois assignées à la main → U des murs, toiture, plancher et vitrages **déduits** (fait `declare`,
+  source « enveloppe experte »), retirés si l'assignation change (D35)
+- [ ] Environnement relevé (LiDAR × BD TOPO) → horizon par façade pour N0/N1, à la place de l'horizon simplifié
+- [ ] Façades analysées (Panoramax) → propositions de taux de vitrage à valider
+**Tests à passer avant de clore le lot :**
+- [ ] Chaque geste crée le fait attendu et le retire quand il est défait ; N0/N1 deviennent périmés
+**Vérifié le :**
+
+## Lot 27 — Fiche unique et anciennes pages   ·   statut : à faire
+**Objectif :** une seule entrée par bâtiment ; les pages d'avant deviennent des onglets ou des outils.
+**Tâches :**
+- [ ] Onglets « Géométrie 3D » (vue et assignation de l'ancienne page Bâtiment) et « Environnement » dans la fiche
+- [ ] Anciennes routes `batiment`, `calcul-3d`, `mode-simplifie`, `environnement` redirigées vers l'onglet
+  (`?b=`) ; Calcul 1D et Parois restent des outils, liés depuis la fiche ; navigation simplifiée
+- [ ] Commande `migrer_fiches` : tout bâtiment reçoit une fiche (idempotente, `--check`)
+**Tests à passer avant de clore le lot :**
+- [ ] Navigateur réel, clair et sombre : chaque ancienne adresse arrive au bon onglet
+- [ ] `migrer_fiches --check` rend 0 sur la base de service après passage
+**Vérifié le :**
 
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
