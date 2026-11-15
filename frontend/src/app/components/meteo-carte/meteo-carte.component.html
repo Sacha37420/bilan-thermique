@@ -1,0 +1,88 @@
+<section class="rf-card" aria-labelledby="m-title">
+  <div class="rf-card-head"><h2 id="m-title">Météo</h2></div>
+  <p class="rf-hint">Année type pour comparer des bâtiments ; météo réelle de la période facturée pour un calage ;
+    climat futur pour l'adaptation. La météo retenue sert aux calculs N0 et N1.</p>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+
+  <div class="rf-table-wrap">
+    <table class="rf-table">
+      <thead><tr><th>Utiliser</th><th>Comparer</th><th>Jeu</th><th class="num">DJU 18</th><th class="num">Soleil kWh/m²</th><th class="num">T max</th><th class="num">h &gt; 30 °C</th></tr></thead>
+      <tbody>
+        <tr><td><input type="radio" name="wsel" [checked]="selected() === null" (change)="use(null)" aria-label="Année type du site (par défaut)"></td><td></td>
+          <td colspan="5">Année type du site (par défaut)</td></tr>
+        @for (d of datasets(); track d.id) {
+          <tr>
+            <td><input type="radio" name="wsel" [checked]="selected() === d.id" (change)="use(d.id)" [attr.aria-label]="'Utiliser ' + d.label"></td>
+            <td><input type="checkbox" [checked]="compareIds().has(d.id)" (change)="toggle(d.id)" [attr.aria-label]="'Comparer ' + d.label"></td>
+            <td><span class="rf-badge">{{ kinds[d.kind] }}</span> {{ d.label }}
+              @if (d.quality['filled_hours']) { <small>· {{ d.quality['filled_hours'] }} h comblées</small> }
+              @if (d.quality['warning']) { <small class="w">· {{ d.quality['warning'] }}</small> }</td>
+            <td class="num">{{ d.stats['dju_18'] | number: '1.0-0' }}</td>
+            <td class="num">{{ d.stats['ghi_kwh_m2'] | number: '1.0-0' }}</td>
+            <td class="num">{{ d.stats['t_max'] | number: '1.1-1' }}</td>
+            <td class="num">{{ d.stats['hours_over_30'] }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <details>
+    <summary>Ajouter une météo</summary>
+    <div class="add">
+      <div class="rf-row"><button type="button" class="rf-btn" (click)="build('tmy')">Année type (PVGIS)</button></div>
+      <div class="rf-row">
+        <label class="rf-field"><span>Du</span><input type="date" [(ngModel)]="start"></label>
+        <label class="rf-field"><span>Au</span><input type="date" [(ngModel)]="end"></label>
+        <button type="button" class="rf-btn" (click)="build('reel')" [disabled]="!start || !end">Période réelle (réanalyse)</button>
+      </div>
+      <div class="rf-row">
+        <button type="button" class="rf-btn" (click)="searchStations()">Chercher une station Météo-France</button>
+        @if (stations(); as st) {
+          <label class="rf-field grow"><span>Station</span>
+            <select [(ngModel)]="station"><option [ngValue]="null">— choisir —</option>
+              @for (s of st; track s.id) { <option [ngValue]="s">{{ s.name }} — {{ s.distance_km }} km, {{ s.alt }} m{{ s.has_radiation ? ', rayonnement' : '' }}{{ s.warning ? ' ⚠ ' + s.warning : '' }}</option> }
+            </select></label>
+          <button type="button" class="rf-btn" (click)="build('station')" [disabled]="!station || !start || !end">Station sur la période</button>
+        }
+      </div>
+      <div class="rf-row">
+        <label class="rf-field"><span>Climat futur (TRACC)</span>
+          <select [(ngModel)]="scenario">
+            <option value="+2">+2 °C</option><option value="+2.7">+2,7 °C</option><option value="+4">+4 °C</option>
+            <option value="+2-chaleur">+2 °C, vague de chaleur</option><option value="+2.7-chaleur">+2,7 °C, vague de chaleur</option>
+            <option value="+4-chaleur">+4 °C, vague de chaleur</option></select></label>
+        <button type="button" class="rf-btn" (click)="build('tracc')">Ajouter</button>
+        <label class="rf-btn file">Importer EPW / CSV<input type="file" accept=".epw,.csv" (change)="onFile($event)"></label>
+      </div>
+    </div>
+  </details>
+  @if (job(); as j) { <p class="rf-hint" role="status">{{ j.message }}</p> }
+
+  <div class="rf-row cmp">
+    <label class="rf-field"><span>Période (facultatif) du</span><input type="date" [(ngModel)]="periodStart"></label>
+    <label class="rf-field"><span>au</span><input type="date" [(ngModel)]="periodEnd"></label>
+    <button type="button" class="rf-btn primary" (click)="compare()" [disabled]="!compareIds().size || busy()">
+      Comparer ({{ compareIds().size }})</button>
+  </div>
+  @if (compareRows(); as rows) {
+    <div class="rf-table-wrap">
+      <table class="rf-table">
+        <thead><tr><th>Météo</th><th class="num">DJU</th><th class="num">Soleil</th><th class="num">Besoin kWh/m²</th><th class="num">Fourchette</th><th class="num">h &gt; 28 °C</th></tr></thead>
+        <tbody>
+          @for (r of rows; track r.dataset.id) {
+            <tr><td>{{ r.dataset.label }}</td>
+              @if (r.error) { <td colspan="5" class="rf-error">{{ r.error }}</td> } @else {
+                <td class="num">{{ r.weather_stats?.['dju_18'] | number: '1.0-0' }}</td>
+                <td class="num">{{ r.weather_stats?.['ghi_kwh_m2'] | number: '1.0-0' }}</td>
+                <td class="num"><strong>{{ r.indicators?.['heating_kwh_m2'] | number: '1.0-0' }}</strong></td>
+                <td class="num">{{ r.indicators?.['heating_kwh_m2_p10'] | number: '1.0-0' }}–{{ r.indicators?.['heating_kwh_m2_p90'] | number: '1.0-0' }}</td>
+                <td class="num">{{ r.indicators?.['hours_over_28'] }}</td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</section>

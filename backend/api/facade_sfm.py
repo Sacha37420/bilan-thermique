@@ -32,12 +32,21 @@ import os
 import shutil
 import time
 from pathlib import Path
+from . import net
 
 import numpy as np
 
 from . import facades as F
 
 SFM_DIR = os.path.join(F.CACHE_DIR, 'sfm')
+
+
+def cleanup_workdir(path):
+    """Supprime un dossier de travail SfM, seulement s'il est sous SFM_DIR (Lot 3, refonte)."""
+    import shutil
+    real = os.path.realpath(path)
+    if real.startswith(os.path.realpath(SFM_DIR) + os.sep) and os.path.isdir(real):
+        shutil.rmtree(real, ignore_errors=True)
 SFM_WIDTH = 4096
 MASK_PITCH = (-25.0, 50.0)
 GPS_INLIER_M = 4.0
@@ -205,14 +214,14 @@ def solve_poses(panos, workdir, ground_at, progress=None):
     try:
         models, by_name = reconstruct(panos, workdir, progress)
     except Exception as exc:  # noqa: BLE001 — la photogrammétrie est un plus, pas un prérequis
-        report['errors'].append(f"Reconstruction impossible ({exc}).")
+        report['errors'].append(f"Reconstruction impossible ({net.reason(exc)}).")
         return {}, report
     poses = {}
     for rec in models:
         try:
             out, stats = align_model(rec, by_name, ground_at)
         except SfmError as exc:
-            report['errors'].append(str(exc))
+            report['errors'].append(net.reason(exc))
             continue
         poses.update(out)
         report['models'].append(stats)

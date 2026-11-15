@@ -1,9 +1,9 @@
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
-import { Building, Job } from '../../core/building.types';
+import { Building, Job, CalcRunSummary } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
 import { VENTILATION_PROFILES } from '../../core/ventilation-profiles';
 import {
@@ -88,6 +88,10 @@ const MARGIN = { top: 16, right: 16, bottom: 32, left: 46 };
 
 // Échelle divergente bleu/rouge (skill dataviz) pour une grandeur continue
 // (température) — distincte de la palette catégorielle des séries.
+// EXCEPTION DOCUMENTÉE à « aucune couleur en dur » (identité Foyer, Lot 5 de la refonte) : ces
+// trois valeurs colorent les SOMMETS d'un maillage three.js (WebGL), qui ne lit pas les variables
+// CSS ; elles encodent une donnée (température), pas le thème, et doivent rester identiques en
+// clair et en sombre pour que la légende garde son sens.
 const COLD_HEX = '#2a78d6';
 const HOT_HEX = '#e34948';
 const MID_HEX = '#c9c7bd';
@@ -107,7 +111,7 @@ function lerpColor(a: [number, number, number], b: [number, number, number], t: 
 @Component({
   selector: 'app-calcul-3d',
   standalone: true,
-  imports: [FormsModule, RouterLink, DecimalPipe, MeshViewerComponent],
+  imports: [FormsModule, RouterLink, DecimalPipe, DatePipe, MeshViewerComponent],
   templateUrl: './calcul-3d.component.html',
   styleUrl: './calcul-3d.component.scss',
 })
@@ -466,8 +470,40 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
     this.stopShadowPoll();
   }
 
+  // ── Refonte, Lot 3 : calculs précédents, rechargeables sans recalcul ──
+  history = signal<CalcRunSummary[]>([]);
+  reviewedRunId = signal<number | null>(null);
+
+  loadHistory(): void {
+    const id = this.selectedBuildingId;
+    if (id === null) { this.history.set([]); return; }
+    this.api.getCalcRuns(id).subscribe({
+      next: (r) => this.history.set(r.results),
+      error: () => this.history.set([]),
+    });
+  }
+
+  reviewRun(run: CalcRunSummary): void {
+    this.stopPoll();
+    this.api.getCalcRun(run.id).subscribe({
+      next: (full) => {
+        this.reviewedRunId.set(full.id);
+        this.submittedWeatherSourceLabel.set(
+          `calcul enregistré du ${new Date(full.created_at).toLocaleString('fr-FR')} (${full.weather?.n_hours ?? '?'} h)`);
+        this.job.set({
+          id: full.job ?? 0, kind: 'building_calcul', status: 'DONE', progress: 100,
+          message: `Résultat relu sans recalcul (calcul n° ${full.id}).`,
+          params: {}, result: full.results, created_at: full.created_at, updated_at: full.created_at,
+        });
+      },
+      error: () => this.error.set('Ce calcul ne peut pas être relu.'),
+    });
+  }
+
   onBuildingChange(): void {
     this.job.set(null);
+    this.reviewedRunId.set(null);
+    this.loadHistory();
     this.currentBuilding.set(null);
     this.shadowJob.set(null);
     this.stopShadowPoll();
@@ -753,7 +789,10 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
         next: (res) => {
           const updated = res as Job;
           this.job.set(updated);
-          if (updated.status === 'DONE' || updated.status === 'ERROR') this.stopPoll();
+          if (updated.status === 'DONE' || updated.status === 'ERROR') {
+            this.stopPoll();
+            this.loadHistory();
+          }
         },
       });
     }, POLL_INTERVAL_MS);

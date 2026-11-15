@@ -52,7 +52,10 @@ services:
       timeout: 3s
       retries: 20
 
-  worker:
+  # Service nommé `<app>-worker` (règle du lab, Lot 5 de la refonte). Ancien nom : `worker` —
+  # même conteneur ; les deux chemins de déploiement passent `--remove-orphans`, qui retire
+  # l'ancien service avant de créer celui-ci (vérifié sur un projet compose factice, 2026-11-14).
+  bilan-thermique-worker:
     build: ./backend
     container_name: bilan-thermique-worker
     restart: unless-stopped
@@ -60,8 +63,10 @@ services:
     # Précalcul d'ombrage (lancers de rayons) et résolution FEM bâtiment sont
     # les deux seuls jobs lourds de cette app — un seul à la fois (verrou DB
     # applicatif dans les vues de lancement), même principe qu'atelier-3d/
+    # Refonte (Lot 11) : écoute aussi la file `parc` (traitement de parc), consultée APRÈS la file
+    # interactive `celery` (CELERY_BROKER_TRANSPORT_OPTIONS, décision D13) — pas de second worker.
     # lab-admin pour la même raison (2 vCPU/16 Go partagés par tout le lab).
-    command: celery -A config worker --loglevel=info --concurrency=1
+    command: celery -A config worker --loglevel=info --concurrency=1 -Q celery,parc --prefetch-multiplier=1
     volumes:
       - facade-cache:/tmp/bilan-thermique-facades
     depends_on:

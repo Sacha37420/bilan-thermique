@@ -75,7 +75,7 @@ class TriangleInputSerializer(serializers.Serializer):
     # t_ground plutôt qu'avec t_ext — le sol a une température bien plus stable/
     # amortie que l'air extérieur. Défaut 'exterior_air' = comportement historique
     # (mur/toiture face à l'air extérieur), inchangé pour tout maillage existant.
-    boundary = serializers.ChoiceField(choices=['exterior_air', 'ground'], required=False, default='exterior_air')
+    boundary = serializers.ChoiceField(choices=['exterior_air', 'ground', 'adiabatic'], required=False, default='exterior_air')
     # Lot J : dispositif d'occultation mobile (volet/store) éventuellement
     # installé sur ce triangle — indépendant de paroi_model_id (deux fenêtres
     # du même modèle de vitrage peuvent avoir des dispositifs différents, ou
@@ -318,8 +318,19 @@ class BuildingSerializer(serializers.Serializer):
                                                         min_value=0.0, max_value=0.95)
     sun_visibility_stale = serializers.BooleanField(read_only=True)
     facades = serializers.SerializerMethodField()
+    # Refonte (Lots 8-9) : lecture seule — la fiche s'écrit par /faits/, la chaîne par /initialiser/.
+    rnb_id = serializers.CharField(read_only=True)
+    address = serializers.CharField(read_only=True)
+    pipeline_status = serializers.CharField(read_only=True)
+    pipeline = serializers.SerializerMethodField()
+    confidence = serializers.FloatField(read_only=True)
+    completeness = serializers.FloatField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+    def get_pipeline(self, obj):
+        p = obj.pipeline or {}
+        return {k: p.get(k) for k in ('steps', 'geometry', 'horizon_deg', 'sources', 'geocode_score') if k in p}
 
     def get_facades(self, obj):
         """Lot AK — analyse des façades, sans l'enveloppe de base (réservée à la
@@ -328,7 +339,8 @@ class BuildingSerializer(serializers.Serializer):
         return {k: v for k, v in data.items() if k != 'base'}
 
     def validate_name(self, value):
-        qs = Building.objects.filter(name=value)
+        portfolio = self.instance.portfolio_id if self.instance is not None else None
+        qs = Building.objects.filter(name=value, portfolio_id=portfolio)
         if self.instance is not None:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():

@@ -1,0 +1,42 @@
+<section class="rf-card" aria-labelledby="s-title">
+  <div class="rf-card-head"><h2 id="s-title">Systèmes et consommations</h2></div>
+  <p class="rf-hint">Du besoin calculé à la consommation : rendements de génération, d'émission, de distribution et
+    de régulation (repères 3CL), COP horaire d'une pompe à chaleur. Aide à la décision, pas un DPE.</p>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  <div class="rf-row">
+    @for (k of keys; track k) {
+      @if (spec(k); as s) {
+        <label class="rf-field"><span>{{ s.label }}</span>
+          <select [(ngModel)]="form[k]"><option value="">— non renseigné —</option>
+            @for (c of s.choices | keyvalue; track c.key) { <option [value]="c.key">{{ c.value }}</option> }</select></label>
+      }
+    }
+    <label class="rf-field"><span>Rendement ou COP saisonnier (si connu)</span><input type="number" step="0.01" [(ngModel)]="efficiency"></label>
+    <button type="button" class="rf-btn primary" (click)="save()" [disabled]="busy()">{{ busy() ? 'Calcul…' : 'Enregistrer et recalculer' }}</button>
+  </div>
+  @if (energy(); as e) {
+    <div class="rf-kpis">
+      <div class="rf-kpi"><small>Énergie finale</small><strong>{{ e.final_kwh_m2 | number: '1.0-0' }}</strong><em>kWh/m²·an · {{ e.final_kwh | number: '1.0-0' }} kWh</em></div>
+      <div class="rf-kpi"><small>Énergie primaire</small><strong>{{ e.primary_kwh_m2 | number: '1.0-0' }}</strong><em>kWh/m²·an</em></div>
+      <div class="rf-kpi"><small>Émissions</small><strong>{{ e.co2_kg_m2 | number: '1.0-0' }}</strong><em>kg CO₂/m²·an</em></div>
+      <div class="rf-kpi"><small>Coût indicatif</small><strong>{{ e.cost_eur | number: '1.0-0' }} €</strong><em>par an</em></div>
+      <div class="rf-kpi"><small>Étiquette du modèle</small><strong><span class="dpe" [attr.data-l]="e.dpe_label_model">{{ e.dpe_label_model }}</span></strong>
+        <em>@if (e.dpe_label_declared) { DPE affiché : {{ e.dpe_label_declared }} } @else { aucun DPE connu }
+          @if (e.dpe_gap_pct !== undefined) { · écart {{ e.dpe_gap_pct > 0 ? '+' : '' }}{{ e.dpe_gap_pct }} % } </em></div>
+    </div>
+    <div class="cols">
+      <table class="rf-table"><caption>Par usage</caption>
+        @for (u of usageLabels | keyvalue; track u.key) {
+          <tr><td>{{ u.value }}</td><td class="num">{{ e.by_usage_kwh[u.key] | number: '1.0-0' }} kWh</td>
+            <td class="bar"><i [style.width.%]="share(e, u.key)"></i></td></tr>
+        }
+      </table>
+      <table class="rf-table"><caption>Par énergie</caption>
+        @for (x of e.by_energy_kwh | keyvalue; track x.key) { <tr><td>{{ energyLabels[x.key] ?? x.key }}</td><td class="num">{{ x.value | number: '1.0-0' }} kWh</td></tr> }
+        @if (e.cop_seasonal) { <tr><td>COP saisonnier</td><td class="num">{{ e.cop_seasonal | number: '1.1-2' }}</td></tr> }
+      </table>
+    </div>
+  } @else {
+    <p class="rf-hint">Lancez un calcul (onglet Synthèse) pour voir les consommations.</p>
+  }
+</section>

@@ -1,0 +1,11 @@
+:host { display: block; }
+input[type=radio], input[type=checkbox] { width: 22px; height: 22px; margin: 11px; accent-color: var(--accent); }
+small { color: var(--text-mute); }
+small.w { color: var(--warning); }
+details { margin: var(--space-3) 0; }
+details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+.add { display: grid; gap: var(--space-3); padding-top: var(--space-2); }
+.grow { flex: 1 1 16rem; }
+.file { display: inline-flex; align-items: center; position: relative; overflow: hidden; }
+.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.cmp { margin: var(--space-3) 0; }

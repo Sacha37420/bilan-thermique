@@ -6,6 +6,8 @@ from . import shadow
 from . import building_solver
 from . import geodata
 from . import weather_source
+from . import net
+from . import calc_runs
 
 
 def _environment_ground(environment):
@@ -29,6 +31,10 @@ def precompute_shadows(self, job_id: int, building_id: int):
         job.set_state(status=Job.RUNNING, progress=0, message="Préparation de la géométrie…")
         building = Building.objects.get(pk=building_id)
         environment_envelope = building.environment.envelope if building.environment_id else None
+        # Refonte (Lot 14) : protections fixes en mode géométrique = obstacles supplémentaires.
+        from . import shading_service
+        environment_envelope = shading_service.merge_envelopes(
+            environment_envelope, shading_service.geometric_occluders(building)) or environment_envelope
 
         def progress_cb(done, total):
             # Grille de visibilité solaire : 0-79 % ; facteur de vue du ciel : 80-98 %.
@@ -64,7 +70,7 @@ def precompute_shadows(self, job_id: int, building_id: int):
         job.save(update_fields=['result'])
         job.set_state(status=Job.DONE, progress=100, message="Précalcul d'ombrage terminé.")
     except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 @shared_task(bind=True)
@@ -73,6 +79,9 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
     job.celery_task_id = self.request.id
     job.save(update_fields=['celery_task_id'])
 
+    import time as _time
+    started = _time.monotonic()
+    calc_runs.mark_running(job_id)
     try:
         job.set_state(status=Job.RUNNING, progress=0, message="Assemblage du système…")
         building = Building.objects.get(pk=building_id)
@@ -90,6 +99,9 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
         }
         sun_visibility = building.sun_visibility if building.sun_visibility.get('per_triangle') else None
         environment_envelope = building.environment.envelope if building.environment_id else None
+        from . import shading_service
+        environment_envelope = shading_service.merge_envelopes(
+            environment_envelope, shading_service.geometric_occluders(building)) or environment_envelope
 
         # DB write throttlée (~1 % du run, jamais moins de 5s d'intervalle) —
         # un job de plusieurs milliers d'heures ne doit pas faire une écriture
@@ -123,20 +135,23 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
             # où la ligne du nœud d'air est écrasée par Dirichlet.
             'balance': result['balance'],
             't_air': result['t_air'],
+            't_op': result.get('t_op'),
+            't_mrt': result.get('t_mrt'),
             'envelope_flux_w': result['envelope_flux_w'],
             'final_exterior_surface_temp': result['final_exterior_surface_temp'],
             'final_interior_surface_temp': result['final_interior_surface_temp'],
         }
         job.save(update_fields=['result'])
+        # Lot 3 (refonte) : le résultat reste consultable après avoir quitté la page.
+        calc_runs.finish(job_id, job.result, started, surface_m2=building.surface_ref_m2)
         job.set_state(
             status=Job.DONE, progress=100,
             message=f"Calcul terminé — {result['hours']}h, "
                     f"chauffage {result['heating_kwh']:.0f} kWh, clim {result['cooling_kwh']:.0f} kWh.",
         )
-    except building_solver.BuildingSimulationError as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
     except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
+        calc_runs.fail(job_id, net.public_message(exc))
 
 
 @shared_task(bind=True)
@@ -204,9 +219,9 @@ def generate_environment(self, job_id, params):
                     + (" (LiDAR HD)." if summary['source'] == 'lidar' else " (repli BD TOPO / OSM)."),
         )
     except (geodata.GeodataError, environment_service.EnvironmentServiceError) as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
     except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 @shared_task(bind=True)
@@ -270,9 +285,9 @@ def fetch_weather(self, job_id, params):
             message += f" {n_missing} heure(s) ignorée(s), donnée manquante."
         job.set_state(status=Job.DONE, progress=100, message=message)
     except weather_source.WeatherSourceError as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
     except Exception as exc:
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 from celery.signals import worker_ready  # noqa: E402
@@ -335,7 +350,7 @@ def analyse_facades(self, job_id, building_id):
         job.set_state(status=Job.DONE, progress=100,
                       message=f"{n}/{len(result['facades'])} façade(s) vues sur photo, {n_open} baie(s).")
     except Exception as exc:  # noqa: BLE001
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
 
 
 @shared_task(bind=True)
@@ -366,4 +381,183 @@ def recompose_facades(self, job_id, building_id):
                                        progress_cb=lambda m, p: job.set_state(progress=p, message=m))
         job.set_state(status=Job.DONE, progress=100, message=f"{n} texture(s) recomposée(s).")
     except Exception as exc:  # noqa: BLE001
-        job.set_state(status=Job.ERROR, message=str(exc))
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
+
+
+@shared_task(bind=True)
+def init_building(self, job_id, building_id):
+    """Refonte (Lot 9) : chaîne automatique A1→A6 d'un bâtiment (réseau, léger en calcul)."""
+    from . import pipeline
+    job = Job.objects.get(pk=job_id)
+    job.celery_task_id = self.request.id or ''
+    job.save(update_fields=['celery_task_id'])
+    try:
+        building = Building.objects.get(pk=building_id)
+        Building.objects.filter(pk=building_id).update(pipeline_status='en_cours')
+        job.set_state(status=Job.RUNNING, progress=1, message="Initialisation…")
+        report = pipeline.initialize(building, progress=lambda m, p: job.set_state(progress=p, message=m))
+        after_init(building, job)
+        job.result = {'building_id': building.pk, 'pipeline_status': building.pipeline_status,
+                      'steps': report['steps']}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100,
+                      message='Fiche initiale prête.' if building.pipeline_status == 'complet'
+                      else 'Fiche initiale incomplète (voir les étapes).')
+    except Exception as exc:
+        Building.objects.filter(pk=building_id).update(pipeline_status='incomplet')
+        job.set_state(status=Job.ERROR, message=net.public_message(exc))
+
+
+def after_init(building, job):
+    """Suite de la chaîne (A7→A9) : météo de l'année type du site, calculs N0 puis N1."""
+    from . import calc_service
+    if building.georef_lat is None:
+        return None
+    try:
+        job.set_state(progress=96, message="Météo et calculs N0 / N1…")
+        for lvl in ('N0', 'N1'):
+            calc_service.run_level(building, lvl, owner_sub=job.owner_sub, job=None)
+    except calc_service.CalcError as exc:
+        pipe = dict(building.pipeline or {})
+        pipe.setdefault('steps', {})['A8'] = {'ok': False, 'error': str(exc)[:300]}
+        building.pipeline = pipe
+        building.pipeline_status = 'incomplet'
+        building.save(update_fields=['pipeline', 'pipeline_status'])
+        return None
+    pipe = dict(building.pipeline or {})
+    pipe.setdefault('steps', {})['A8'] = {'ok': True}
+    building.pipeline = pipe
+    building.save(update_fields=['pipeline'])
+    return None
+
+
+@shared_task(bind=True, acks_late=True)
+def process_parc_next(self, portfolio_id, owner_sub=''):
+    """Refonte (Lot 11) : traite UN bâtiment du parc puis se replanifie (file `parc`, D13) — un job
+    interactif en attente sur la file `celery` passe avant le bâtiment suivant."""
+    from . import parc
+    b = parc.next_building(portfolio_id)
+    if b is None:
+        return 'fini'
+    parc.process_one(b, owner_sub=owner_sub)
+    process_parc_next.apply_async(args=[portfolio_id, owner_sub], queue='parc')
+    return b.pk
+
+
+@shared_task(bind=True)
+def build_weather_dataset(self, job_id, params):
+    """Refonte (Lot 13) : construit un jeu météo (réseau) — année type, réanalyse, station, TRACC."""
+    from datetime import date as _date
+    from . import weather_service as ws
+    job = Job.objects.get(pk=job_id)
+    try:
+        job.set_state(status=Job.RUNNING, progress=5, message='Récupération des données météo…')
+        kind, lat, lon, owner = params['type'], params['lat'], params['lon'], job.owner_sub
+        if kind == 'tmy':
+            ds = ws.from_tmy(lat, lon, owner)
+        elif kind == 'reel':
+            ds = ws.from_reanalysis(lat, lon, _date.fromisoformat(params['start']), _date.fromisoformat(params['end']), owner)
+        elif kind == 'station':
+            job.set_state(progress=10, message='Lecture des fichiers horaires Météo-France (en flux)…')
+            ds = ws.from_station(params['station'], _date.fromisoformat(params['start']), _date.fromisoformat(params['end']), owner)
+        elif kind == 'tracc':
+            ds = ws.from_tracc(lat, lon, params['scenario'], owner)
+        else:
+            raise ws.WeatherError('Type de météo inconnu.')
+        job.result = {'dataset_id': ds.pk, 'label': ds.label}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100, message=f'« {ds.label} » prêt.')
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=net.public_message(exc, 'Météo indisponible.'))
+
+
+@shared_task(bind=True)
+def list_weather_stations(self, job_id, params):
+    """Refonte (Lot 13) : stations Météo-France proches (première fois par département : lecture en flux)."""
+    from . import weather_service as ws
+    job = Job.objects.get(pk=job_id)
+    try:
+        job.set_state(status=Job.RUNNING, progress=10, message='Recherche des stations Météo-France…')
+        stations = ws.stations_near(params['lat'], params['lon'], params.get('alt'))
+        job.result = {'stations': stations}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100, message=f'{len(stations)} station(s) à moins de {ws.STATION_MAX_KM} km.')
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=net.public_message(exc, 'Stations indisponibles.'))
+
+
+@shared_task(bind=True)
+def calibrate_building(self, job_id, building_id, measurement_id, dataset_id=None):
+    """Refonte (Lot 17) : calage sur factures (météo réelle de la période). Rend une proposition ;
+    rien n'est écrit dans la fiche avant que la personne ne l'applique."""
+    from datetime import date as _date
+    from . import calibration, geometry_service, weather_service as ws
+    from .models import Measurement, WeatherDataset
+    job = Job.objects.get(pk=job_id)
+    try:
+        job.set_state(status=Job.RUNNING, progress=5, message='Météo réelle de la période facturée…')
+        b = Building.objects.get(pk=building_id)
+        m = Measurement.objects.get(pk=measurement_id, building=b)
+        bills = m.values
+        start, end = calibration.period_bounds(bills)
+        chosen = b.weather_dataset if (not dataset_id and b.weather_dataset_id and b.weather_dataset.kind in
+                                         ('reel', 'station', 'import') and b.weather_dataset.meta.get('start')) else None
+        if chosen is not None and not (chosen.meta['start'] <= start.isoformat() and
+                                       (chosen.meta.get('end') or '9999') >= end.isoformat()):
+            chosen = None  # la météo retenue ne couvre pas la période facturée
+        if dataset_id or chosen is not None:
+            ds = chosen or WeatherDataset.objects.get(pk=dataset_id)
+            weather = ws.slice_period(ds.series, start.isoformat(), end.isoformat(), ds)
+            wlabel = ds.label
+        else:
+            ds = ws.from_reanalysis(b.georef_lat, b.georef_lon, start, end, job.owner_sub)
+            weather, wlabel = ds.series, ds.label
+        job.set_state(progress=25, message='Sensibilité (Morris) puis optimisation…')
+        report = calibration.calibrate(b, bills, m.energy or 'gaz', weather, geom=geometry_service.effective_summary(b))
+        report['weather'] = wlabel
+        report['measurement_id'] = m.pk
+        job.result = report
+        job.save(update_fields=['result'])
+        msg = ('Calage conforme (ASHRAE 14)' if report.get('ok') else 'Calage hors critères') if report.get('after') else report.get('reason', '')
+        job.set_state(status=Job.DONE, progress=100, message=msg)
+    except Exception as exc:
+        job.set_state(status=Job.ERROR, message=net.public_message(exc, 'Calage impossible.'))
+
+
+@shared_task(bind=True)
+def extract_document(self, job_id, run_id):
+    """Refonte (Lot 21) : lecture d'un document par l'IA, avec la clé de la personne qui l'a demandée
+    (job.owner_sub == document.owner_sub, vérifié par la vue et revérifié ici)."""
+    from . import documents
+    from .ia import fournisseurs, registre
+    from .models import AIExtractionRun, AiKeyVault
+    job = Job.objects.get(pk=job_id)
+    run = AIExtractionRun.objects.select_related('document__building').get(pk=run_id)
+    doc = run.document
+    try:
+        if not (job.owner_sub and job.owner_sub == run.owner_sub == doc.owner_sub):
+            raise ValueError('owner')
+        job.set_state(status=Job.RUNNING, progress=10, message='Lecture du document par l’IA…')
+        vault = AiKeyVault.objects.filter(owner_sub=job.owner_sub).first()
+        key = getattr(vault, registre.FOURNISSEURS[run.provider]['champ'], '') if vault else ''
+        if not key:
+            raise documents.DocumentError('Aucune clé configurée pour ce fournisseur (page « Intelligence artificielle »).')
+        rows, usage = documents.run_extraction(run.provider, key, run.model, doc.pages, run.pages_sent)
+        del key
+        props = documents.make_proposals(run, doc.building, rows, doc.pages)
+        run.tokens_input, run.tokens_output = usage['input_tokens'], usage['output_tokens']
+        run.status, run.message = 'DONE', f'{len(props)} proposition(s)'
+        run.save(update_fields=['tokens_input', 'tokens_output', 'status', 'message'])
+        job.result = {'run_id': run.pk, 'proposals': len(props)}
+        job.save(update_fields=['result'])
+        job.set_state(status=Job.DONE, progress=100, message=f'{len(props)} fait(s) proposé(s) : à valider.')
+    except fournisseurs.ErreurFournisseur as exc:
+        msg = exc.message or 'Document trop long pour ce modèle : envoyez moins de pages.'
+        run.status, run.message = 'ERROR', msg[:500]
+        run.save(update_fields=['status', 'message'])
+        job.set_state(status=Job.ERROR, message=msg[:500])
+    except Exception as exc:  # noqa: BLE001 — message fixe, jamais la clé ni le texte d'une exception réseau
+        msg = str(exc) if isinstance(exc, documents.DocumentError) else 'Lecture impossible.'
+        run.status, run.message = 'ERROR', msg[:500]
+        run.save(update_fields=['status', 'message'])
+        job.set_state(status=Job.ERROR, message=msg[:500])

@@ -1,0 +1,80 @@
+import { Component, Input, OnChanges, inject, signal, output } from '@angular/core';
+import { DatePipe, DecimalPipe } from '@angular/common';
+import { RefonteApiService } from '../../core/refonte-api.service';
+
+export interface RunCompact {
+  id: number; level: 'N0' | 'N1' | 'N2'; status: string; created_at: string; up_to_date?: boolean | null;
+  indicators: Record<string, number | string | null>;
+  weather: { source?: string; n_hours?: number; warning?: string | null };
+  results: { monthly_heating_kwh?: number[]; balance?: Record<string, number>; t_op_max?: number;
+             inputs_summary?: Record<string, number> };
+  duration_s: number | null;
+}
+type Latest = Record<'N0' | 'N1' | 'N2', RunCompact | null>;
+
+const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+const BALANCE: Record<string, string> = {
+  transmission_kwh: 'Pertes par les parois', ventilation_kwh: 'Pertes par l’air',
+  solar_windows_kwh: 'Apports solaires (baies)', solar_opaque_kwh: 'Apports solaires (parois)', internal_kwh: 'Apports internes',
+};
+
+/** Résultat courant d'un bâtiment (refonte, Lot 10) : N1 en tête, N0 en contrôle, provenance du calcul. */
+@Component({
+  selector: 'app-resultat-carte',
+  standalone: true,
+  imports: [DecimalPipe, DatePipe],
+  templateUrl: './resultat-carte.component.html',
+  styleUrl: './resultat-carte.component.scss',
+})
+export class ResultatCarteComponent implements OnChanges {
+  @Input({ required: true }) buildingId!: number;
+  @Input() scenarioId: number | null = null;
+  /** Incrémenté par la page quand la fiche change : relit l'état « à jour / périmé ». */
+  @Input() refresh = 0;
+  computed = output<void>();
+  private rf = inject(RefonteApiService);
+  latest = signal<Latest | null>(null);
+  busy = signal(false);
+  error = signal('');
+  months = MONTHS;
+  balanceLabels = BALANCE;
+
+  ngOnChanges(): void { this.load(); }
+
+  load(): void {
+    const q = this.scenarioId ? `?scenario=${this.scenarioId}` : '';
+    this.rf.get<Latest>(`/batiments/${this.buildingId}/resultat/${q}`).subscribe({
+      next: l => this.latest.set(l), error: () => this.latest.set(null),
+    });
+  }
+
+  compute(force = false): void {
+    this.busy.set(true);
+    this.error.set('');
+    this.rf.post(`/batiments/${this.buildingId}/calculer/`, { niveaux: ['N0', 'N1'], scenario: this.scenarioId, force }).subscribe({
+      next: () => { this.busy.set(false); this.load(); this.computed.emit(); },
+      error: e => { this.busy.set(false); this.error.set(e?.error?.detail ?? 'Calcul impossible.'); },
+    });
+  }
+
+  num(r: RunCompact | null | undefined, k: string): number | null {
+    const v = r?.indicators?.[k];
+    return typeof v === 'number' ? v : null;
+  }
+
+  bars(r: RunCompact): { m: string; v: number; h: number }[] {
+    const m = r.results.monthly_heating_kwh ?? [];
+    const max = Math.max(1, ...m);
+    return m.map((v, i) => ({ m: MONTHS[i] ?? String(i + 1), v, h: Math.round((v / max) * 100) }));
+  }
+
+  balance(r: RunCompact): { k: string; label: string; v: number }[] {
+    const b = r.results.balance ?? {};
+    return Object.keys(BALANCE).filter(k => b[k] !== undefined).map(k => ({ k, label: BALANCE[k], v: b[k] }));
+  }
+
+  gap(): number | null {
+    const a = this.num(this.latest()?.N1, 'heating_kwh'), b = this.num(this.latest()?.N0, 'heating_kwh');
+    return a && b ? Math.round((b / a - 1) * 100) : null;
+  }
+}

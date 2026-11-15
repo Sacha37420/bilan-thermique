@@ -1,5 +1,7 @@
 from django.db import models
 
+from .fields import EncryptedTextField
+
 
 class Department(models.Model):
     """Département ou équipe de l'organisation."""
@@ -114,6 +116,11 @@ class Environment(models.Model):
     # Compte rendu de génération : source (lidar / repli BD TOPO-OSM), dalles et
     # dates d'acquisition LiDAR, statistiques, avertissements.
     generation = models.JSONField(default=dict, blank=True)
+    # Lot 3 (refonte, point L6) : régénérer l'environnement d'un bâtiment ne laisse plus
+    # s'accumuler les anciens. L'ancien n'est pas supprimé (il peut porter des retraits ou
+    # remplacements d'objets faits à la main) : il est marqué remplacé et sort de la liste.
+    replaced_by = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name='replaces')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -124,6 +131,61 @@ class Environment(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class WeatherDataset(models.Model):
+    """Série météo horaire partagée (refonte, Lot 13 — api.weather_service). Stockée une fois par
+    empreinte de la série ; un fichier importé n'est pas gardé, seule la série lue l'est."""
+
+    KINDS = [('tmy', 'Année type'), ('reel', 'Période réelle (réanalyse)'), ('station', 'Station Météo-France'),
+             ('tracc', 'Climat futur TRACC'), ('import', 'Import')]
+    kind = models.CharField(max_length=10, choices=KINDS)
+    label = models.CharField(max_length=200)
+    lat = models.FloatField(null=True, blank=True)
+    lon = models.FloatField(null=True, blank=True)
+    series = models.JSONField(default=list)
+    series_hash = models.CharField(max_length=64, unique=True)
+    stats = models.JSONField(default=dict, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+    quality = models.JSONField(default=dict, blank=True)
+    owner_sub = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'weather_datasets'
+        ordering = ['-created_at']
+
+
+class Portfolio(models.Model):
+    """Parc de bâtiments (refonte, Lot 11). Rôles par personne (`sub`) dans `PortfolioMember`."""
+
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    owner_sub = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'portfolios'
+        ordering = ['name']
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PortfolioMember(models.Model):
+    GESTIONNAIRE_PARC, GESTIONNAIRE_BAT, LECTEUR = 'gestionnaire_parc', 'gestionnaire_bat', 'lecteur'
+    ROLES = [(GESTIONNAIRE_PARC, 'Gestionnaire de parc'), (GESTIONNAIRE_BAT, 'Gestionnaire de bâtiment'),
+             (LECTEUR, 'Lecteur')]
+    portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, related_name='members')
+    sub = models.CharField(max_length=64)
+    display_name = models.CharField(max_length=150, blank=True)
+    role = models.CharField(max_length=20, choices=ROLES)
+    added_by = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'portfolio_members'
+        constraints = [models.UniqueConstraint(fields=['portfolio', 'sub'], name='portfolio_member_unique')]
 
 
 class Building(models.Model):
@@ -154,12 +216,16 @@ class Building(models.Model):
     a changé depuis (voir Building.sun_visibility_stale).
     """
 
-    name = models.CharField(max_length=150, unique=True)
+    # Refonte (Lot 11) : unique par parc, et parmi les bâtiments sans parc (contraintes plus bas).
+    name = models.CharField(max_length=150)
     description = models.TextField(blank=True)
     envelope = models.JSONField(default=dict, blank=True)
     environment = models.ForeignKey(
         Environment, null=True, blank=True, on_delete=models.SET_NULL, related_name='buildings',
     )
+    # Refonte (Lot 11) : parc de rattachement ; vide = bâtiment commun de l'app (comme avant).
+    portfolio = models.ForeignKey('Portfolio', null=True, blank=True, on_delete=models.CASCADE,
+                                  related_name='buildings')
 
     # Géoréférencement (optionnel) — ancre le repère local du bâtiment (0,0 = ce point,
     # +Y = ce cap réel) dans le monde réel, pour que la génération automatique
@@ -195,12 +261,32 @@ class Building(models.Model):
 
     sun_visibility = models.JSONField(default=dict, blank=True)
     sun_visibility_stale = models.BooleanField(default=True)
+
+    # Refonte (Lot 13) : météo retenue pour les calculs N0/N1 (vide = année type du site).
+    weather_dataset = models.ForeignKey('WeatherDataset', null=True, blank=True, on_delete=models.SET_NULL,
+                                        related_name='buildings')
+    # Refonte (Lot 9) : chaîne automatique (api.pipeline).
+    rnb_id = models.CharField(max_length=20, blank=True, default='', db_index=True)
+    address = models.CharField(max_length=300, blank=True, default='')
+    pipeline_status = models.CharField(max_length=12, blank=True, default='')  # '' | en_attente | en_cours | complet | incomplet
+    # Compte rendu : étapes (ok / erreur, message fixe), géométrie simplifiée, horizon par façade.
+    pipeline = models.JSONField(default=dict, blank=True)
+
+    # Refonte (Lot 8) : scores de la fiche effective (api.facts.scores), tenus à jour à chaque fait.
+    confidence = models.FloatField(default=0.0)
+    completeness = models.FloatField(default=0.0)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'buildings'
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(fields=['portfolio', 'name'], name='building_name_per_portfolio'),
+            models.UniqueConstraint(fields=['name'], condition=models.Q(portfolio__isnull=True),
+                                    name='building_name_common'),
+        ]
 
     def __str__(self) -> str:
         return self.name
@@ -227,6 +313,10 @@ class Job(models.Model):
     celery_task_id = models.CharField(max_length=100, blank=True)
     params = models.JSONField(default=dict, blank=True)
     result = models.JSONField(null=True, blank=True)
+    # Lot 2 (refonte) : qui a lancé le job (`sub` Keycloak, vide pour un job d'avant la refonte
+    # ou lancé par le système). Sert à ne rendre un job qu'à celui qui l'a lancé, et à garder les
+    # traitements faits avec la clé d'IA d'un utilisateur pour cet utilisateur seul.
+    owner_sub = models.CharField(max_length=64, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -245,3 +335,328 @@ class Job(models.Model):
 
     def __str__(self) -> str:
         return f"{self.kind} #{self.pk} [{self.status}]"
+
+
+class CalcRun(models.Model):
+    """Un calcul passé, rechargeable sans recalcul (Lot 3, refonte — point U3).
+
+    Un par calcul terminé ou en cours, quel que soit le niveau :
+    - N0 : bilan statique mensuel (Lot 10) ; N1 : horaire réduit 5R1C (Lot 10) ;
+    - N2 : FEM par triangle (`building_solver`, existant, lancé par Calcul 3D).
+
+    `inputs_hash` : empreinte des entrées (fiche effective + météo + réglages) — dit si un résultat
+    est à jour et évite de refaire un calcul identique. `indicators` : les chiffres du tableau de
+    parc (petits, indexables) ; `results` : le résultat complet (séries horaires comprises), lu
+    seulement sur la fiche d'un calcul.
+    """
+
+    N0, N1, N2 = 'N0', 'N1', 'N2'
+    LEVEL_CHOICES = [(N0, 'N0 — statique mensuel'), (N1, 'N1 — horaire réduit'), (N2, 'N2 — FEM 3D')]
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='calc_runs')
+    # Variante (Lot 18) ; vide = état actuel (base).
+    scenario = models.ForeignKey('Scenario', null=True, blank=True, on_delete=models.CASCADE, related_name='calc_runs')
+    level = models.CharField(max_length=2, choices=LEVEL_CHOICES)
+    status = models.CharField(max_length=10, choices=Job.STATUS_CHOICES, default=Job.PENDING)
+    job = models.ForeignKey(Job, null=True, blank=True, on_delete=models.SET_NULL, related_name='calc_runs')
+    # Météo : description (source, lieu, période, empreinte de la série).
+    weather = models.JSONField(default=dict, blank=True)
+    inputs_hash = models.CharField(max_length=64, blank=True, db_index=True)
+    # Réglages du calcul (sans la série météo, qui peut peser plusieurs Mo).
+    settings = models.JSONField(default=dict, blank=True)
+    indicators = models.JSONField(default=dict, blank=True)
+    results = models.JSONField(null=True, blank=True)
+    message = models.CharField(max_length=500, blank=True)
+    duration_s = models.FloatField(null=True, blank=True)
+    owner_sub = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'calc_runs'
+        ordering = ['-created_at']
+        constraints = [
+            # Verrou du § 8 : au plus un calcul actif par (bâtiment, variante, niveau).
+            models.UniqueConstraint(
+                fields=['building', 'scenario', 'level'],
+                condition=models.Q(status__in=['PENDING', 'RUNNING']),
+                nulls_distinct=False,
+                name='calc_run_one_active',
+            ),
+        ]
+        indexes = [models.Index(fields=['building', 'level', '-created_at'])]
+
+    def __str__(self) -> str:
+        return f"{self.level} #{self.pk} bâtiment {self.building_id} [{self.status}]"
+
+
+class Scenario(models.Model):
+    """Variante d'un bâtiment (refonte, principe 4) : ne stocke que ses différences, sous forme de
+    faits rattachés à la variante (`BuildingFact.scenario`). La base (état actuel) n'a pas de ligne."""
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='scenarios')
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='children')
+    # Météo propre à la variante (climat futur…), sinon celle de la base.
+    weather = models.JSONField(default=dict, blank=True)
+    author_sub = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'scenarios'
+        ordering = ['building', 'created_at']
+
+    def __str__(self) -> str:
+        return f"{self.name} (bâtiment {self.building_id})"
+
+
+class BuildingFact(models.Model):
+    """Une valeur d'une clé de la fiche, avec sa provenance (Lot 8, refonte). Voir api.facts."""
+
+    METHODS = [('mesure', 'Mesuré'), ('document', 'Document'), ('declare', 'Déclaré'),
+               ('infere', 'Inféré'), ('defaut', 'Défaut')]
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='facts')
+    scenario = models.ForeignKey(Scenario, null=True, blank=True, on_delete=models.CASCADE, related_name='facts')
+    key = models.CharField(max_length=80)
+    value = models.JSONField(null=True, blank=True)
+    unit = models.CharField(max_length=20, blank=True)
+    method = models.CharField(max_length=10, choices=METHODS)
+    source = models.CharField(max_length=300, blank=True)
+    confidence = models.FloatField(default=0.5)
+    # Personne : `sub` Keycloak (identité) ; `author_name` n'est qu'un affichage.
+    author_sub = models.CharField(max_length=64, blank=True, default='')
+    author_name = models.CharField(max_length=150, blank=True, default='')
+    # Extrait cité (document lu, Lot 21) : {document_id, page, texte}.
+    extract = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    retired_at = models.DateTimeField(null=True, blank=True)
+    retired_by = models.CharField(max_length=64, blank=True, default='')
+    superseded_by = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL,
+                                      related_name='supersedes')
+
+    class Meta:
+        db_table = 'building_facts'
+        ordering = ['building', 'key', '-created_at']
+        indexes = [models.Index(fields=['building', 'key'])]
+
+    def __str__(self) -> str:
+        return f"{self.key}={self.value!r} [{self.method}] bâtiment {self.building_id}"
+
+
+class SourceCache(models.Model):
+    """Réponse d'un service open data, gardée par clé (Lot 9, refonte — api.sources)."""
+
+    key = models.CharField(max_length=300, unique=True)
+    service = models.CharField(max_length=30, blank=True)
+    payload = models.JSONField(null=True, blank=True)
+    fetched_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'source_cache'
+
+
+class BuildingAccess(models.Model):
+    """Bâtiment confié à une personne (refonte, Lot 11) : gestionnaire ou occupant (D2)."""
+
+    GESTIONNAIRE, OCCUPANT = 'gestionnaire', 'occupant'
+    ROLES = [(GESTIONNAIRE, 'Gestionnaire du bâtiment'), (OCCUPANT, 'Occupant')]
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='accesses')
+    sub = models.CharField(max_length=64)
+    display_name = models.CharField(max_length=150, blank=True)
+    role = models.CharField(max_length=20, choices=ROLES)
+    added_by = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'building_accesses'
+        constraints = [models.UniqueConstraint(fields=['building', 'sub'], name='building_access_unique')]
+
+
+class Invitation(models.Model):
+    """Invitation par code à un parc ou à un bâtiment (refonte, Lot 11). Aucun annuaire : la personne
+    invitée ouvre le lien avec son compte, et c'est son `sub` qui est enregistré. Seule l'empreinte
+    du code est gardée."""
+
+    portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, related_name='invitations')
+    building = models.ForeignKey(Building, null=True, blank=True, on_delete=models.CASCADE, related_name='invitations')
+    role = models.CharField(max_length=20)
+    token_hash = models.CharField(max_length=64, unique=True)
+    prefix = models.CharField(max_length=12)
+    created_by = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    max_uses = models.PositiveIntegerField(default=1)
+    uses = models.PositiveIntegerField(default=0)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'invitations'
+
+
+class ShadingDevice(models.Model):
+    """Protection solaire d'un bâtiment (refonte, Lot 14 — api.engines.shading, api.shading_service).
+
+    orientation : façade visée (N/E/S/O) ou `all` ; mode : `parametrique` (facteur horaire, N0/N1) ou
+    `geometrique` (obstacles ajoutés au lancer de rayons du N2, et facteur paramétrique pour N0/N1)."""
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='shading_devices')
+    scenario = models.ForeignKey('Scenario', null=True, blank=True, on_delete=models.CASCADE, related_name='shading_devices')
+    kind = models.CharField(max_length=20)
+    orientation = models.CharField(max_length=3)
+    mode = models.CharField(max_length=12, default='parametrique')
+    label = models.CharField(max_length=150, blank=True)
+    params = models.JSONField(default=dict, blank=True)
+    control = models.JSONField(default=dict, blank=True)
+    author_sub = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'shading_devices'
+        ordering = ['building', 'orientation', 'created_at']
+
+
+class GeometryEdit(models.Model):
+    """Géométrie corrigée d'un bâtiment (refonte, Lot 15 — api.geometry_service) : une surcharge de la
+    géométrie automatique (BD TOPO), qui reste en mémoire ; la retirer revient à l'automatique."""
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='geometry_edits')
+    scenario = models.ForeignKey('Scenario', null=True, blank=True, on_delete=models.CASCADE, related_name='geometry_edits')
+    footprint_xy = models.JSONField(default=list)
+    eave_height_m = models.FloatField()
+    levels = models.PositiveIntegerField()
+    roof_type = models.CharField(max_length=10, default='terrasse')
+    roof_pitch_deg = models.FloatField(default=0.0)
+    summary = models.JSONField(default=dict, blank=True)
+    envelope_regenerated = models.BooleanField(default=False)
+    author_sub = models.CharField(max_length=64, blank=True, default='')
+    author_name = models.CharField(max_length=150, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    retired_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'geometry_edits'
+        ordering = ['-created_at']
+
+
+class Measurement(models.Model):
+    """Mesure d'un bâtiment (refonte, Lot 17 — api.calibration) : factures, courbe de charge, sonde, test.
+    Donnée personnelle : visible de son auteur et des gestionnaires du bâtiment de parc. Le fichier
+    d'origine n'est pas gardé (seules les valeurs lues le sont, `DEMANDES_LAB.md` DL-2)."""
+
+    KINDS = [('facture', 'Factures'), ('courbe', 'Courbe de charge'), ('sonde', 'Sonde'), ('test', 'Test')]
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='measurements')
+    owner_sub = models.CharField(max_length=64)
+    kind = models.CharField(max_length=10, choices=KINDS)
+    energy = models.CharField(max_length=12, blank=True)
+    label = models.CharField(max_length=150, blank=True)
+    values = models.JSONField(default=list)
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'measurements'
+        ordering = ['-created_at']
+
+
+class AiKeyVault(models.Model):
+    """Coffre des clés d'IA d'une personne (refonte, Lot 21 — même forme qu'App Builder `0ff4e4e`).
+    Écart volontaire : l'identité est le `sub` Keycloak, pas l'email. Les clés sont chiffrées
+    (`VAULT_ENCRYPTION_KEY`) et ne servent qu'aux demandes de leur propriétaire."""
+
+    owner_sub = models.CharField(max_length=64, unique=True)
+    claude_key = EncryptedTextField(blank=True, default='')
+    mistral_key = EncryptedTextField(blank=True, default='')
+    albert_key = EncryptedTextField(blank=True, default='')
+    preferred_provider = models.CharField(max_length=20, blank=True, default='')
+    preferred_models = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ai_key_vault'
+
+
+class BuildingDocument(models.Model):
+    """Document d'un bâtiment (DPE XML ou PDF, audit, facture…) — donnée personnelle de son auteur.
+    L'original va dans `storage` (espace de la personne) quand c'est possible ; ici, seul le texte lu."""
+
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='documents')
+    owner_sub = models.CharField(max_length=64)
+    kind = models.CharField(max_length=10)            # xml_dpe | pdf | texte
+    filename = models.CharField(max_length=200)
+    size_bytes = models.PositiveIntegerField(default=0)
+    storage_path = models.CharField(max_length=400, blank=True)
+    pages = models.JSONField(default=list, blank=True)  # [texte de chaque page]
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'building_documents'
+        ordering = ['-created_at']
+
+
+class AIExtractionRun(models.Model):
+    """Une lecture d'un document (par l'IA ou localement pour un XML DPE). Jamais la clé."""
+
+    document = models.ForeignKey(BuildingDocument, on_delete=models.CASCADE, related_name='runs')
+    owner_sub = models.CharField(max_length=64)
+    provider = models.CharField(max_length=20)          # local | claude | mistral | albert | mcp
+    model = models.CharField(max_length=100, blank=True)
+    pages_sent = models.JSONField(default=list, blank=True)
+    tokens_estimated = models.PositiveIntegerField(default=0)
+    tokens_input = models.PositiveIntegerField(default=0)
+    tokens_output = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=10, default='PENDING')
+    message = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ai_extraction_runs'
+        ordering = ['-created_at']
+
+
+class FactProposal(models.Model):
+    """Fait proposé (par un document lu), en attente d'une décision humaine. Rien n'entre sans clic."""
+
+    run = models.ForeignKey(AIExtractionRun, on_delete=models.CASCADE, related_name='proposals')
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='proposals')
+    key = models.CharField(max_length=80)
+    value = models.JSONField(null=True)
+    unit = models.CharField(max_length=20, blank=True)
+    page = models.PositiveIntegerField(null=True, blank=True)
+    extract = models.CharField(max_length=500, blank=True)
+    control = models.CharField(max_length=20)   # ok | hors_plage | incoherent | extrait_introuvable | cle_inconnue
+    control_message = models.CharField(max_length=300, blank=True)
+    decision = models.CharField(max_length=12, default='en_attente')  # en_attente | acceptee | rejetee
+    decided_by = models.CharField(max_length=64, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    fact = models.ForeignKey(BuildingFact, null=True, blank=True, on_delete=models.SET_NULL, related_name='proposals')
+
+    class Meta:
+        db_table = 'fact_proposals'
+        ordering = ['run', 'key']
+
+
+class McpToken(models.Model):
+    """Jeton personnel du serveur MCP (refonte, Lot 22) — modèle d'App Builder `0ff4e4e` (`McpToken`),
+    identité par le `sub`. Seule l'empreinte sha256 est gardée ; `prefix` (« btt_ » + 8 caractères) le
+    reconnaît dans la liste. Lié à un bâtiment ou à un parc, il ne voit que lui."""
+
+    owner_sub = models.CharField(max_length=64, db_index=True)
+    owner_name = models.CharField(max_length=150, blank=True)
+    name = models.CharField(max_length=80)
+    prefix = models.CharField(max_length=12)
+    token_hash = models.CharField(max_length=64, unique=True)
+    scope = models.CharField(max_length=10, default='lire')          # lire | ecrire
+    building = models.ForeignKey(Building, null=True, blank=True, on_delete=models.CASCADE, related_name='mcp_tokens')
+    portfolio = models.ForeignKey(Portfolio, null=True, blank=True, on_delete=models.CASCADE, related_name='mcp_tokens')
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'mcp_tokens'
+
+    def __str__(self):
+        return f'{self.prefix}…'

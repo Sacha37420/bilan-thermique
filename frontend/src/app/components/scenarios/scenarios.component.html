@@ -1,0 +1,61 @@
+<section class="rf-card" aria-labelledby="sc-title">
+  <div class="rf-card-head"><h2 id="sc-title">Scénarios de travaux</h2></div>
+  <p class="rf-hint">Une variante ne garde que ses différences avec l'état actuel ; la fiche de base ne change pas.</p>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  <ul class="scs">
+    @for (s of list(); track s.id) {
+      <li>
+        <label class="check"><input type="checkbox" [(ngModel)]="selected[s.id]" [attr.aria-label]="'Comparer ' + s.name"> <strong>{{ s.name }}</strong></label>
+        <small>@for (b of s.bundles; track b) { {{ label(b) }}@if (!$last) { · } }</small>
+        <button type="button" class="rf-btn small danger" (click)="remove(s)">Supprimer</button>
+      </li>
+    } @empty { <li class="rf-hint">Aucune variante.</li> }
+  </ul>
+  <details>
+    <summary>Nouvelle variante</summary>
+    <div class="bundles">
+      @for (b of bundles(); track b.key) {
+        <label class="check"><input type="checkbox" [(ngModel)]="picked[b.key]"> {{ b.label }}</label>
+      }
+    </div>
+    <div class="rf-row">
+      <label class="rf-field grow"><span>Nom (facultatif)</span><input type="text" [(ngModel)]="name"></label>
+      <button type="button" class="rf-btn primary" (click)="create()">Créer la variante</button>
+    </div>
+  </details>
+  <div class="rf-row cmp">
+    @if (futures().length) {
+      <label class="rf-field grow"><span>Comparer aussi sous un climat futur</span>
+        <select [(ngModel)]="futureId"><option [ngValue]="null">— non —</option>
+          @for (d of futures(); track d.id) { <option [ngValue]="d.id">{{ d.label }}</option> }</select></label>
+    }
+    <button type="button" class="rf-btn primary" (click)="compare()" [disabled]="busy()">{{ busy() ? 'Calcul…' : 'Comparer à l’état actuel' }}</button>
+  </div>
+  @if (rows(); as rs) {
+    <div class="rf-table-wrap">
+      <table class="rf-table">
+        <thead><tr><th>Variante</th><th>Météo</th><th class="num">Besoin kWh/m²</th><th class="num">EP kWh/m²</th><th class="num">CO₂ kg/m²</th>
+          <th class="num">Coût €/an</th><th class="num">h &gt; 28 °C</th><th>Étiquette</th></tr></thead>
+        <tbody>
+          @for (r of rs; track $index) {
+            <tr><td><strong>{{ r.scenario_name }}</strong></td><td><small>{{ r.weather_label }}</small></td>
+              @if (r.error) { <td colspan="6" class="rf-error">{{ r.error }}</td> } @else {
+                <td class="num"><span class="bar"><i [style.width.%]="(n(r, 'heating_kwh_m2') / max('heating_kwh_m2')) * 100"></i></span>{{ n(r, 'heating_kwh_m2') | number: '1.0-0' }}
+                  <small>{{ n(r, 'heating_kwh_m2_p10') | number: '1.0-0' }}–{{ n(r, 'heating_kwh_m2_p90') | number: '1.0-0' }}</small></td>
+                <td class="num">{{ n(r, 'primary_kwh_m2') | number: '1.0-0' }}</td>
+                <td class="num">{{ n(r, 'co2_kg_m2') | number: '1.0-0' }}</td>
+                <td class="num">{{ n(r, 'cost_eur') | number: '1.0-0' }}</td>
+                <td class="num">{{ n(r, 'hours_over_28') }}</td>
+                <td><span class="dpe" [attr.data-l]="r.indicators['dpe_label_model']">{{ r.indicators['dpe_label_model'] }}</span></td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    @if (vigilance().length) {
+      <h3>Points de vigilance (non thermiques)</h3>
+      <ul class="vig">@for (v of vigilance(); track $index) { <li><strong>{{ v.bundle }}</strong> — {{ v.message }}</li> }</ul>
+    }
+  }
+</section>

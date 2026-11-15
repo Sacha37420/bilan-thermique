@@ -53,6 +53,42 @@ MAX_REALTIME_RAYCAST_OPS = 2_000_000
 # combiné à un planning de ventilation à 24 valeurs toutes distinctes — marge
 # large.
 MAX_DISTINCT_BOUNDARY_COMBOS = 2000
+# Lot 2 (refonte) — passe végétation du mode temps réel : pour chaque rayon qui a passé le test
+# opaque, un second lancer `multiple_hits=True` traverse la végétation (shadow.VegetationScene).
+# Il n'était pas compté dans le coût estimé (point L5 du journal). Poids : un lancer à impacts
+# multiples parcourt la scène jusqu'au bout au lieu de s'arrêter au premier impact ; on le compte
+# pour deux lancers simples — estimation prudente, pas une mesure fine.
+VEGETATION_PASS_WEIGHT = 2.0
+
+
+def envelope_has_vegetation(*envelopes):
+    """Au moins un triangle translucide (végétation, Lot Z) dans ces enveloppes."""
+    for env in envelopes:
+        for tri in (env or {}).get('triangles', []) or []:
+            if shadow._is_translucent(tri):
+                return True
+    return False
+
+
+def realtime_raycast_ops(n_triangles, n_hours, has_vegetation):
+    """Coût estimé du mode temps réel, en lancers de rayons simples."""
+    weight = 1.0 + (VEGETATION_PASS_WEIGHT if has_vegetation else 0.0)
+    return int(n_triangles * n_hours * weight)
+
+
+def check_realtime_cost(building_envelope, environment_envelope, n_hours):
+    """Lève BuildingSimulationError si le mode temps réel dépasse le garde-fou."""
+    n_tri = len((building_envelope or {}).get('triangles', []) or [])
+    veg = envelope_has_vegetation(building_envelope, environment_envelope)
+    ops = realtime_raycast_ops(n_tri, n_hours, veg)
+    if ops > MAX_REALTIME_RAYCAST_OPS:
+        detail = ' (végétation comprise)' if veg else ''
+        raise BuildingSimulationError(
+            f"{n_tri} triangles × {n_hours} heures{detail} : coût estimé {ops} lancers de rayons, "
+            f"au-delà de la limite du mode temps réel ({MAX_REALTIME_RAYCAST_OPS}) — utiliser le mode "
+            "précalculé, ou réduire le maillage/la période."
+        )
+    return ops
 
 
 class BuildingSimulationError(ValueError):
@@ -349,6 +385,8 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
         else:
             e_dir_i, e_dif_i = e_dir, e_dif
         e_glo = e_dir_i * cos_ti + e_dif_i * f_ciel
+        if geom.get('boundary') == 'adiabatic':
+            e_glo = 0.0  # mitoyen (Lot 12) : face extérieure contre le voisin, jamais au soleil
         # Lot AI : réflexion par le sol (albédo relevé), traitée comme du diffus —
         # y compris vis-à-vis d'un store fermé (même facteur que e_dif).
         if ground_reflect_factor is not None and ground_reflect_factor[i]:
@@ -628,11 +666,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         raise BuildingSimulationError("La série météo est vide.")
     if shadow_mode not in ('precomputed', 'realtime'):
         raise BuildingSimulationError(f"shadow_mode inconnu : {shadow_mode!r}")
-    if shadow_mode == 'realtime' and len(triangles) * len(weather) > MAX_REALTIME_RAYCAST_OPS:
-        raise BuildingSimulationError(
-            f"{len(triangles)} triangles × {len(weather)} heures dépasse la limite du mode temps réel "
-            f"({MAX_REALTIME_RAYCAST_OPS} — utiliser le mode précalculé, ou réduire le maillage/la période)."
-        )
+    if shadow_mode == 'realtime':
+        check_realtime_cost(building_envelope, environment_envelope, len(weather))
     if h_e_dynamic:
         # Garde-fou défensif — le serializer valide déjà ceci, mais
         # run_building_simulation reste appelable directement (voir tests.py).
@@ -723,6 +758,9 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # résistance du sol, constante dans le temps (ni vent, ni planning).
     is_ground = [tri.get('boundary') == 'ground' for tri in triangles]
     h_ground = h_ground_from_r(payload.get('r_ground', DEFAULT_R_GROUND))
+    # Refonte (Lot 12, E9) : paroi mitoyenne contre un local chauffé — adiabatique : aucun échange
+    # côté extérieur (flux nul), aucun ensoleillement. Elle garde sa capacité et sa conduction.
+    is_adiabatic = [tri.get('boundary') == 'adiabatic' for tri in triangles]
 
     shading_delta_r = []
     shading_fs_dir = []
@@ -817,6 +855,14 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     T = np.full(n_dof, float(t_init))
     t_air_series = [float(T[air_idx])]
+    # Refonte (Lot 20) : température radiante moyenne = moyenne des faces intérieures pondérée par
+    # l'aire (approximation usuelle sans facteurs de forme), et température opérative
+    # θ_op = (θ_air + θ_rm) / 2 (air calme, ISO 7730) — même grandeur de confort que le N1.
+    inner_idx = np.array([offsets[i] + systems[i][0]['n_wall_nodes'] - 1 for i in range(len(systems))])
+    inner_w = np.array(areas, dtype=float)
+    inner_w = inner_w / max(inner_w.sum(), 1e-12)
+    t_mrt_series = [float(T[inner_idx] @ inner_w)]
+    t_op_series = [0.5 * (t_air_series[0] + t_mrt_series[0])]
     heating_j = 0.0
     cooling_j = 0.0
     flux_series = []  # flux net (W) de l'enveloppe vers l'intérieur, par heure
@@ -907,7 +953,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             # Un triangle 'ground' (Lot AB3) est hors de ces deux mécanismes :
             # ni vent (h_e), ni volet — la terre, pas l'air extérieur.
             h_e_vec = [
-                h_ground if is_ground[i]
+                0.0 if is_adiabatic[i]
+                else h_ground if is_ground[i]
                 else (1.0 / (1.0 / h_e + shading_delta_r[i]) if volet_closed else h_e)
                 for i in range(len(triangles))
             ]
@@ -1006,6 +1053,9 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
         T = T_next
         t_air_series.append(float(t_air_next))
+        t_mrt = float(T[inner_idx] @ inner_w)
+        t_mrt_series.append(t_mrt)
+        t_op_series.append(0.5 * (float(t_air_next) + t_mrt))
 
         if progress_cb:
             progress_cb(hour_idx + 1, n_hours_total)
@@ -1039,6 +1089,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         'hours': len(weather),
         'balance': balance,
         't_air': t_air_series,
+        't_mrt': t_mrt_series,
+        't_op': t_op_series,
         't_air_mean': float(t_air_arr.mean()),
         'heating_kwh': heating_j / 3.6e6,
         'cooling_kwh': cooling_j / 3.6e6,

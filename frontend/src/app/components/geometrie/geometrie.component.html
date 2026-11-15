@@ -1,0 +1,77 @@
+<section class="rf-card" aria-labelledby="g-title">
+  <div class="rf-card-head"><h2 id="g-title">Géométrie</h2></div>
+  <p class="rf-hint">Emprise vue de dessus (nord en haut, mètres). Faites glisser un sommet ; « + » au milieu d'un côté
+    en ajoute un. Les bâtiments voisins (gris) servent à recalculer la mitoyenneté et les masques.</p>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  @if (ok()) { <p class="rf-ok" role="status">{{ ok() }}</p> }
+  @if (data()?.diff; as d) {
+    <p class="diff">Corrigée @if (d.author) { par {{ d.author }} } le {{ d.at | date: 'dd/MM/yyyy' }} :
+      @for (c of d.changes; track c.label) { {{ c.label }} {{ c.auto | number: '1.0-1' }} → {{ c.edit | number: '1.0-1' }} {{ c.unit }}@if (!$last) { ; } }
+      @if (d.note) { — {{ d.note }} }</p>
+  }
+  <div class="ed">
+    <svg #svg class="plan" [attr.viewBox]="view().x + ' ' + view().y + ' ' + view().s + ' ' + view().s" role="img"
+         aria-label="Emprise du bâtiment" (pointermove)="move($event, svg)" (pointerup)="up()" (pointerleave)="up()">
+      @for (n of data()?.neighbours ?? []; track $index) { <polygon class="nb" [attr.points]="poly(n)" /> }
+      <polygon class="fp" [attr.points]="poly(pts())" />
+      @for (m of mids(); track m.i) {
+        <g class="mid" (click)="insert(m.i)"><circle [attr.cx]="m.x" [attr.cy]="-m.y" [attr.r]="view().s / 70" /><title>Ajouter un sommet</title></g>
+      }
+      @for (p of pts(); track $index) {
+        <circle class="v" [class.sel]="sel() === $index" [attr.cx]="p[0]" [attr.cy]="-p[1]" [attr.r]="view().s / 45"
+                (pointerdown)="down($index, $event)" />
+      }
+      <text class="north" [attr.x]="view().x + view().s * 0.04" [attr.y]="view().y + view().s * 0.08" [attr.font-size]="view().s / 22">N ↑</text>
+    </svg>
+    <div class="side">
+      <p class="rf-hint">Emprise {{ area() | number: '1.0-0' }} m² · périmètre {{ perimeter() | number: '1.0-0' }} m · {{ pts().length }} sommets</p>
+      @if (sel() !== null) {
+        <div class="rf-row nudge" aria-label="Sommet sélectionné">
+          <button type="button" class="rf-btn small" (click)="nudge(0, 0.5)" aria-label="Vers le nord">↑</button>
+          <button type="button" class="rf-btn small" (click)="nudge(0, -0.5)" aria-label="Vers le sud">↓</button>
+          <button type="button" class="rf-btn small" (click)="nudge(-0.5, 0)" aria-label="Vers l'ouest">←</button>
+          <button type="button" class="rf-btn small" (click)="nudge(0.5, 0)" aria-label="Vers l'est">→</button>
+          <button type="button" class="rf-btn small danger" (click)="removeSel()">Supprimer le sommet</button>
+        </div>
+      }
+      <div class="rf-row">
+        <label class="rf-field"><span>Hauteur à l'égout (m)</span><input type="number" step="0.1" [(ngModel)]="eave"></label>
+        <label class="rf-field"><span>Niveaux</span><input type="number" step="1" [(ngModel)]="levels"></label>
+      </div>
+      <div class="rf-row">
+        <label class="rf-field"><span>Toiture</span>
+          <select [(ngModel)]="roof"><option value="terrasse">Terrasse</option><option value="2pans">Deux pans</option><option value="4pans">Quatre pans</option></select></label>
+        @if (roof !== 'terrasse') { <label class="rf-field"><span>Pente (°)</span><input type="number" [(ngModel)]="pitch"></label> }
+      </div>
+      @if (data()?.has_manual_parois) {
+        <label class="check"><input type="checkbox" [(ngModel)]="regen"> Régénérer l'enveloppe 3D (perd les parois assignées à la main)</label>
+      }
+      <div class="rf-row">
+        <button type="button" class="rf-btn primary" (click)="save()">Enregistrer la géométrie</button>
+        @if (data()?.edit) { <button type="button" class="rf-btn" (click)="reset()">Revenir à l'automatique</button> }
+      </div>
+    </div>
+  </div>
+  <h3>Taux de vitrage par façade</h3>
+  <div class="ratios">
+    @for (o of ['N', 'E', 'S', 'O']; track o) {
+      <label class="rf-field"><span>{{ {N: 'Nord', E: 'Est', S: 'Sud', O: 'Ouest'}[o] }} : {{ ratios[o] }} %</span>
+        <input type="range" min="0" max="80" step="1" [(ngModel)]="ratios[o]" [attr.aria-label]="'Taux de vitrage ' + o"></label>
+    }
+  </div>
+  <button type="button" class="rf-btn" (click)="saveRatios()">Enregistrer les taux de vitrage</button>
+</section>
+
+<section class="rf-card" aria-labelledby="pos-title">
+  <div class="rf-card-head"><h2 id="pos-title">Position</h2></div>
+  <p class="rf-hint">Cliquez sur la carte pour corriger la position du bâtiment (point d'adresse mal placé, grand site) ;
+    la chaîne automatique peut ensuite être rejouée à ce point.</p>
+  <app-carte [points]="pos()" [center]="center()" [zoom]="18" (clicked)="pick($event)" ariaLabel="Position du bâtiment" />
+  @if (newPos(); as p) {
+    <div class="rf-row pos-actions">
+      <span class="rf-hint">Nouvelle position : {{ p.lat | number: '1.5-5' }}, {{ p.lon | number: '1.5-5' }}</span>
+      <button type="button" class="rf-btn" (click)="savePosition(false)">Enregistrer</button>
+      <button type="button" class="rf-btn primary" (click)="savePosition(true)">Enregistrer et rejouer la chaîne</button>
+    </div>
+  }
+</section>

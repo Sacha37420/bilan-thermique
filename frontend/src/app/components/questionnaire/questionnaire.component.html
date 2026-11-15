@@ -1,0 +1,49 @@
+<section class="rf-card" aria-labelledby="q-title">
+  <div class="rf-card-head"><h2 id="q-title">Questions</h2></div>
+  @if (ranked(); as r) {
+    @for (i of r.inconsistencies; track $index) { <p class="warn" role="note">⚠ {{ i.message }}</p> }
+    <p class="rf-hint">D'abord les réponses qui réduiraient le plus l'incertitude du résultat
+      (écart du besoin annuel quand la valeur actuelle varie de son incertitude).</p>
+    <ng-template #qtpl let-q>
+      <div class="q" [class.done]="q.answered">
+        <label class="rf-field">
+          <span>{{ q.label }} @if (q.influence_kwh) { <em class="infl">± {{ q.influence_kwh / 2 | number: '1.0-0' }} kWh</em> }
+            @if (q.answered) { <em class="ok">répondu</em> }</span>
+          @if (q.kind === 'enum') {
+            <select [(ngModel)]="answers[q.id]" [attr.aria-label]="q.label">
+              <option [ngValue]="undefined">— {{ hint(q) }}</option>
+              @for (c of q.choices | keyvalue; track c.key) { <option [ngValue]="c.key">{{ c.value }}</option> }
+            </select>
+          } @else {
+            <input type="number" [(ngModel)]="answers[q.id]" [min]="q.min" [max]="q.max" step="any" [attr.aria-label]="q.label" [placeholder]="hint(q)">
+          }
+        </label>
+        @for (s of q.subquestions; track s.id) {
+          @if (showSub(s)) {
+            <label class="rf-field sub"><span>{{ s.label }}</span>
+              <input type="number" [(ngModel)]="answers[s.id]" [min]="s.min" [max]="s.max" step="any" [attr.aria-label]="s.label"></label>
+          }
+        }
+      </div>
+    </ng-template>
+    <div class="grid">
+      @for (q of first(); track q.id) { <ng-container *ngTemplateOutlet="qtpl; context: { $implicit: q }" /> }
+    </div>
+    <details>
+      <summary>Toutes les autres questions ({{ others().length }})</summary>
+      <div class="grid">
+        @for (q of others(); track q.id) { <ng-container *ngTemplateOutlet="qtpl; context: { $implicit: q }" /> }
+      </div>
+    </details>
+    <div class="rf-row actions">
+      <button type="button" class="rf-btn primary" (click)="save()" [disabled]="saving()">{{ saving() ? 'Enregistrement…' : 'Enregistrer mes réponses' }}</button>
+    </div>
+    @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+    @if (saved(); as s) {
+      <p class="rf-ok" role="status">Réponses enregistrées.
+        @if (kwhM2(s.before) !== null && kwhM2(s.after) !== null) { Besoin : {{ kwhM2(s.before) | number: '1.0-0' }} → {{ kwhM2(s.after) | number: '1.0-0' }} kWh/m²·an. }
+        Confiance : {{ s.confidence_before * 100 | number: '1.0-0' }} → {{ s.confidence_after * 100 | number: '1.0-0' }} %.
+        @if (s.calc_error) { ({{ s.calc_error }}) }</p>
+    }
+  }
+</section>

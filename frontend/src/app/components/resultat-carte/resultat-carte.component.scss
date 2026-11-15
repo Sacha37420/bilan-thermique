@@ -1,0 +1,9 @@
+:host { display: block; }
+.cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: var(--space-5); }
+@media (max-width: 899px) { .cols { grid-template-columns: 1fr; } }
+.months { margin: 0; }
+.months figcaption, .bal h3 { font-size: var(--text-sm); color: var(--text-mute); margin: 0 0 var(--space-2); font-weight: 600; }
+.bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; height: 140px; align-items: end; }
+.bar { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.bar i { display: block; width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 1px; }
+.bar span { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-mute); margin-top: 2px; }

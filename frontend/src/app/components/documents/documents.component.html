@@ -1,0 +1,70 @@
+<section class="rf-card" aria-labelledby="docs-h">
+  <div class="rf-card-head"><h2 id="docs-h">Documents</h2></div>
+  <p class="rf-hint">Déposez un DPE (PDF ou XML de l'ADEME), un audit, une facture. Le texte est lu sur le serveur. Un XML DPE
+    donne directement des valeurs, sans IA. Pour un PDF, vous pouvez demander à <strong>votre</strong> IA de proposer des valeurs :
+    chacune est contrôlée (plage, cohérence, extrait retrouvé dans le document) et n'entre dans la fiche que si vous l'acceptez.</p>
+  @if (!storage()) { <p class="rf-hint">L'original n'est pas conservé sur ce serveur : seul le texte lu est gardé.</p> }
+  <label class="rf-btn" style="display: inline-flex; align-items: center; cursor: pointer">Déposer un document
+    <input type="file" accept=".pdf,.xml,.txt" (change)="upload($event)" [disabled]="busy()" aria-label="Déposer un document" style="display:none"></label>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  @if (ok()) { <p class="rf-ok" role="status">{{ ok() }}</p> }
+  @if (jobMsg()) { <p class="rf-hint" role="status">{{ jobMsg() }}</p> }
+
+  @if (docs().length) {
+    <div class="rf-table-wrap"><table class="rf-table">
+      <thead><tr><th>Document</th><th>Pages</th><th>Taille</th><th></th></tr></thead>
+      <tbody>
+        @for (d of docs(); track d.id) {
+          <tr><td>{{ d.filename }} <span class="rf-badge m-defaut">{{ d.kind }}</span></td>
+            <td>{{ d.pages_with_text.length }} / {{ d.n_pages }} lisibles</td>
+            <td>{{ d.size_bytes / 1024 | number:'1.0-0' }} ko</td>
+            <td class="rf-row">
+              @if (d.kind !== 'xml_dpe') {
+                <button type="button" class="rf-btn" (click)="askEstimate(d)" [disabled]="busy() || !d.pages_with_text.length">Lire avec mon IA</button>
+              }
+              <button type="button" class="rf-btn danger" (click)="remove(d)" [attr.aria-label]="'Supprimer ' + d.filename">Supprimer</button></td></tr>
+        }
+      </tbody></table></div>
+    <label class="rf-field" style="max-width: 18rem"><span>Fournisseur</span>
+      <select [(ngModel)]="provider" aria-label="Fournisseur d’IA">
+        @for (p of providers(); track p.id) { <option [value]="p.id">{{ p.label }}{{ p.configured ? '' : ' (aucune clé)' }}</option> }</select></label>
+  }
+
+  @if (estimate(); as e) {
+    <div class="rf-card" role="dialog" aria-labelledby="est-h">
+      <h3 id="est-h">Avant l'envoi</h3>
+      <p>{{ e.warning }}</p>
+      <ul>
+        <li>Fournisseur : {{ e.provider_label }} — modèle {{ e.model }}</li>
+        <li>Pages envoyées : {{ e.pages.join(', ') }}</li>
+        <li>Environ {{ e.tokens_estimated | number:'1.0-0' }} jetons en entrée{{ e.fits ? '' : ' — trop long pour ce modèle' }}</li>
+      </ul>
+      @if (!e.key_configured) { <p class="rf-error">Aucune clé {{ e.provider_label }} : <a routerLink="/ia">configurez-la</a> d'abord.</p> }
+      <div class="rf-row">
+        <button type="button" class="rf-btn primary" (click)="extract()" [disabled]="!e.key_configured || !e.fits || busy()">Envoyer et lire</button>
+        <button type="button" class="rf-btn" (click)="estimate.set(null)">Annuler</button></div>
+    </div>
+  }
+
+  @if (pending().length) {
+    <h3>Valeurs proposées, à valider</h3>
+    <div class="rf-table-wrap"><table class="rf-table">
+      <thead><tr><th>Donnée</th><th>Valeur</th><th>Extrait</th><th>Contrôle</th><th></th></tr></thead>
+      <tbody>
+        @for (p of pending(); track p.id) {
+          <tr><td>{{ p.label }}</td><td>{{ show(p.value) }} {{ p.unit }}</td>
+            <td><q>{{ p.extract }}</q> <span class="rf-hint">— {{ p.document }}{{ p.page ? ', p. ' + p.page : '' }}</span></td>
+            <td><span [class]="'rf-badge ' + (p.check === 'ok' ? 'm-mesure' : (acceptable(p) ? 'm-declare' : 'm-defaut'))">{{ checkLabel[p.check] || p.check }}</span>
+              @if (p.check_message) { <span class="rf-hint"> {{ p.check_message }}</span> }</td>
+            <td class="rf-row">
+              <button type="button" class="rf-btn primary" (click)="decide(p, 'acceptee')" [disabled]="!acceptable(p)" [attr.aria-label]="'Accepter ' + p.label">Accepter</button>
+              <button type="button" class="rf-btn" (click)="decide(p, 'rejetee')" [attr.aria-label]="'Rejeter ' + p.label">Rejeter</button></td></tr>
+        }
+      </tbody></table></div>
+  }
+  @if (decided().length) {
+    <details><summary>Propositions déjà traitées ({{ decided().length }})</summary>
+      <ul>@for (p of decided(); track p.id) { <li>{{ p.label }} : {{ show(p.value) }} {{ p.unit }} — {{ p.decision === 'acceptee' ? 'acceptée' : 'rejetée' }} ({{ p.document }})</li> }</ul>
+    </details>
+  }
+</section>

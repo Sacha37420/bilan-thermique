@@ -1,0 +1,12 @@
+:host { display: block; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-3); margin: var(--space-3) 0; }
+.q { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-3); display: grid; gap: var(--space-2); }
+.q.done { border-style: dashed; }
+.q select, .q input { width: 100%; }
+.infl { font-style: normal; font-family: var(--font-mono); color: var(--accent); margin-left: var(--space-1); }
+.ok { font-style: normal; color: var(--success); margin-left: var(--space-1); }
+.sub { padding-left: var(--space-3); border-left: 2px solid var(--border); }
+.warn { background: var(--warning-tint); color: var(--text); border-left: 3px solid var(--warning); padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm); font-size: var(--text-sm); margin: 0 0 var(--space-2); }
+details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+.actions { margin-top: var(--space-3); }

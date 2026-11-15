@@ -31,6 +31,7 @@ un objet en « bâtiment étudié » sans régénérer quoi que ce soit.
 """
 
 import math
+from . import net
 
 import numpy as np
 import shapely
@@ -1746,7 +1747,7 @@ def build_objects(frame, half_m, points, bdtopo, acquisition_months, include_veg
             )
         except (ObservedEnvError, ValueError) as exc:
             n_failed += 1
-            warnings.append(f"Bâtiment {fp.get('id') or '?'} non reconstruit ({exc}).")
+            warnings.append(f"Bâtiment {fp.get('id') or '?'} non reconstruit ({net.reason(exc)}).")
             continue
         info.update({
             'bdtopo_id': fp.get('id'), 'nature': fp.get('nature'), 'usage': fp.get('usage'),

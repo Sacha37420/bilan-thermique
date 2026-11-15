@@ -24,11 +24,12 @@ cas (latitudes/saisons/hémisphères variés, Paris/Sydney/New York/équateur) :
 import math
 import time
 from datetime import datetime, timedelta, timezone
+from . import net
 
 import requests
 
 OPEN_METEO_ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive'
-USER_AGENT = 'bilan-thermique-lab/1.0 (usage interne, contact: sacha.mailler@gmail.com)'
+USER_AGENT = net.USER_AGENT
 HTTP_TIMEOUT_S = 30
 
 # Mêmes bornes que BuildingWeatherPointSerializer (serializers.py) — on y clampe
@@ -225,12 +226,12 @@ def fetch_open_meteo_archive(lat, lon, start_date, end_date):
     try:
         resp = _get_with_retry(OPEN_METEO_ARCHIVE_URL, params)
     except requests.RequestException as exc:
-        raise WeatherSourceError(f"Open-Meteo Archive injoignable ({exc}).") from exc
+        raise WeatherSourceError(f"Open-Meteo Archive injoignable ({net.reason(exc)}).") from exc
 
     try:
         data = resp.json()
     except ValueError as exc:
-        raise WeatherSourceError(f"Réponse Open-Meteo Archive invalide ({exc}).") from exc
+        raise WeatherSourceError(f"Réponse Open-Meteo Archive invalide ({net.reason(exc)}).") from exc
 
     if data.get('error'):
         raise WeatherSourceError(f"Open-Meteo Archive : {data.get('reason', 'erreur inconnue')}.")
@@ -368,12 +369,12 @@ def fetch_pvgis_tmy(lat, lon):
     try:
         resp = _get_with_retry(PVGIS_TMY_URL, params)
     except requests.RequestException as exc:
-        raise WeatherSourceError(f"PVGIS TMY injoignable ({exc}).") from exc
+        raise WeatherSourceError(f"PVGIS TMY injoignable ({net.reason(exc)}).") from exc
 
     try:
         data = resp.json()
     except ValueError as exc:
-        raise WeatherSourceError(f"Réponse PVGIS TMY invalide ({exc}).") from exc
+        raise WeatherSourceError(f"Réponse PVGIS TMY invalide ({net.reason(exc)}).") from exc
 
     if resp.status_code != 200 or 'outputs' not in data:
         reason = data.get('message', f"HTTP {resp.status_code}")
@@ -469,7 +470,7 @@ def build_tmy_or_fallback_series(lat, lon, fallback_start_date, fallback_end_dat
             utc_offset_seconds=utc_offset_seconds,
         )
         warning = (
-            f"PVGIS TMY indisponible pour cette zone ({exc}) — repli sur l'historique réel "
+            f"PVGIS TMY indisponible pour cette zone ({net.reason(exc)}) — repli sur l'historique réel "
             "Open-Meteo Archive."
         )
         return series, n_missing, 'open-meteo-archive', warning

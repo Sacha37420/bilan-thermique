@@ -16,10 +16,11 @@ maison entière.
 """
 
 import requests
+from . import net
 
 RNB_CLOSEST_URL = 'https://rnb-api.beta.gouv.fr/api/alpha/buildings/closest/'
 BDNB_URL = 'https://api.bdnb.io/v1/bdnb/donnees'
-USER_AGENT = 'bilan-thermique-lab/1.0 (usage interne)'
+USER_AGENT = net.USER_AGENT
 DPE_FIELDS = ('batiment_groupe_id,identifiant_dpe,date_etablissement_dpe,type_batiment_dpe,'
               'surface_vitree_nord,surface_vitree_sud,surface_vitree_est,surface_vitree_ouest,'
               'pourcentage_surface_baie_vitree_exterieur,type_vitrage,type_materiaux_menuiserie,'
@@ -36,7 +37,7 @@ def _get(url, params):
         resp.raise_for_status()
         return resp.json()
     except (requests.RequestException, ValueError) as exc:
-        raise BdnbError(f"Service injoignable ({exc}).") from exc
+        raise BdnbError(f"Service injoignable ({net.reason(exc)}).") from exc
 
 
 def rnb_ids_at(points_latlon, radius_m=8):

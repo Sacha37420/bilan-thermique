@@ -43,3 +43,9 @@ onnxruntime>=1.17
 tokenizers>=0.15
 pycolmap>=4.2
 gunicorn>=23.0,<24.0
+
+# ── Refonte, Lot 21 : lecture des documents par IA (sur le compte de l'utilisateur) ──
+# SDK officiel d'Anthropic, même version qu'App Builder (adaptateur recopié d'app-builder 0ff4e4e).
+anthropic==1.13.0
+# Texte des PDF, lu localement avant tout envoi (BSD-3, pur Python).
+pypdf==5.4.0

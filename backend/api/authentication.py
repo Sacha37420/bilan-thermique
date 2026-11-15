@@ -15,6 +15,9 @@ class KeycloakUser:
         self.email: str = claims.get('email', '')
         self.username: str = claims.get('preferred_username', self.email)
         self.claims = claims
+        # Identité stable (refonte) : toute nouvelle table désigne une personne par son `sub`
+        # Keycloak, jamais par son email (l'email d'un compte peut changer dans l'annuaire).
+        self.sub: str = claims.get('sub', '') or ''
         # Required by some DRF internals
         self.pk = self.email
 
@@ -102,3 +105,58 @@ class KeycloakJWTAuthentication(BaseAuthentication):
             )
 
         return KeycloakUser(claims), token
+
+
+# ── Jetons personnels du serveur MCP (refonte, Lot 22) ──────────────────────────
+# Modèle : App Builder `0ff4e4e` (McpUser, McpTokenAuthentication) ; écarts : préfixe `btt_`, identité
+# par le `sub` (jamais l'email), liaison à un bâtiment ou à un parc au lieu d'une spécification.
+
+class McpUser:
+    """L'appelant d'un jeton `btt_…` : son `sub`, sa portée, sa liaison éventuelle."""
+
+    is_authenticated = True
+    is_active = True
+
+    def __init__(self, jeton) -> None:
+        self.sub: str = jeton.owner_sub
+        self.username: str = jeton.owner_name or jeton.owner_sub
+        self.email = ''
+        self.pk = jeton.owner_sub
+        self.jeton = jeton
+        self.claims: dict = {}
+
+    def __str__(self) -> str:
+        return self.username
+
+
+class McpTokenAuthentication(BaseAuthentication):
+    """`Authorization: Bearer btt_…` — branchée QUE sur `/api/mcp/` : ailleurs l'authentification Keycloak
+    refuse un `btt_` (ce n'est pas un JWT) ; ici un jeton Keycloak est refusé. Recherche par empreinte
+    (index unique), message unique pour tout refus (inconnu, expiré, révoqué)."""
+
+    PREFIXE = 'btt_'
+    _REFUS = 'Jeton MCP invalide, expiré ou révoqué.'
+
+    def authenticate_header(self, request) -> str:
+        return 'Bearer'
+
+    def authenticate(self, request):
+        import hashlib
+
+        from django.utils import timezone
+
+        from .models import McpToken
+
+        entete = request.headers.get('Authorization', '')
+        if not entete.startswith('Bearer '):
+            return None
+        valeur = entete[7:].strip()
+        if not valeur.startswith(self.PREFIXE) or len(valeur) > 128:
+            raise AuthenticationFailed(self._REFUS)
+        empreinte = hashlib.sha256(valeur.encode()).hexdigest()
+        maintenant = timezone.now()
+        jeton = McpToken.objects.filter(token_hash=empreinte).first()
+        if jeton is None or jeton.revoked_at is not None or jeton.expires_at <= maintenant:
+            raise AuthenticationFailed(self._REFUS)
+        McpToken.objects.filter(pk=jeton.pk).update(last_used_at=maintenant)
+        return McpUser(jeton), None

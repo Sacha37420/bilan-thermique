@@ -2,7 +2,8 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --silent
+# npm ci : installe exactement le verrou (npm install résout les dépendances au jour du build).
+RUN npm ci --silent
 COPY . .
 RUN npm run build
 

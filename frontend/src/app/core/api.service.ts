@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { apiUrl } from './env';
+import { CalcRunSummary, CalcRunDetail } from './building.types';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -39,6 +40,16 @@ export class ApiService {
 
   getBuildings(): Observable<unknown[]> {
     return this.http.get<unknown[]>(`${this.base}/api/batiments/`);
+  }
+
+  // ── Refonte, Lot 3 : historique des calculs ──
+  getCalcRuns(buildingId: number, level?: string): Observable<{ results: CalcRunSummary[] }> {
+    const q = level ? `?niveau=${encodeURIComponent(level)}` : '';
+    return this.http.get<{ results: CalcRunSummary[] }>(`${this.base}/api/batiments/${buildingId}/calculs/${q}`);
+  }
+
+  getCalcRun(id: number): Observable<CalcRunDetail> {
+    return this.http.get<CalcRunDetail>(`${this.base}/api/calculs/${id}/`);
   }
 
   getBuilding(id: number): Observable<unknown> {

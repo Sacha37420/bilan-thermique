@@ -22,6 +22,7 @@ numérique de surface. L'API d'altimétrie REFUSE la ressource `ign_rge_mns_wld`
 
 import math
 import time
+from . import net
 
 import requests
 
@@ -71,7 +72,7 @@ def fetch_ign_elevations(points):
             resp = _get(IGN_ELEVATION_URL, params)
             data = resp.json()
         except (requests.RequestException, ValueError) as exc:
-            raise ElevationError(f"Altimétrie IGN injoignable ou en erreur ({exc}).") from exc
+            raise ElevationError(f"Altimétrie IGN injoignable ou en erreur ({net.reason(exc)}).") from exc
         if 'error' in data or 'elevations' not in data:
             raise ElevationError(f"Altimétrie IGN : {data.get('error', 'réponse inattendue')}.")
         values = data['elevations']
@@ -98,7 +99,7 @@ def fetch_open_meteo_elevations(points):
             resp = _get(OPEN_METEO_ELEVATION_URL, params)
             data = resp.json()
         except (requests.RequestException, ValueError) as exc:
-            raise ElevationError(f"Open-Meteo Elevation injoignable ou en erreur ({exc}).") from exc
+            raise ElevationError(f"Open-Meteo Elevation injoignable ou en erreur ({net.reason(exc)}).") from exc
         values = data.get('elevation')
         if not isinstance(values, list) or len(values) != len(batch):
             raise ElevationError("Open-Meteo Elevation : réponse inattendue.")
@@ -125,7 +126,7 @@ def fetch_elevations(points):
         return fetch_open_meteo_elevations(points), 'open-meteo'
     except ElevationError as exc:
         if ign_error is not None:
-            raise ElevationError(f"{ign_error} Repli Open-Meteo également en échec : {exc}") from exc
+            raise ElevationError(f"{ign_error} Repli Open-Meteo également en échec : {net.reason(exc)}") from exc
         raise
 
 

@@ -12,6 +12,7 @@ Trois responsabilités :
 
 import math
 from datetime import date
+from . import net
 
 from django.db import transaction
 from rest_framework import serializers as drf_serializers
@@ -156,7 +157,7 @@ def study_objects(env, obj_ids, name='', assign_materials=True):
             vertices, triangles = observed_env.building_envelope_from_mesh(mv, mt, ids, env.scene_objects)
             label = f"{len(objs)} bâtiments réunis"
     except observed_env.ObservedEnvError as exc:
-        raise EnvironmentServiceError(str(exc)) from exc
+        raise EnvironmentServiceError(net.reason(exc)) from exc
 
     materials = None
     if assign_materials:
@@ -223,7 +224,7 @@ def orthophoto_bytes(env):
     try:
         data, _w, _h = lidar_source.fetch_orthophoto(bbox, lidar_source.ORTHO_RGB_LAYER)
     except geodata.GeodataError as exc:
-        raise EnvironmentServiceError(str(exc)) from exc
+        raise EnvironmentServiceError(net.reason(exc)) from exc
     os.makedirs(ORTHO_CACHE_DIR, exist_ok=True)
     with open(path, 'wb') as fh:
         fh.write(data)
@@ -252,7 +253,7 @@ def replace_object(env, obj_id, vertices, triangles, name='', up_axis='auto', sc
             scale='auto' if scale == 'auto' else float(scale),
         )
     except observed_env.ObservedEnvError as exc:
-        raise EnvironmentServiceError(str(exc)) from exc
+        raise EnvironmentServiceError(net.reason(exc)) from exc
     tri_payload = [
         {'v': t['v'], 'group': t.get('group'), 'paroi_model_id': None,
          'boundary': 'exterior_air', 'shading_profile_id': None}
@@ -269,6 +270,20 @@ def replace_object(env, obj_id, vertices, triangles, name='', up_axis='auto', sc
 
 
 # ── Génération ─────────────────────────────────────────────────────────────────
+
+def mark_previous_replaced(new_env, building):
+    """Lot 3 (refonte, L6) : les environnements générés auparavant pour ce bâtiment sont marqués
+    remplacés par le nouveau (jamais supprimés : ils peuvent porter des retraits d'objets faits à
+    la main). Rend leurs identifiants."""
+    from django.db.models import Q
+    olds = (Environment.objects.filter(replaced_by__isnull=True)
+            .filter(Q(scene_objects__contains=[{'building_id': building.pk}]) | Q(pk=building.environment_id))
+            .exclude(pk=new_env.pk).exclude(generation={}))
+    ids = list(olds.values_list('pk', flat=True))
+    if ids:
+        Environment.objects.filter(pk__in=ids).update(replaced_by=new_env)
+    return ids
+
 
 def generate(params, building=None, progress_cb=None):
     """Génère et ENREGISTRE un environnement. Retourne (env, summary).
@@ -318,7 +333,7 @@ def generate(params, building=None, progress_cb=None):
         except geodata.GeodataError as exc:
             bdtopo = []
             warnings_pre.append(
-                f"BD TOPO indisponible ({exc}) : bâtiments reconstruits depuis le LiDAR seul, "
+                f"BD TOPO indisponible ({net.reason(exc)}) : bâtiments reconstruits depuis le LiDAR seul, "
                 "sans identifiant ni murs rectilignes."
             )
         months = sorted({int(t['acq_end'][5:7]) for t in tiles if len(t['acq_end']) >= 7}
@@ -333,7 +348,7 @@ def generate(params, building=None, progress_cb=None):
                 cosia = observed_env.CosiaImage(
                     lidar_source.fetch_cosia(cbbox, max(years) if years else None), cbbox)
             except (geodata.GeodataError, OSError, ValueError) as exc:
-                warnings_pre.append(f"CoSIA indisponible ({exc}) : essence des arbres inconnue.")
+                warnings_pre.append(f"CoSIA indisponible ({net.reason(exc)}) : essence des arbres inconnue.")
         objects, ground_z, stats, warnings, rasters = observed_env.build_objects(
             frame, half, points, bdtopo, months, include_vegetation=include_veg,
             include_terrain=include_terrain, self_polygon=self_polygon, progress_cb=report,
@@ -353,7 +368,7 @@ def generate(params, building=None, progress_cb=None):
             stats['ground_albedo_mean'] = round(sum(vals) / len(vals), 3)
         except (geodata.GeodataError, OSError, ValueError) as exc:
             ground_albedo = None
-            warnings.append(f"Orthophoto indisponible ({exc}) : ni albédo du sol ni couleur des toits.")
+            warnings.append(f"Orthophoto indisponible ({net.reason(exc)}) : ni albédo du sol ni couleur des toits.")
         stats.update({'lidar_requests': read_stats['requests'],
                       'lidar_mb': round(read_stats['bytes'] / 1e6, 1), 'bdtopo': len(bdtopo)})
     except lidar_source.LidarUnavailable as exc:
@@ -363,7 +378,7 @@ def generate(params, building=None, progress_cb=None):
             lat0, lon0, half, north, ground_z, include_veg, include_terrain,
             params.get('terrain_spacing_m') or 10.0, self_polygon, report,
         )
-        warnings.insert(0, f"LiDAR HD indisponible ({exc}) : repli sur la BD TOPO / OpenStreetMap — "
+        warnings.insert(0, f"LiDAR HD indisponible ({net.reason(exc)}) : repli sur la BD TOPO / OpenStreetMap — "
                            "hauteurs issues des attributs, toits plats, arbres à hauteur forfaitaire.")
 
     if ground_z is not None:
@@ -393,8 +408,11 @@ def generate(params, building=None, progress_cb=None):
             building.georef_ground_z = ground_z
             building.save(update_fields=['georef_ground_z'])
 
+    replaced = mark_previous_replaced(env, building) if building is not None else []
+
     summary = {
         'environment_id': env.pk, 'source': source, 'stats': stats, 'warnings': warnings,
+        'replaced_environment_ids': replaced,
         'n_objects': len(objects), 'n_triangles': len(env.envelope['triangles']),
     }
     return env, summary
@@ -420,7 +438,7 @@ def legacy_objects(lat0, lon0, half, north, ground_z, include_veg, include_terra
         try:
             ground_z, _src = elevation.ground_altitude(lat0, lon0)
         except elevation.ElevationError as exc:
-            warnings.append(f"Altitude du sol indisponible ({exc}) : altitudes relatives approximatives.")
+            warnings.append(f"Altitude du sol indisponible ({net.reason(exc)}) : altitudes relatives approximatives.")
 
     report('legacy-buildings', 20)
     bbox = geodata.bbox_from_radius(lat0, lon0, half)
@@ -429,7 +447,7 @@ def legacy_objects(lat0, lon0, half, north, ground_z, include_veg, include_terra
         try:
             buildings, origin = geodata.fetch_ign_buildings(bbox), 'bdtopo'
         except geodata.GeodataError as exc:
-            warnings.append(f"{exc} Repli sur OpenStreetMap.")
+            warnings.append(f"{net.reason(exc)} Repli sur OpenStreetMap.")
     if not buildings:
         buildings, origin = geodata.fetch_osm_buildings(bbox), 'osm'
 
@@ -484,7 +502,7 @@ def legacy_objects(lat0, lon0, half, north, ground_z, include_veg, include_terra
                     info={'distance_m': round(math.hypot(cx, cy), 1)}, k=tris[0]['k'],
                 ))
         except geodata.GeodataError as exc:
-            warnings.append(f"Végétation non chargée ({exc}).")
+            warnings.append(f"Végétation non chargée ({net.reason(exc)}).")
 
     if include_terrain:
         report('legacy-terrain', 70)
@@ -497,7 +515,7 @@ def legacy_objects(lat0, lon0, half, north, ground_z, include_veg, include_terra
                 info={'points': n},
             ))
         except elevation.ElevationError as exc:
-            warnings.append(f"Terrain non chargé ({exc}).")
+            warnings.append(f"Terrain non chargé ({net.reason(exc)}).")
 
     observed_env.mark_studied(objects, self_polygon, warnings)
     objects = observed_env._apply_budget(objects, warnings)

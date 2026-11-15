@@ -1,0 +1,106 @@
+"""Scénarios et comparateur (Lot 18, refonte). Routes nouvelles uniquement.
+
+GET/POST /api/batiments/<id>/scenarios/     {name, description?, bundles?: [clé…], dataset_id?}
+GET      /api/scenarios/bouquets/
+DELETE   /api/scenarios/<id>/
+POST     /api/scenarios/<id>/bouquets/       {bundles: [clé…]}
+POST     /api/batiments/<id>/comparer/       {scenarios: [null | id…], meteos?: [id…]} → N1 de chaque variante × météo
+"""
+
+from django.shortcuts import get_object_or_404
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from . import access, scenarios as sc_service
+from .models import Scenario, WeatherDataset
+
+
+def _scenario(s, building):
+    return {'id': s.pk, 'name': s.name, 'description': s.description, 'bundles': (s.weather or {}).get('bundles', []),
+            'dataset_id': (s.weather or {}).get('dataset_id'), 'created_at': s.created_at,
+            'differences': sc_service.differences(building, s), 'vigilance': sc_service.vigilance(s)}
+
+
+def _building(request, pk, write=False):
+    b = get_object_or_404(access.visible_buildings(request), pk=pk)
+    if write and not access.can_declare(request, b):
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied('Lecture seule sur ce bâtiment.')
+    return b
+
+
+class BundlesView(APIView):
+    def get(self, request):
+        return Response({'bundles': [{'key': k, 'label': v['label'], 'vigilance': v['vigilance']} for k, v in sc_service.BUNDLES.items()]})
+
+
+class ScenariosView(APIView):
+    def get(self, request, pk):
+        b = _building(request, pk)
+        return Response({'results': [_scenario(s, b) for s in b.scenarios.all()]})
+
+    def post(self, request, pk):
+        b = _building(request, pk, write=True)
+        name = str(request.data.get('name') or '').strip()[:150]
+        if not name:
+            return Response({'detail': 'Nom de la variante attendu.'}, status=status.HTTP_400_BAD_REQUEST)
+        if b.scenarios.count() >= 20:
+            return Response({'detail': 'Vingt variantes au plus par bâtiment.'}, status=status.HTTP_400_BAD_REQUEST)
+        weather = {}
+        did = request.data.get('dataset_id')
+        if did:
+            weather['dataset_id'] = get_object_or_404(WeatherDataset.objects.defer('series'), pk=did).pk
+        s = Scenario.objects.create(building=b, name=name, description=str(request.data.get('description') or '')[:2000],
+                                    weather=weather, author_sub=access.sub_of(request))
+        try:
+            sc_service.apply_bundles(b, s, request.data.get('bundles') or [], access.sub_of(request), access.name_of(request))
+        except sc_service.ScenarioError as exc:
+            s.delete()
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(_scenario(s, b), status=status.HTTP_201_CREATED)
+
+
+class ScenarioDetailView(APIView):
+    def _get(self, request, pk):
+        s = get_object_or_404(Scenario.objects.filter(building__in=access.visible_buildings(request)), pk=pk)
+        if not access.can_declare(request, s.building):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Lecture seule sur ce bâtiment.')
+        return s
+
+    def delete(self, request, pk):
+        self._get(request, pk).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ScenarioBundlesView(ScenarioDetailView):
+    def post(self, request, pk):
+        s = self._get(request, pk)
+        try:
+            sc_service.apply_bundles(s.building, s, request.data.get('bundles') or [], access.sub_of(request), access.name_of(request))
+        except sc_service.ScenarioError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(_scenario(s, s.building))
+
+
+class CompareView(APIView):
+    def post(self, request, pk):
+        b = _building(request, pk, write=True)
+        ids = request.data.get('scenarios') or [None]
+        if not isinstance(ids, list) or not 1 <= len(ids) <= 5:
+            return Response({'detail': 'De une à cinq variantes.'}, status=status.HTTP_400_BAD_REQUEST)
+        scs = []
+        for i in ids:
+            scs.append(None if i in (None, 'base') else get_object_or_404(Scenario, pk=i, building=b))
+        meteos = request.data.get('meteos') or []
+        if not isinstance(meteos, list) or len(meteos) > 3:
+            return Response({'detail': 'Trois météos au plus.'}, status=status.HTTP_400_BAD_REQUEST)
+        for m in meteos:
+            get_object_or_404(WeatherDataset.objects.defer('series'), pk=m)
+        rows = sc_service.compare(b, scs, meteos, access.sub_of(request))
+        vig = []
+        for s in scs:
+            if s is not None:
+                vig += sc_service.vigilance(s)
+        return Response({'rows': rows, 'vigilance': vig})
