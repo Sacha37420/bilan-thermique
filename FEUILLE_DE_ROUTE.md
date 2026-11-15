@@ -512,17 +512,24 @@ détail N1 (paramètres du modèle) ; comparaison de deux N1 nommant « U des mu
 console. Courbes : une série par graphique, couleur d'accent validée en clair et en sombre (`validate_palette.js`), tableau
 mensuel en complément.
 
-## Lot 25 — Page « Simulation » : préparer, juger la fiabilité, lancer   ·   statut : à faire
+## Lot 25 — Page « Simulation » : préparer, juger la fiabilité, lancer   ·   statut : livré
 **Objectif :** avant de lancer, savoir ce qui sera calculé, avec quelles entrées et quelle fiabilité.
 **Tâches :**
-- [ ] `GET /api/batiments/<id>/simulation/?niveau=&scenario=` : entrées par famille (valeur, provenance,
+- [x] `GET /api/batiments/<id>/simulation/?niveau=&scenario=` : entrées par famille (valeur, provenance,
   confiance), les entrées les plus influentes et incertaines, fourchette attendue, durée estimée, blocages
-- [ ] Onglet « Simulation » : choix du niveau, de la variante et de la météo, tableau des entrées, fiabilité,
+- [x] Onglet « Simulation » : choix du niveau, de la variante et de la météo, tableau des entrées, fiabilité,
   liens « corriger », bouton lancer ; la carte « Résultat » y renvoie
 **Tests à passer avant de clore le lot :**
-- [ ] Les entrées listées sont exactement celles que le calcul enregistre ensuite
-- [ ] Navigateur réel, clair et sombre
-**Vérifié le :**
+- [x] Les entrées listées sont exactement celles que le calcul enregistre ensuite
+- [x] Navigateur réel, clair et sombre
+**Vérifié le :** 2026-11-15 — 462 tests OK (5 nouveaux, `api/tests/test_simulation.py` : entrées annoncées = entrées
+enregistrées pour N1 et N2, « déjà calculé », fourchette, verdict, mesure d'une entrée → dispersion en baisse,
+blocages, droits, préparer ne lance rien). Navigateur réel (banc), clair et sombre, 25 contrôles : la carte Résultat
+mène à la Simulation ; verdict « à confirmer » (dispersion ± 21 %) ; entrées décisives (surface, hauteur, U des murs,
+renouvellement d'air) avec lien « Corriger » ; N2 annoncé (géométrie, parois, ≈ 9 s), lancé, suivi, puis onglet Calculs
+ouvert sur ce N2 ; entrées inchangées → « Voir le calcul déjà fait » ; occupant : N1 lançable, N2 bloqué et expliqué.
+Dispersion : effets des entrées incertaines (± 1 écart type de leur méthode, `uncertainty.REL_SPREAD`) supposés
+indépendants, sommés en quadrature ; verdict < 10 % « fiable », < 25 % « à confirmer », sinon « indicatif ».
 
 ## Lot 26 — Gestes experts → faits   ·   statut : à faire
 **Objectif :** ce qui se fait sur les pages expertes améliore la fiche, donc tous les niveaux.

@@ -36,6 +36,8 @@ export class ResultatCarteComponent implements OnChanges, OnDestroy {
   /** Incrémenté par la page quand la fiche change : relit l'état « à jour / périmé ». */
   @Input() refresh = 0;
   computed = output<void>();
+  /** Ouvrir l'onglet Simulation (Lot 25). */
+  prepare = output<void>();
   private rf = inject(RefonteApiService);
   latest = signal<Latest | null>(null);
   busy = signal(false);

@@ -5,6 +5,7 @@
       @if (r.up_to_date) { <span class="rf-badge m-mesure">à jour</span> }
       @else { <span class="rf-badge m-infere">périmé — la fiche a changé</span> }
     }
+    <button type="button" class="rf-btn" (click)="prepare.emit()">Préparer une simulation</button>
     <button type="button" class="rf-btn primary" (click)="compute()" [disabled]="busy()">
       {{ busy() ? 'Calcul…' : (latest()?.N1 ? 'Recalculer (N0, N1)' : 'Calculer (N0, N1)') }}</button>
   </div>

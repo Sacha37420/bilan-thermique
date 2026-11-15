@@ -54,6 +54,9 @@ const BALANCE: Record<string, string> = {
 export class CalculsComponent implements OnChanges {
   @Input({ required: true }) buildingId!: number;
   @Input() refresh = 0;
+  /** Calcul à ouvrir d'emblée (fin d'une simulation, Lot 25). */
+  @Input() openId: number | null = null;
+  private opened: number | null = null;
   private rf = inject(RefonteApiService);
   readonly levelLabel = LEVEL_LABEL;
   readonly methodLabel = METHOD_LABEL;
@@ -70,6 +73,7 @@ export class CalculsComponent implements OnChanges {
   ngOnChanges(): void {
     if (!this.catalogue()) this.rf.catalogue().subscribe({ next: c => this.catalogue.set(c) });
     this.load();
+    if (this.openId && this.openId !== this.opened) { this.opened = this.openId; this.open(this.openId); }
   }
 
   load(): void {

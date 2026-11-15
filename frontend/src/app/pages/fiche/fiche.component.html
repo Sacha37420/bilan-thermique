@@ -67,16 +67,17 @@
       }
     </nav>
     @if (tab() === 'synthese') {
-      <app-resultat-carte [buildingId]="buildingId" [refresh]="ficheVersion()" />
+      <app-resultat-carte [buildingId]="buildingId" [refresh]="ficheVersion()" (prepare)="setTab('simulation')" />
       <app-questionnaire [buildingId]="buildingId" [refresh]="ficheVersion()" (changed)="onQuestionnaire()" />
     }
+    @if (tab() === 'simulation') { <app-simulation [buildingId]="buildingId" [refresh]="ficheVersion()" (launched)="showRun($event)" /> }
     @if (tab() === 'meteo') { <app-meteo-carte [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'geometrie') { <app-geometrie [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'protections') { <app-protections [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'systemes') { <app-systemes [buildingId]="buildingId" [refresh]="ficheVersion()" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'mesures') { <app-mesures [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'scenarios') { <app-scenarios [buildingId]="buildingId" /> }
-    @if (tab() === 'calculs') { <app-calculs [buildingId]="buildingId" [refresh]="ficheVersion()" /> }
+    @if (tab() === 'calculs') { <app-calculs [buildingId]="buildingId" [refresh]="ficheVersion()" [openId]="openRun()" /> }
     @if (tab() === 'documents') { <app-documents [buildingId]="buildingId" (changed)="onQuestionnaire()" /> }
     @if (tab() === 'donnees') {
     @for (bl of blocks(); track bl.id) {

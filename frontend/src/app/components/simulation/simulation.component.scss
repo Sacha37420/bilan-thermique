@@ -1,0 +1,30 @@
+.controls { display: flex; flex-wrap: wrap; gap: var(--space-3, .75rem); align-items: flex-end; }
+.levels { display: flex; flex-wrap: wrap; gap: var(--space-2, .5rem); }
+.lvl { min-height: 44px; padding: 0 var(--space-4, 1rem); border-radius: 999px; border: 1px solid var(--border);
+  background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
+.lvl.active { background: var(--accent); border-color: var(--accent); color: var(--accent-on, var(--card)); }
+.field { display: flex; flex-direction: column; gap: .25rem; color: var(--text-mute); font-size: var(--text-sm, 14px); }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3, .75rem); margin: var(--space-4, 1rem) 0; }
+.summary.dim { opacity: .6; }
+.txt { font-size: var(--text-base, 16px) !important; }
+.verdict { padding: var(--space-2, .5rem) var(--space-3, .75rem); border-radius: var(--radius-sm, 6px); border: 1px solid var(--border); }
+.v-fiable { background: var(--success-tint); color: var(--success); border-color: var(--success); }
+.v-à-confirmer, .v-indicatif { background: var(--warning-tint); color: var(--warning); border-color: var(--warning); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-2, .5rem); margin: var(--space-3, .75rem) 0; }
+.progress { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; color: var(--text-mute); }
+.progress progress { flex: 1 1 12rem; accent-color: var(--accent); }
+h3 { margin: var(--space-5, 1.5rem) 0 var(--space-2, .5rem); }
+.meter { display: inline-block; width: 80px; height: 8px; margin-right: .5rem; background: var(--bg); border-radius: 4px;
+  vertical-align: middle; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.grp summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+.src { display: block; color: var(--text-mute); font-size: var(--text-xs, 12px); }
+.kv { display: grid; grid-template-columns: minmax(8rem, max-content) 1fr; gap: .35rem 1rem; }
+.kv dt { color: var(--text-mute); }
+.kv dd { margin: 0; }
+.chip { display: inline-block; margin: 0 .5rem .25rem 0; padding: 0 .5rem; border: 1px solid var(--border); border-radius: 999px;
+  font-size: var(--text-xs, 12px); }
+.limits { color: var(--text-mute); padding-left: 1.2rem; }
+.rf-hint .rf-badge { margin-left: .35rem; }
+@media (max-width: 600px) { .kv { grid-template-columns: 1fr; } }
+a.rf-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }

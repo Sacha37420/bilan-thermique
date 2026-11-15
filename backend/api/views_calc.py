@@ -2,6 +2,7 @@
 
 GET /api/batiments/<id>/calculs/   liste (sans séries), plus récent d'abord ; `?niveau=N1`
 GET /api/calculs/<id>/             un calcul complet (séries et entrées figées comprises) : rechargeable sans recalcul
+GET /api/batiments/<id>/simulation/?niveau=&scenario=  préparer un calcul sans le lancer (Lot 25)
 GET /api/calculs/<a>/comparer/<b>/ deux calculs d'un même bâtiment : entrées qui diffèrent, écart des indicateurs (Lot 24)
 POST /api/batiments/<id>/calculer/ {niveaux: ['N0','N1','N2'], scenario?, meteo?, force?} — N0/N1 synchrones (Lot 10) ;
     N2 en tâche de fond, gestionnaire seulement (Lot 23) : la réponse porte le calcul en attente et son `job`
@@ -196,4 +197,24 @@ class ResultatView(APIView):
             d['from_fiche'] = calc_service.from_fiche(run)
             out[lvl] = d
         out['can_n2'] = access.can_manage(request, b)  # Lot 23 : le N2 est réservé aux gestionnaires
+        return Response(out)
+
+
+class SimulationView(APIView):
+    """Ce que lancerait un calcul : entrées, ce qu'en tire le moteur, fiabilité, durée, blocages (Lot 25)."""
+
+    def get(self, request, pk):
+        from . import simulation
+        b = get_object_or_404(visible_buildings(request), pk=pk)
+        level = request.query_params.get('niveau') or 'N1'
+        if level not in ('N0', 'N1', 'N2'):
+            return Response({'detail': 'Niveau inconnu (N0, N1 ou N2).'}, status=status.HTTP_400_BAD_REQUEST)
+        sid = request.query_params.get('scenario')
+        sc = scenario_of(b, sid)
+        if sid not in (None, '') and sc is None:
+            return Response({'detail': 'Variante inconnue.'}, status=status.HTTP_400_BAD_REQUEST)
+        out = simulation.prepare(b, level, sc, can_manage=access.can_manage(request, b))
+        if not access.can_declare(request, b):
+            out['blockers'].append('Lecture seule sur ce bâtiment.')
+            out['can_launch'] = False
         return Response(out)
