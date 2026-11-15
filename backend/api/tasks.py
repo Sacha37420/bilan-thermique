@@ -376,6 +376,11 @@ def analyse_facades(self, job_id, building_id):
                                  ground_z=ground_z, own_footprint=own)
         building.facades = {**result, 'base': base}
         building.save(update_fields=['facades', 'updated_at'])
+        try:   # Lot 26 (refonte) : taux de vitrage vus sur photo → propositions à valider (onglet Documents)
+            from . import expert_facts
+            expert_facts.facade_proposals(building, job.owner_sub)
+        except Exception:  # noqa: BLE001 — l'analyse reste valable sans propositions
+            pass
         n = sum(1 for f in result['facades'].values() if f['status'] in ('analysee', 'partielle'))
         n_open = sum(len(f['openings']) for f in result['facades'].values())
         job.result = {'n_facades': len(result['facades']), 'n_analysees': n, 'n_openings': n_open}

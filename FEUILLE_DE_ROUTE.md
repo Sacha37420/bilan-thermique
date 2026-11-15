@@ -531,16 +531,25 @@ ouvert sur ce N2 ; entrées inchangées → « Voir le calcul déjà fait » ; o
 Dispersion : effets des entrées incertaines (± 1 écart type de leur méthode, `uncertainty.REL_SPREAD`) supposés
 indépendants, sommés en quadrature ; verdict < 10 % « fiable », < 25 % « à confirmer », sinon « indicatif ».
 
-## Lot 26 — Gestes experts → faits   ·   statut : à faire
+## Lot 26 — Gestes experts → faits   ·   statut : livré
 **Objectif :** ce qui se fait sur les pages expertes améliore la fiche, donc tous les niveaux.
 **Tâches :**
-- [ ] Parois assignées à la main → U des murs, toiture, plancher et vitrages **déduits** (fait `declare`,
-  source « enveloppe experte »), retirés si l'assignation change (D35)
-- [ ] Environnement relevé (LiDAR × BD TOPO) → horizon par façade pour N0/N1, à la place de l'horizon simplifié
-- [ ] Façades analysées (Panoramax) → propositions de taux de vitrage à valider
+- [x] Parois assignées à la main → U des murs, toiture, plancher et vitrages, g, taux de vitrage par orientation,
+  part mitoyenne et emprise **déduits** (fait `declare`, source « enveloppe experte », au nom de qui enregistre),
+  remplacés si l'assignation change, retirés si l'enveloppe n'est plus entièrement assignée (D35, `api/expert_facts.py`)
+- [x] Environnement relevé (LiDAR × BD TOPO) → horizon par façade pour N0/N1, à la place de l'horizon simplifié
+- [x] Façades analysées (Panoramax) → document local « Analyse des façades » et propositions de taux de vitrage par
+  orientation, validées dans l'onglet Documents comme celles d'un DPE (D39)
 **Tests à passer avant de clore le lot :**
-- [ ] Chaque geste crée le fait attendu et le retire quand il est défait ; N0/N1 deviennent périmés
-**Vérifié le :**
+- [x] Chaque geste crée le fait attendu et le retire quand il est défait ; N0/N1 deviennent périmés
+**Vérifié le :** 2026-11-15 — 469 tests OK (7 nouveaux, `api/tests/test_gestes_experts.py` : valeurs déduites = U des
+couches, ré-enregistrer ne duplique rien, désassigner retire, assignation changée → valeurs mises à jour, part mitoyenne,
+géométrie corrigée qui régénère l'enveloppe → retrait ; tour de 24 m au sud → horizon S > 40°, N1 périmé puis besoin en
+hausse ; façades → proposition « ok », acceptée = fait « document », nouvelle analyse remplace les propositions en attente).
+Navigateur réel (banc), clair et sombre : U des murs « déclaré · enveloppe experte » au-dessus de l'automatique ; document
+« façades analysées » sans bouton IA ; proposition acceptée → provenance « document ». Deux défauts trouvés en écrivant
+les tests et corrigés avant livraison : une toiture plate (inclinaison 0) comptée comme un mur (`or 90`), et
+l'enveloppe écrite par `vertices`/`triangles` (pas `envelope`, en lecture seule) non détectée.
 
 ## Lot 27 — Fiche unique et anciennes pages   ·   statut : à faire
 **Objectif :** une seule entrée par bâtiment ; les pages d'avant deviennent des onglets ou des outils.

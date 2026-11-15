@@ -93,6 +93,16 @@ class BuildingListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         return access.visible_buildings(self.request)
 
+    def perform_create(self, serializer):
+        building = serializer.save()
+        _sync_expert(self.request, building)   # Lot 26 : enveloppe déjà assignée → faits déduits
+
+
+def _sync_expert(request, building):
+    """Lot 26 (refonte) : l'enveloppe experte (parois assignées) alimente la fiche."""
+    from . import expert_facts
+    expert_facts.sync_envelope(building, _sub(request), access.name_of(request))
+
 
 class BuildingDetailView(generics.RetrieveUpdateDestroyAPIView):
     """GET/PUT/PATCH/DELETE /api/batiments/<id>/"""
@@ -105,7 +115,9 @@ class BuildingDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
         if not access.can_manage(self.request, serializer.instance):
             raise PermissionDenied("Action réservée aux gestionnaires de ce bâtiment.")
-        serializer.save()
+        building = serializer.save()
+        if 'triangles' in self.request.data or 'vertices' in self.request.data:   # l'enveloppe a été réécrite
+            _sync_expert(self.request, building)
 
     def perform_destroy(self, instance):
         if not access.can_manage(self.request, instance):
@@ -404,6 +416,7 @@ class BuildingRefineView(APIView):
         building.envelope = {'vertices': new_vertices, 'triangles': new_triangles}
         building.sun_visibility_stale = True
         building.save(update_fields=['envelope', 'sun_visibility_stale', 'updated_at'])
+        _sync_expert(request, building)
 
         return Response(BuildingSerializer(building).data)
 
@@ -585,4 +598,5 @@ class FacadeApplyView(APIView):
         }}
         building.sun_visibility_stale = True
         building.save(update_fields=['envelope', 'facades', 'sun_visibility_stale', 'updated_at'])
+        _sync_expert(request, building)
         return Response({'building': BuildingSerializer(building).data, 'report': report})
