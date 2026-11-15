@@ -1,0 +1,245 @@
+<section class="rf-card" aria-labelledby="calc-title">
+  <div class="rf-card-head">
+    <h2 id="calc-title">Calculs</h2>
+    <label class="filter">Niveau
+      <select class="rf-input" [value]="level()" (change)="setLevel($any($event.target).value)">
+        <option value="">Tous</option><option value="N0">N0</option><option value="N1">N1</option><option value="N2">N2</option>
+      </select>
+    </label>
+    <button type="button" class="rf-btn" [disabled]="picked().length !== 2" (click)="compare()">
+      Comparer les 2 calculs cochés</button>
+  </div>
+  <p class="rf-hint tools">Outils experts : <a routerLink="/calcul-1d">tester une paroi (Calcul 1D)</a> ·
+    <a routerLink="/parois">modèles de paroi</a> · <a routerLink="/calcul-3d">Calcul 3D avancé</a></p>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  @if (!runs().length) {
+    <p class="rf-hint">Aucun calcul pour ce bâtiment. Lancez-en un depuis la Synthèse.</p>
+  } @else {
+    <div class="table-wrap">
+      <table class="rf-table runs">
+        <thead><tr>
+          <th scope="col"><span class="sr">Comparer</span></th><th scope="col">Date</th><th scope="col">Niveau</th>
+          <th scope="col">Variante</th><th scope="col">État</th><th scope="col" class="num">Besoin (kWh/m²·an)</th>
+          <th scope="col" class="num">Puissance max (kW)</th><th scope="col" class="num">h &gt; 28 °C</th><th scope="col"></th>
+        </tr></thead>
+        <tbody>
+          @for (r of runs(); track r.id) {
+            <tr [class.current]="detail()?.id === r.id">
+              <td><input type="checkbox" class="pick" [checked]="picked().includes(r.id)" (change)="togglePick(r.id)"
+                         [disabled]="r.status !== 'DONE'" [attr.aria-label]="'Comparer le calcul du ' + (r.created_at | date: 'dd/MM HH:mm')" /></td>
+              <td>{{ r.created_at | date: 'dd/MM/yyyy HH:mm' }}</td>
+              <td>{{ r.level }}</td>
+              <td>{{ r.scenario_name ?? 'état actuel' }}</td>
+              <td>
+                @if (r.status !== 'DONE') { <span class="rf-badge m-infere">{{ r.status === 'ERROR' ? 'échec' : 'en cours' }}</span> }
+                @else if (r.up_to_date === true) { <span class="rf-badge m-mesure">à jour</span> }
+                @else if (r.up_to_date === false) { <span class="rf-badge m-infere">périmé</span> }
+                @else { <span class="rf-badge m-defaut">Calcul 3D</span> }
+              </td>
+              <td class="num">{{ num(r, 'heating_kwh_m2') ?? '—' }}</td>
+              <td class="num">{{ num(r, 'heating_kw_max') ?? '—' }}</td>
+              <td class="num">{{ num(r, 'hours_over_28') ?? '—' }}</td>
+              <td><button type="button" class="rf-btn small" (click)="open(r.id)" [attr.aria-label]="'Détail du calcul ' + r.level + ' du ' + (r.created_at | date: 'dd/MM HH:mm')">Détail</button></td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</section>
+
+@if (loading()) { <p class="rf-hint" role="status">Chargement du calcul…</p> }
+
+@if (detail(); as d) {
+  <section class="rf-card detail" aria-labelledby="det-title">
+    <div class="rf-card-head">
+      <h2 id="det-title">{{ levelLabel[d.level] }} · {{ d.created_at | date: 'dd/MM/yyyy HH:mm' }}</h2>
+      @if (d.up_to_date === true) { <span class="rf-badge m-mesure">à jour</span> }
+      @else if (d.up_to_date === false) { <span class="rf-badge m-infere">périmé — la fiche a changé depuis</span> }
+      <button type="button" class="rf-btn small" (click)="close()">Fermer</button>
+    </div>
+    <p class="rf-hint">
+      {{ d.scenario_name ?? 'État actuel' }} · météo : {{ d.weather.source ?? '—' }}@if (d.weather.n_hours) { ({{ d.weather.n_hours }} h) }
+      @if (d.duration_s) { · calculé en {{ d.duration_s | number: '1.0-1' }} s }
+      · @if (d.mode === 'experte') { enveloppe experte (parois assignées à la main) }
+      @else if (d.mode === 'calcul_3d') { lancé depuis la page Calcul 3D (réglages du formulaire) }
+      @else { entrées tirées de la fiche }
+    </p>
+    @if (d.status === 'ERROR') { <p class="rf-error" role="alert">{{ d.message }}</p> }
+
+    @if (d.status === 'DONE') {
+      <h3>Résultats</h3>
+      <div class="rf-kpis">
+        @for (k of indicatorRows(d); track k.label + k.unit) {
+          <div class="rf-kpi"><small>{{ k.label }}</small>
+            <strong>{{ k.pct ? (k.v * 100 | number: '1.0-0') + ' %' : (k.v | number: '1.0-1') }}</strong><em>{{ k.pct ? '' : k.unit }}</em></div>
+        }
+      </div>
+      <div class="cols">
+        @if (monthly(d).length) {
+          <figure class="months">
+            <figcaption>Besoin de chauffage par mois (kWh)</figcaption>
+            <div class="bars">
+              @for (v of monthly(d); track $index) {
+                <div class="bar" [title]="monthNames[$index] + ' : ' + (v | number: '1.0-0') + ' kWh'">
+                  <i [style.height.%]="(v / monthMax(d)) * 100"></i><span>{{ monthNames[$index].charAt(0) | uppercase }}</span></div>
+              }
+            </div>
+          </figure>
+        }
+        @if (balance(d).length) {
+          <div><h4>Bilan annuel</h4>
+            <table class="rf-table">
+              @for (x of balance(d); track x.label) { <tr><td>{{ x.label }}</td><td class="num">{{ x.v | number: '1.0-0' }} kWh</td></tr> }
+            </table>
+          </div>
+        }
+      </div>
+      @if (series(d, tempKey(d)).length) {
+        <app-serie-jour [values]="series(d, tempKey(d))" unit="°C"
+          [title]="(tempKey(d) === 't_op' ? 'Température opérative' : 'Température d’air') + ' intérieure (°C)'" />
+      }
+      @if (series(d, 'phi_hc_w').length) {
+        <app-serie-jour [values]="series(d, 'phi_hc_w')" unit="kW" [scale]="0.001" mode="max"
+          title="Puissance de chauffage (+) ou de froid (−), kW" />
+      }
+    }
+
+    <h3>Entrées utilisées</h3>
+    @if (d.inputs?.facts || d.settings['facts']) {
+      @for (g of factGroups($any(d.inputs?.facts ?? d.settings['facts'])); track g.block) {
+        <h4>{{ g.label }}</h4>
+        <table class="rf-table facts">
+          <thead><tr><th scope="col">Donnée</th><th scope="col">Valeur</th><th scope="col">Provenance</th><th scope="col" class="num">Confiance</th></tr></thead>
+          <tbody>
+            @for (row of g.rows; track row.key) {
+              <tr><td>{{ label(row.key) }}</td><td>{{ value(row.key, row.f.value) }}</td>
+                <td><span class="rf-badge" [class]="'rf-badge m-' + row.f.method">{{ methodLabel[row.f.method] ?? row.f.method }}</span>
+                  @if (row.f.source) { <small class="src">{{ row.f.source }}</small> }</td>
+                <td class="num">{{ pct(row.f.confidence) }}</td></tr>
+            }
+          </tbody>
+        </table>
+      }
+    }
+
+    @if (d.inputs?.['params']) {
+      <h4>Paramètres du modèle</h4>
+      <table class="rf-table">
+        <thead><tr><th scope="col">Façade</th><th scope="col" class="num">Mur opaque (m²)</th><th scope="col" class="num">U mur</th>
+          <th scope="col" class="num">Baies (m²)</th><th scope="col" class="num">Uw</th></tr></thead>
+        <tbody>
+          @for (o of orientations; track o) {
+            <tr><td>{{ o }}</td><td class="num">{{ scalar(inp(d, 'params.murs.' + o + '.opaque')) }}</td><td class="num">{{ scalar(inp(d, 'params.murs.' + o + '.u')) }}</td>
+              <td class="num">{{ scalar(inp(d, 'params.murs.' + o + '.window')) }}</td><td class="num">{{ scalar(inp(d, 'params.murs.' + o + '.uw')) }}</td></tr>
+          }
+        </tbody>
+      </table>
+      <dl class="kv">
+        <dt>Toiture</dt><dd>{{ scalar(inp(d, 'params.toiture.surface_m2')) }} m², U {{ scalar(inp(d, 'params.toiture.u')) }}</dd>
+        <dt>Plancher bas</dt><dd>{{ scalar(inp(d, 'params.plancher.surface_m2')) }} m², U {{ scalar(inp(d, 'params.plancher.u')) }}</dd>
+        <dt>Renouvellement d’air effectif</dt><dd>{{ scalar(inp(d, 'params.renouvellement_vol_h')) }} vol/h</dd>
+        <dt>Inertie</dt><dd>{{ scalar(inp(d, 'params.inertie.c_m_j_k_m2')) }} J/K par m²</dd>
+        <dt>Occupation</dt><dd>{{ scalar(inp(d, 'params.occupation')) }}</dd>
+        <dt>Horizon (°)</dt><dd>@for (o of orientations; track o) { {{ o }} {{ scalar(inp(d, 'params.horizon_deg.' + o)) }} }</dd>
+      </dl>
+    }
+
+    @if (d.inputs?.['parois']) {
+      <h4>Géométrie</h4>
+      <dl class="kv">
+        <dt>Origine</dt><dd>{{ scalar(inp(d, 'geometry.source')) }}</dd>
+        @if (inp(d, 'geometry.emprise_m2') !== undefined) {
+          <dt>Emprise, hauteur, niveaux</dt><dd>{{ scalar(inp(d, 'geometry.emprise_m2')) }} m² · {{ scalar(inp(d, 'geometry.hauteur_m')) }} m · {{ scalar(inp(d, 'geometry.niveaux')) }}</dd>
+          <dt>Toiture</dt><dd>{{ scalar(inp(d, 'geometry.toiture')) }}</dd>
+          <dt>Mitoyenneté</dt><dd>{{ pct(inp(d, 'geometry.mitoyennete.part')) }} des murs ({{ scalar(inp(d, 'geometry.mitoyennete.source')) }})</dd>
+        }
+        <dt>Maillage</dt><dd>{{ scalar(inp(d, 'geometry.n_triangles')) }} triangles</dd>
+        <dt>Obstacles</dt><dd>{{ scalar(inp(d, 'obstacles')) }}</dd>
+        <dt>Occupation</dt><dd>{{ scalar(inp(d, 'occupation')) }}</dd>
+      </dl>
+      @if (inp(d, 'geometry.baies')) {
+        <table class="rf-table">
+          <thead><tr><th scope="col">Façade</th><th scope="col" class="num">Taux de la fiche</th><th scope="col" class="num">Taux modélisé</th><th scope="col" class="num">Vitrages (m²)</th></tr></thead>
+          <tbody>
+            @for (o of orientations; track o) {
+              <tr><td>{{ o }}</td><td class="num">{{ pct(inp(d, 'geometry.baies.' + o + '.cible')) }}</td>
+                <td class="num">{{ pct(inp(d, 'geometry.baies.' + o + '.obtenu')) }}</td><td class="num">{{ scalar(inp(d, 'geometry.baies.' + o + '.surface_m2')) }}</td></tr>
+            }
+          </tbody>
+        </table>
+      }
+      <h4>Parois</h4>
+      <table class="rf-table">
+        <thead><tr><th scope="col">Paroi</th><th scope="col" class="num">U (W/m²·K)</th><th scope="col">Composition (extérieur → intérieur)</th></tr></thead>
+        <tbody>
+          @for (p of entries(inp(d, 'parois')); track p[0]) {
+            <tr><td>{{ $any(p[1]).label }}</td><td class="num">{{ scalar($any(p[1]).u) }}</td>
+              <td>@for (l of $any(p[1]).layers ?? []; track $index) { <span class="layer">{{ (l.e * 100) | number: '1.0-1' }} cm · λ {{ l.lam | number: '1.0-3' }}</span> }
+                @if (!$any(p[1]).layers) { {{ scalar($any(p[1]).surface_m2) }} m² }</td></tr>
+          }
+        </tbody>
+      </table>
+      @if (entries(inp(d, 'limites')).length) {
+        <h4>Limites de ce calcul</h4>
+        <ul class="limits">@for (l of entries(inp(d, 'limites')); track l[0]) { <li>{{ l[1] }}</li> }</ul>
+      }
+    }
+
+    @if (d.mode === 'calcul_3d') {
+      <h4>Réglages du formulaire Calcul 3D</h4>
+      <dl class="kv">
+        @for (e of entries(d.settings); track e[0]) { @if (e[0] !== 'facts') { <dt>{{ e[0] }}</dt><dd>{{ scalar(e[1]) }}</dd> } }
+      </dl>
+    }
+  </section>
+}
+
+@if (comparison(); as c) {
+  <section class="rf-card detail" aria-labelledby="cmp-title">
+    <div class="rf-card-head">
+      <h2 id="cmp-title">Comparaison</h2>
+      <button type="button" class="rf-btn small" (click)="close()">Fermer</button>
+    </div>
+    <p class="rf-hint">
+      A : {{ c.a.level }} du {{ c.a.created_at | date: 'dd/MM/yyyy HH:mm' }} ({{ c.a.scenario_name ?? 'état actuel' }}) ·
+      B : {{ c.b.level }} du {{ c.b.created_at | date: 'dd/MM/yyyy HH:mm' }} ({{ c.b.scenario_name ?? 'état actuel' }})
+      @if (c.weather) { · météo différente : {{ c.weather.a }} / {{ c.weather.b }} }
+    </p>
+    <h3>Résultats</h3>
+    <table class="rf-table">
+      <thead><tr><th scope="col">Indicateur</th><th scope="col" class="num">A</th><th scope="col" class="num">B</th><th scope="col" class="num">Écart</th></tr></thead>
+      <tbody>
+        @for (i of c.indicators; track i.key) {
+          @if (indicatorLabel(i.key) !== i.key) {
+            <tr><td>{{ indicatorLabel(i.key) }}</td><td class="num">{{ i.a | number: '1.0-2' }}</td><td class="num">{{ i.b | number: '1.0-2' }}</td>
+              <td class="num">{{ i.delta > 0 ? '+' : '' }}{{ i.delta | number: '1.0-2' }}@if (i.pct !== null) { ({{ i.pct > 0 ? '+' : '' }}{{ i.pct }} %) }</td></tr>
+          }
+        }
+      </tbody>
+    </table>
+    <h3>Données de la fiche qui diffèrent</h3>
+    @if (!c.facts.length) { <p class="rf-hint">Aucune : les deux calculs partent de la même fiche.</p> }
+    @else {
+      <table class="rf-table">
+        <thead><tr><th scope="col">Donnée</th><th scope="col">A</th><th scope="col">B</th></tr></thead>
+        <tbody>
+          @for (f of c.facts; track f.key) {
+            <tr><td>{{ label(f.key) }}</td>
+              <td>{{ value(f.key, f.a?.value) }} @if (f.a) { <small class="src">{{ methodLabel[f.a.method] ?? f.a.method }}</small> }</td>
+              <td>{{ value(f.key, f.b?.value) }} @if (f.b) { <small class="src">{{ methodLabel[f.b.method] ?? f.b.method }}</small> }</td></tr>
+          }
+        </tbody>
+      </table>
+    }
+    @if (c.inputs.length) {
+      <details>
+        <summary>Autres entrées qui diffèrent ({{ c.inputs.length }})</summary>
+        <table class="rf-table">
+          <thead><tr><th scope="col">Entrée</th><th scope="col">A</th><th scope="col">B</th></tr></thead>
+          <tbody>@for (x of c.inputs; track x.key) { <tr><td><code>{{ x.key }}</code></td><td>{{ scalar(x.a) }}</td><td>{{ scalar(x.b) }}</td></tr> }</tbody>
+        </table>
+      </details>
+    }
+  </section>
+}

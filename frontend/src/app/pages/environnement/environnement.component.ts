@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal, Input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe, UpperCasePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -108,7 +108,17 @@ export class EnvironnementComponent implements OnInit, OnDestroy {
   replaceUpAxis: 'auto' | 'z' | 'y' = 'auto';
   replaceScale: 'auto' | '1' | '0.01' | '0.001' | '0.0254' = 'auto';
 
+  /** Lot 27 (refonte) : intégré à la fiche — environnement de ce bâtiment, généré autour de lui. */
+  @Input() embedBuildingId: number | null = null;
+
   ngOnInit(): void {
+    if (this.embedBuildingId) {
+      this.genBuildingId = this.embedBuildingId;
+      this.api.getBuilding(this.embedBuildingId).subscribe({
+        next: (b) => { const id = (b as { environment_id?: number | null }).environment_id; if (id) this.load(id); },
+        error: () => {},
+      });
+    }
     this.refresh();
     this.api.getBuildings().subscribe({
       next: (bs) => this.buildings.set(bs as { id: number; name: string }[]),

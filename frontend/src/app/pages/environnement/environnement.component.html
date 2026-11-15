@@ -1,5 +1,6 @@
-<main class="page-env">
+<div class="page-env" [class.embedded]="!!embedBuildingId" [attr.role]="embedBuildingId ? null : 'main'">
 
+  @if (!embedBuildingId) {
   <div class="env-head">
     <p class="eyebrow"><span class="dot"></span> Ombrage</p>
     <h1>Environnement</h1>
@@ -11,6 +12,7 @@
     </p>
   </div>
 
+  }
   <!-- ── Génération ─────────────────────────────────────────────────── -->
   <section class="form-card">
     <h2>Générer un environnement</h2>
@@ -23,6 +25,7 @@
       Hors couverture LiDAR, repli sur la BD TOPO / OpenStreetMap (hauteurs forfaitaires, toits plats).
     </p>
 
+    @if (!embedBuildingId) {
     <div class="field-grid">
       <label>
         <span>Autour d'un bâtiment existant</span>
@@ -43,6 +46,9 @@
         </small>
       </label>
     </div>
+    } @else {
+    <p class="hint">Autour de ce bâtiment (il doit être géoréférencé) : il est reconnu dans la scène et marqué comme bâtiment étudié ; l'environnement lui est relié et donne l'horizon de N0/N1 et les obstacles du N2.</p>
+    }
     <div class="field-grid">
       @if (genBuildingId === null) {
         <label>
@@ -376,6 +382,7 @@
     </section>
   }
 
+  @if (!embedBuildingId) {
   <!-- ── Environnements enregistrés ──────────────────────────────────── -->
   <section class="form-card">
     <h2>Environnements enregistrés</h2>
@@ -410,4 +417,5 @@
       </label>
     </details>
   </section>
-</main>
+  }
+</div>

@@ -1,5 +1,6 @@
-<main class="page-batiment">
+<div class="page-batiment" [class.embedded]="!!embedId" [attr.role]="embedId ? null : 'main'">
 
+  @if (!embedId) {
   <div class="batiment-head">
     <p class="eyebrow"><span class="dot"></span> Enveloppe 3D</p>
     <h1>Bâtiment</h1>
@@ -31,6 +32,7 @@
     }
     <button type="button" class="btn-secondary" (click)="newBuilding()">+ Nouveau bâtiment</button>
   </section>
+  }
 
   <section class="form-card">
     <h2>{{ currentBuildingId() === null ? 'Nouveau bâtiment' : 'Modifier « ' + buildingName + ' »' }}</h2>
@@ -45,15 +47,27 @@
             <span class="checklist-label">{{ item.label }}</span>
           </a>
         }
-        <a class="checklist-item next-step" routerLink="/calcul-3d">
-          <span class="status-badge todo">→</span>
-          <span class="checklist-label">Construire la météo et lancer le calcul (Calcul 3D)</span>
-        </a>
+        @if (embedId) {
+          <a class="checklist-item next-step" routerLink="/fiche" [queryParams]="{ b: embedId, onglet: 'simulation' }">
+            <span class="status-badge todo">→</span>
+            <span class="checklist-label">Lancer le calcul (onglet Simulation)</span>
+          </a>
+        } @else {
+          <a class="checklist-item next-step" routerLink="/calcul-3d">
+            <span class="status-badge todo">→</span>
+            <span class="checklist-label">Construire la météo et lancer le calcul (Calcul 3D)</span>
+          </a>
+        }
       </div>
+      @if (embedId) {
+        <p class="hint">Une enveloppe entièrement assignée alimente la fiche : U des parois, taux de vitrage et part
+          mitoyenne en sont déduits (provenance « enveloppe experte ») et le N2 la prend telle quelle.</p>
+      } @else {
       <p class="hint">
         Étape météo non trackée ci-dessus : elle n'est jamais enregistrée avec le bâtiment (Lot L),
         elle se construit à chaque fois sur la page Calcul 3D.
       </p>
+      }
     }
 
     <div class="field-grid">
@@ -132,8 +146,8 @@
         OpenStreetMap (ailleurs), déjà extrudée avec un groupe par paroi et le plancher marqué
         « Sol ». Le géoréférencement est rempli au passage — y compris la rotation nord, nulle par
         construction. Réserves de la source : toiture toujours plate, hauteur parfois estimée depuis
-        le nombre d'étages, cours intérieures comblées. Pour un parcours entièrement guidé (taux de
-        vitrage par paroi), voir le <a routerLink="/mode-simplifie">mode simplifié</a>.
+        le nombre d'étages, cours intérieures comblées. Pour un parcours entièrement guidé, partez
+        d'une adresse dans les <a routerLink="/parc">parcs</a>.
       </p>
       <app-building-search [maxWalls]="searchMaxWalls" [initialLat]="georefLat"
         [initialLon]="georefLon" (candidateChosen)="onCandidateChosen($event)" />
@@ -145,7 +159,7 @@
         Point d'entrée pédagogique/de test — pas besoin de modélisateur 3D externe : génère
         directement un maillage simple avec des groupes déjà nommés (mur_nord, mur_sud…), prêt pour
         l'assignation par groupe ci-dessous. Pour une géométrie réelle, l'import ci-dessus reste la
-        voie avancée, ou le <a routerLink="/mode-simplifie">mode simplifié</a> pour un bâtiment réel
+        voie avancée, ou le <a routerLink="/parc">parcs</a> pour un bâtiment réel
         existant.
       </p>
       <div class="field-grid">
@@ -306,4 +320,4 @@
       </button>
     }
   </section>
-</main>
+</div>

@@ -322,7 +322,7 @@ def _executer(nom: str, user: McpUser, args: dict):
         for lvl in ('N0', 'N1', 'N2'):
             run = calc_service.current_or_latest(b, lvl, sc)
             out[lvl] = None if run is None else {**_resume_run(run),
-                                                 'up_to_date': calc_service.is_up_to_date(run) if lvl != 'N2' else None}
+                                                 'up_to_date': calc_service.is_up_to_date(run)}
         return out
     if nom == 'lister_documents':
         return [{'id': d.pk, 'filename': d.filename, 'kind': d.kind, 'n_pages': len(d.pages),

@@ -13,6 +13,10 @@ import { ProtectionsComponent } from '../../components/protections/protections.c
 import { MeteoCarteComponent } from '../../components/meteo-carte/meteo-carte.component';
 import { QuestionnaireComponent } from '../../components/questionnaire/questionnaire.component';
 import { ResultatCarteComponent } from '../../components/resultat-carte/resultat-carte.component';
+import { CalculsComponent } from '../../components/calculs/calculs.component';
+import { SimulationComponent } from '../../components/simulation/simulation.component';
+import { BatimentComponent } from '../batiment/batiment.component';
+import { EnvironnementComponent } from '../environnement/environnement.component';
 import { Catalogue, CatalogueKey, Fact, Fiche, METHOD_LABELS, Method } from '../../core/refonte.types';
 
 interface BuildingSummary { id: number; name: string; }
@@ -27,7 +31,7 @@ interface BuildingInfo {
 @Component({
   selector: 'app-fiche',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent, ProtectionsComponent, GeometrieComponent, SystemesComponent, MesuresComponent, ScenariosComponent, DocumentsComponent],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, KeyValuePipe, ResultatCarteComponent, QuestionnaireComponent, MeteoCarteComponent, ProtectionsComponent, GeometrieComponent, SystemesComponent, MesuresComponent, ScenariosComponent, DocumentsComponent, CalculsComponent, SimulationComponent, BatimentComponent, EnvironnementComponent],
   templateUrl: './fiche.component.html',
   styleUrl: './fiche.component.scss',
 })
@@ -44,9 +48,13 @@ export class FicheComponent implements OnInit {
   error = signal('');
   saving = signal(false);
   ficheVersion = signal(0);
+  /** Calcul à ouvrir dans l'onglet Calculs (Lot 25 : fin d'une simulation). */
+  openRun = signal<number | null>(null);
   tab = signal('synthese');
-  tabs: [string, string][] = [['synthese', 'Synthèse'], ['meteo', 'Météo'], ['geometrie', 'Géométrie'], ['protections', 'Protections solaires'], ['systemes', 'Systèmes'], ['mesures', 'Mesures et calage'], ['scenarios', 'Scénarios'], ['documents', 'Documents'],
+  tabs: [string, string][] = [['synthese', 'Synthèse'], ['simulation', 'Simulation'], ['meteo', 'Météo'], ['geometrie', 'Géométrie'], ['maillage', 'Maillage 3D'], ['environnement', 'Environnement'], ['protections', 'Protections solaires'], ['systemes', 'Systèmes'], ['mesures', 'Mesures et calage'], ['scenarios', 'Scénarios'], ['calculs', 'Calculs'], ['documents', 'Documents'],
     ['donnees', 'Données et provenance']];
+
+  showRun(id: number): void { this.openRun.set(id); this.setTab('calculs'); this.ficheVersion.update(v => v + 1); }
 
   setTab(t: string): void {
     this.tab.set(t);

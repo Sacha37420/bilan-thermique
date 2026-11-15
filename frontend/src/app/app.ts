@@ -31,17 +31,18 @@ export class AppComponent {
   protected noop = (): void => {};
   protected closeMobileFn = (): void => this.closeMobile();
 
+  // Lot 27 (refonte) : un bâtiment s'étudie dans sa fiche (maillage 3D, environnement, simulation,
+  // calculs) ; les entrées suivantes sont des outils experts.
   readonly navItems: NavItem[] = [
     { path: '/parc',          label: 'Parcs',            abbr: 'Pc' },
     { path: '/fiche',         label: 'Fiche bâtiment',   abbr: 'Fi' },
     { path: '/ia',            label: 'Intelligence artificielle', abbr: 'IA' },
-    { path: '/calcul-1d',     label: 'Calcul 1D',        abbr: '1D' },
-    { path: '/theorie',       label: 'Théorie',          abbr: 'Th' },
+    { path: '/calcul-1d',     label: 'Calcul 1D (paroi)', abbr: '1D' },
     { path: '/parois',        label: 'Modèles de paroi', abbr: 'Mp' },
-    { path: '/mode-simplifie', label: 'Mode simplifié',  abbr: 'Ms' },
-    { path: '/batiment',      label: 'Bâtiment',         abbr: 'Bt' },
-    { path: '/environnement', label: 'Environnement',    abbr: 'En' },
-    { path: '/calcul-3d',     label: 'Calcul 3D',        abbr: '3D' },
+    { path: '/batiment',      label: 'Importer un maillage', abbr: 'Im' },
+    { path: '/environnement', label: 'Environnement d’un quartier', abbr: 'En' },
+    { path: '/calcul-3d',     label: 'Calcul 3D avancé', abbr: '3D' },
+    { path: '/theorie',       label: 'Théorie',          abbr: 'Th' },
   ];
 
   @ViewChild('closeBtn') private closeBtnRef?: ElementRef<HTMLButtonElement>;

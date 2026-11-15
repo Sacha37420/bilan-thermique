@@ -1,0 +1,104 @@
+<section class="rf-card" aria-labelledby="sim-title">
+  <div class="rf-card-head"><h2 id="sim-title">Préparer une simulation</h2></div>
+  <div class="controls">
+    <div class="levels" role="radiogroup" aria-label="Niveau de calcul">
+      @for (l of levels; track l.id) {
+        <button type="button" role="radio" class="lvl" [class.active]="level() === l.id" [attr.aria-checked]="level() === l.id"
+                (click)="setLevel(l.id)">{{ l.label }}</button>
+      }
+    </div>
+    <label class="field">Variante
+      <select class="rf-input" [value]="scenario() ?? ''" (change)="setScenario($any($event.target).value)">
+        <option value="">État actuel</option>
+        @for (s of scenarios(); track s.id) { <option [value]="s.id">{{ s.name }}</option> }
+      </select>
+    </label>
+  </div>
+  <p class="rf-hint">{{ levelHelp() }}</p>
+  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+  @if (loading() && !prep()) { <p class="rf-hint" role="status">Préparation…</p> }
+
+  @if (prep(); as p) {
+    <div class="summary" [class.dim]="loading()">
+      <div class="rf-kpi"><small>Météo</small><strong class="txt">{{ p.weather?.source ?? '—' }}</strong>
+        <em>{{ p.weather?.n_hours ?? 0 }} h · <a [routerLink]="['/fiche']" [queryParams]="{ b: buildingId, onglet: 'meteo' }">changer</a></em></div>
+      <div class="rf-kpi"><small>Durée estimée</small><strong>{{ duration(p.estimate_s) }}</strong>
+        <em>@if (p.level === 'N2') { un calcul lourd à la fois sur le lab } @else { calculé tout de suite }</em></div>
+      <div class="rf-kpi"><small>Fiabilité des entrées</small>
+        <strong class="txt">{{ p.reliability.verdict ?? '—' }}</strong>
+        <em>@if (p.reliability.spread_pct !== null) { dispersion ± {{ p.reliability.spread_pct | number: '1.0-0' }} % · }confiance {{ p.reliability.confidence * 100 | number: '1.0-0' }} %</em></div>
+      @if (p.range) {
+        <div class="rf-kpi"><small>Fourchette N1 actuelle</small><strong>{{ p.range.heating_kwh_m2_p10 | number: '1.0-0' }}–{{ p.range.heating_kwh_m2_p90 | number: '1.0-0' }}</strong><em>kWh/m²·an (P10–P90)</em></div>
+      }
+    </div>
+    @if (p.reliability.verdict_text) { <p class="verdict" [class]="'verdict v-' + p.reliability.verdict!.replace(' ', '-')">{{ p.reliability.verdict_text }}</p> }
+
+    @for (b of p.blockers; track b) { <p class="rf-error" role="alert">{{ b }}</p> }
+    @if (p.busy && p.can_launch) { <p class="rf-hint">Un calcul lourd tourne déjà sur le lab : le vôtre sera refusé tant qu'il n'est pas fini.</p> }
+    @if (job(); as j) {
+      <div class="progress" role="status">
+        <progress max="100" [value]="j.progress" [attr.aria-label]="'Avancement : ' + j.progress + ' %'"></progress>
+        <span>{{ j.message || 'En attente du calculateur…' }} ({{ j.progress }} %)</span>
+      </div>
+    }
+    <div class="actions">
+      @if (p.already) {
+        <button type="button" class="rf-btn" (click)="launched.emit(p.already!)">Voir le calcul déjà fait avec ces entrées</button>
+        <button type="button" class="rf-btn" [disabled]="!p.can_launch || !!job()" (click)="launch(true)">Relancer quand même</button>
+      } @else {
+        <button type="button" class="rf-btn primary" [disabled]="!p.can_launch || !!job()" (click)="launch()">
+          {{ job() ? 'Calcul en cours…' : 'Lancer le ' + p.level }}</button>
+      }
+    </div>
+
+    @if (p.reliability.decisive.length) {
+      <h3>Entrées décisives</h3>
+      <p class="rf-hint">Ce qui bouge le plus le besoin de chauffage quand on tient compte de l'incertitude de chaque valeur
+        (variation pour ± 1 écart type, besoin nominal {{ p.reliability.nominal_kwh | number: '1.0-0' }} kWh). Les préciser resserre le résultat.</p>
+      <table class="rf-table">
+        <thead><tr><th scope="col">Donnée</th><th scope="col">Valeur</th><th scope="col">Provenance</th>
+          <th scope="col" class="num">Effet sur le besoin</th><th scope="col"></th></tr></thead>
+        <tbody>
+          @for (d of p.reliability.decisive; track d.key) {
+            <tr><td>{{ label(d.key) }}</td><td>{{ value(d.key, d.value) }}</td>
+              <td><span [class]="'rf-badge m-' + d.method">{{ methodLabel[d.method] ?? d.method }}</span></td>
+              <td class="num"><span class="meter" aria-hidden="true"><i [style.width.%]="d.share_pct > 100 ? 100 : d.share_pct"></i></span>
+                ± {{ d.share_pct / 2 | number: '1.0-0' }} %</td>
+              <td><a class="rf-btn small" [routerLink]="['/fiche']" [queryParams]="{ b: buildingId, onglet: 'donnees' }">Corriger</a></td></tr>
+          }
+        </tbody>
+      </table>
+    }
+
+    <h3>Entrées du calcul</h3>
+    <p class="rf-hint">Exactement ce que le calcul enregistrera.
+      @for (c of methodCounts(p.inputs); track c.m) { <span [class]="'rf-badge m-' + c.m">{{ c.n }} {{ methodLabel[c.m] }}</span> }</p>
+    @for (g of groups(p.inputs); track g.label) {
+      <details class="grp" [open]="$first">
+        <summary>{{ g.label }} ({{ g.rows.length }})</summary>
+        <table class="rf-table">
+          <tbody>
+            @for (r of g.rows; track r.key) {
+              <tr><td>{{ label(r.key) }}</td><td>{{ value(r.key, r.f.value) }}</td>
+                <td><span [class]="'rf-badge m-' + r.f.method">{{ methodLabel[r.f.method] ?? r.f.method }}</span>
+                  @if (r.f.source) { <small class="src">{{ r.f.source }}</small> }</td>
+                <td class="num">{{ r.f.confidence * 100 | number: '1.0-0' }} %</td></tr>
+            }
+          </tbody>
+        </table>
+      </details>
+    }
+
+    @if (p.level === 'N2' && p.engine) {
+      <h3>Ce que le N2 en tire</h3>
+      <dl class="kv">
+        <dt>Géométrie</dt><dd>{{ eng('geometry.source') }} · {{ eng('geometry.n_triangles') }} triangles</dd>
+        <dt>Obstacles</dt><dd>{{ eng('obstacles') }}</dd>
+        <dt>Parois</dt><dd>@for (e of entries(eng('parois')); track e[0]) { <span class="chip">{{ e[1]['label'] }} : U {{ e[1]['u'] }}</span> }</dd>
+      </dl>
+      @if (list(eng('limites')).length) {
+        <ul class="limits">@for (l of list(eng('limites')); track $index) { <li>{{ l }}</li> }</ul>
+      }
+    }
+  }
+</section>

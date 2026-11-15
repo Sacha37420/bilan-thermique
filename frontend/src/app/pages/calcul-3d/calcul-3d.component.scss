@@ -282,3 +282,5 @@ textarea { width: 100%; font-family: var(--font-mono); min-height: 120px; resize
 .history-level { font-family: var(--font-mono); font-weight: 700; color: var(--accent); }
 .history-date { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-mute); }
 .history-ind { flex: 1 1 12rem; font-size: var(--text-sm); }
+
+.notice { margin: 0 0 1rem; padding: .75rem 1rem; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-tint); color: var(--text); }

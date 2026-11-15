@@ -1,0 +1,26 @@
+.rf-card-head { flex-wrap: wrap; gap: var(--space-3, .75rem); }
+.filter { display: flex; align-items: center; gap: .5rem; color: var(--text-mute); margin-left: auto; }
+.table-wrap { overflow-x: auto; }
+.runs tr.current td { background: var(--accent-tint); }
+.pick { width: 22px; height: 22px; margin: 11px; accent-color: var(--accent); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.detail { margin-top: var(--space-4, 1rem); }
+.detail h3 { margin: var(--space-5, 1.5rem) 0 var(--space-2, .5rem); }
+.detail h4 { margin: var(--space-4, 1rem) 0 var(--space-2, .5rem); font-size: var(--text-sm, 14px); color: var(--text-mute); }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4, 1rem); margin: var(--space-4, 1rem) 0; }
+.months { margin: 0; }
+.months figcaption { font-weight: 600; margin-bottom: .5rem; }
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 140px; }
+.bar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.bar i { display: block; width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 1px; }
+.bar span { font-size: 11px; color: var(--text-mute); margin-top: 2px; }
+.src { display: block; color: var(--text-mute); font-size: var(--text-xs, 12px); }
+.kv { display: grid; grid-template-columns: minmax(10rem, max-content) 1fr; gap: .35rem 1rem; margin: 0; }
+.kv dt { color: var(--text-mute); }
+.kv dd { margin: 0; }
+.layer { display: inline-block; margin: 0 .5rem .25rem 0; padding: 0 .4rem; border: 1px solid var(--border); border-radius: 4px;
+  font-family: var(--font-mono, monospace); font-size: var(--text-xs, 12px); }
+.limits { margin: 0; padding-left: 1.2rem; color: var(--text-mute); }
+details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--text-mute); }
+app-serie-jour { display: block; margin: var(--space-4, 1rem) 0; }
+@media (max-width: 600px) { .kv { grid-template-columns: 1fr; } .filter { margin-left: 0; } }

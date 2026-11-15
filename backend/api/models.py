@@ -366,6 +366,9 @@ class CalcRun(models.Model):
     settings = models.JSONField(default=dict, blank=True)
     indicators = models.JSONField(default=dict, blank=True)
     results = models.JSONField(null=True, blank=True)
+    # Refonte (Lot 23) : entrées figées au lancement — faits utilisés, géométrie, parois par groupe, réglages,
+    # occupation, obstacles, limites. Ce qu'on relit pour savoir avec quoi un résultat a été obtenu (Lot 24).
+    inputs = models.JSONField(null=True, blank=True)
     message = models.CharField(max_length=500, blank=True)
     duration_s = models.FloatField(null=True, blank=True)
     owner_sub = models.CharField(max_length=64, blank=True, default='')

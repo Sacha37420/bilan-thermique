@@ -8,8 +8,15 @@ Simulateur thermique de bâtiments du lab. Deux régimes sur un même modèle de
 2. **Affinage** — le gestionnaire ou l'occupant d'un bâtiment corrige et complète la fiche ; chaque
    valeur garde sa provenance, chaque correction fait monter la confiance.
 
-Pages expertes existantes : calcul 1D d'une paroi, bâtiment 3D (FEM par triangle, N2), ombrage par
-lancer de rayons, environnement LiDAR HD × BD TOPO, façades Panoramax.
+Un bâtiment s'étudie dans sa **fiche** : Synthèse, **Simulation** (préparer un calcul N0, N1 ou N2 : entrées,
+fiabilité, durée), Météo, Géométrie, **Maillage 3D** (enveloppe et parois assignées, page Bâtiment intégrée),
+**Environnement** (LiDAR HD × BD TOPO), Protections solaires, Systèmes, Mesures et calage, Scénarios, **Calculs**
+(historique, entrées figées, résultats, comparaison), Documents, Données et provenance. Les trois niveaux (N0 mensuel,
+N1 5R1C horaire, N2 éléments finis par paroi) partent de la même fiche ; ce qui se fait sur le maillage, l'environnement
+ou les façades l'alimente (Lots 23 à 27).
+
+Outils experts hors fiche : calcul 1D d'une paroi, modèles de paroi, import d'un maillage, environnement d'un quartier,
+Calcul 3D avancé (planning horaire, régime imposé ou libre, ombrage temps réel, vent), théorie.
 
 - Feuille de route (lue par le lab) : `FEUILLE_DE_ROUTE.md` ; cahier des charges de la refonte et
   décisions : `refonte.md` ; changements demandés au lab : `DEMANDES_LAB.md` ; journal des lots

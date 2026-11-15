@@ -51,11 +51,30 @@ def active_edit(building, scenario=None):
 
 
 def effective_summary(building, scenario=None):
-    """Résumé géométrique utilisé par N0/N1 : l'édition active, sinon l'automatique."""
+    """Résumé géométrique utilisé par N0/N1 : l'édition active, sinon l'automatique.
+
+    Lot 26 : si un environnement relevé est relié, l'horizon par façade en est tiré (bâtiments et arbres
+    réels) à la place de celui des voisins de la chaîne — `horizon_source` le dit."""
     e = active_edit(building, scenario) or (active_edit(building) if scenario is not None else None)
-    if e is not None:
-        return e.summary
-    return (building.pipeline or {}).get('geometry')
+    summary = e.summary if e is not None else (building.pipeline or {}).get('geometry')
+    if building.environment_id:
+        horizon = _env_horizon_cached(building, (summary or {}).get('footprint_xy') or auto_footprint(building),
+                                      float((summary or {}).get('hauteur_m') or 6.0))
+        if horizon is not None:
+            summary = {**(summary or {}), 'horizon_deg': horizon, 'horizon_source': 'environnement relevé'}
+    return summary
+
+
+def _env_horizon_cached(building, footprint, eave):
+    from . import expert_facts, sources
+    from .fingerprint import stable_hash
+    env = building.environment
+    if not footprint:
+        return None
+    ident = f'{env.pk}:{stable_hash(env.updated_at.isoformat(), footprint, round(eave, 2))[:24]}'
+    payload = sources.cached('env_horizon', ident, lambda: {'h': expert_facts.env_horizon(building, footprint, eave)},
+                             ttl_days=3650)
+    return payload.get('h')
 
 
 def _neighbours(building):
@@ -190,6 +209,8 @@ def apply_edit(building, data, author_sub='', author_name='', regenerate_envelop
         building.envelope = envelope
         building.sun_visibility_stale = True
         building.save(update_fields=['envelope', 'sun_visibility_stale'])
+        from . import expert_facts
+        expert_facts.sync_envelope(building, author_sub, author_name)   # Lot 26 : plus d'enveloppe experte
     facts.refresh_scores(building)
     return edit
 

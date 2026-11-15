@@ -8,12 +8,10 @@ export const routes: Routes = [
   { path: 'theorie',   component: TheorieComponent },
   { path: 'calcul-1d', component: Calcul1DComponent },
   { path: 'parois',    component: ParoisComponent },
-  {
-    // three.js (viewer 3D) est lourd — chargé à la demande, comme la page
-    // "jouer" de craft-lab (Phaser) — pas dans le bundle initial de l'app.
-    path: 'mode-simplifie',
-    loadComponent: () => import('./pages/mode-simplifie/mode-simplifie.component').then(m => m.ModeSimplifieComponent),
-  },
+  // Lot 27 (refonte) : le mode simplifié est couvert par les parcs (adresse → fiche automatique → calcul).
+  { path: 'mode-simplifie', redirectTo: 'parc', pathMatch: 'full' },
+  // three.js (viewer 3D) est lourd — chargé à la demande, comme la page
+  // "jouer" de craft-lab (Phaser) — pas dans le bundle initial de l'app.
   {
     path: 'batiment',
     loadComponent: () => import('./pages/batiment/batiment.component').then(m => m.BatimentComponent),

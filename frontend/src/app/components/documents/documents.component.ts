@@ -24,6 +24,11 @@ const CHECK_LABEL: Record<string, string> = { ok: 'contrôle passé', hors_plage
   templateUrl: './documents.component.html',
 })
 export class DocumentsComponent implements OnChanges, OnDestroy {
+  /** Lot 26 : l'analyse des façades (Panoramax) arrive comme un document local, lu sans IA. */
+  kindLabel(k: string): string {
+    return ({ xml_dpe: 'XML DPE', pdf: 'PDF', texte: 'texte', facades: 'façades analysées' } as Record<string, string>)[k] ?? k;
+  }
+
   @Input({ required: true }) buildingId!: number;
   changed = output<void>();
   private rf = inject(RefonteApiService);

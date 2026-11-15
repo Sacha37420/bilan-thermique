@@ -15,11 +15,11 @@
       <thead><tr><th>Document</th><th>Pages</th><th>Taille</th><th></th></tr></thead>
       <tbody>
         @for (d of docs(); track d.id) {
-          <tr><td>{{ d.filename }} <span class="rf-badge m-defaut">{{ d.kind }}</span></td>
+          <tr><td>{{ d.filename }} <span class="rf-badge m-defaut">{{ kindLabel(d.kind) }}</span></td>
             <td>{{ d.pages_with_text.length }} / {{ d.n_pages }} lisibles</td>
-            <td>{{ d.size_bytes / 1024 | number:'1.0-0' }} ko</td>
+            <td>@if (d.kind === 'facades') { — } @else { {{ d.size_bytes / 1024 | number:'1.0-0' }} ko }</td>
             <td class="rf-row">
-              @if (d.kind !== 'xml_dpe') {
+              @if (d.kind !== 'xml_dpe' && d.kind !== 'facades') {
                 <button type="button" class="rf-btn" (click)="askEstimate(d)" [disabled]="busy() || !d.pages_with_text.length">Lire avec mon IA</button>
               }
               <button type="button" class="rf-btn danger" (click)="remove(d)" [attr.aria-label]="'Supprimer ' + d.filename">Supprimer</button></td></tr>
