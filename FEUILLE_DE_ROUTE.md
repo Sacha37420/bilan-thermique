@@ -524,7 +524,7 @@ mensuel en complément.
 - [x] Navigateur réel, clair et sombre
 **Vérifié le :** 2026-11-15 — 462 tests OK (5 nouveaux, `api/tests/test_simulation.py` : entrées annoncées = entrées
 enregistrées pour N1 et N2, « déjà calculé », fourchette, verdict, mesure d'une entrée → dispersion en baisse,
-blocages, droits, préparer ne lance rien). Navigateur réel (banc), clair et sombre, 25 contrôles : la carte Résultat
+blocages, droits, préparer ne lance rien). Navigateur réel (banc), clair et sombre, 23 contrôles : la carte Résultat
 mène à la Simulation ; verdict « à confirmer » (dispersion ± 21 %) ; entrées décisives (surface, hauteur, U des murs,
 renouvellement d'air) avec lien « Corriger » ; N2 annoncé (géométrie, parois, ≈ 9 s), lancé, suivi, puis onglet Calculs
 ouvert sur ce N2 ; entrées inchangées → « Voir le calcul déjà fait » ; occupant : N1 lançable, N2 bloqué et expliqué.
