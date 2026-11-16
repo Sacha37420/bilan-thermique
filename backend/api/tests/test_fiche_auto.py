@@ -10,7 +10,20 @@ from django.test import SimpleTestCase, TestCase
 
 from .. import archetypes, facts, pipeline, sources, tasks
 from ..models import Building, BuildingFact, Job, SourceCache
-from ..testing import client_for, patch_jwks
+from ..testing import client_for, patch_jwks, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 # Réponse BDNB relevée le 2026-11-14 (maison de 1992 en Indre-et-Loire, DPE 2016), réduite.
 DPE_MAISON = {
@@ -103,7 +116,10 @@ class GeometryTest(SimpleTestCase):
     def test_tall_neighbour_south_raises_south_horizon(self):
         tower = rect(0, -30, 10, -20)  # à 20 m au sud, 30 m de haut
         g = pipeline.geometry_from_footprints(rect(0, 0, 10, 8), [(tower, 30.0)], 6.0)
-        self.assertGreater(g['horizon_deg']['S'], 45)
+        # Lot 30 : profil mesuré depuis la façade — plein sud, à mi-hauteur : atan((30 − 3) / 20) ≈ 53°.
+        mid = g['horizon_profil']['S'][1::3]
+        self.assertTrue(all(row[18] > 45 for row in mid))
+        self.assertGreater(g['horizon_deg']['S'], 20)        # angle face à la façade (tour de 10 m de large)
         self.assertEqual(g['horizon_deg']['N'], 0.0)
 
 

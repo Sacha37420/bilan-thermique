@@ -428,9 +428,11 @@ ENV_ESTIMATE_S = 180                      # ordre de grandeur d'une génération
 
 
 def auto_mode(building):
-    """Mode d'environnement du parc du bâtiment ('manuel' hors parc)."""
+    """Mode d'environnement du parc du bâtiment ; hors parc, la valeur par défaut du réglage (Lot 30 : la
+    géométrie croisée avec le LiDAR étant indispensable, « pendant la récupération automatique »)."""
     from . import reglages
-    return reglages.for_building(building, 'orchestration').get('environnement.mode', 'manuel')
+    orch = reglages.for_building(building, 'orchestration') or reglages.defaults('orchestration')
+    return orch.get('environnement.mode', 'manuel')
 
 
 def wanted(building, when):

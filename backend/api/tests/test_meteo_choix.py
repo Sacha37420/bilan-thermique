@@ -7,7 +7,20 @@ from django.test import SimpleTestCase, TestCase
 
 from .. import calc_service, facts, weather_service as ws
 from ..models import Building, WeatherDataset
-from ..testing import client_for, patch_jwks, synthetic_year
+from ..testing import client_for, patch_jwks, synthetic_year, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 MF_HEADER = ['NUM_POSTE', 'NOM_USUEL', 'LAT', 'LON', 'ALTI', 'AAAAMMJJHH'] + ['X'] * 4 + ['FF'] + ['X'] * 5 + ['T'] + \
             ['X'] * 3 + ['GLO', 'DIR', 'DIF']

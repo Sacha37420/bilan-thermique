@@ -42,6 +42,7 @@ class Params:
     residential: bool = True
     t_ground: float = GROUND_T_DEFAULT
     horizon: dict = field(default_factory=lambda: {o: 0.0 for o in ORIENTATIONS})
+    horizon_profile: dict | None = None   # Lot 30 : profil par tranche d'azimut (`api.horizon`)
     # Protections solaires (Lot 14) : [{kind, orientation, mode, params, control}] — engines.shading.
     devices: list = field(default_factory=list)
     sources: dict = field(default_factory=dict)
@@ -126,6 +127,7 @@ def from_fiche(values, geometry=None):
         t_cool=float(t_cool) if t_cool is not None else None,
         residential=usage in RESIDENTIAL,
         horizon=(geometry or {}).get('horizon_deg') or {o: 0.0 for o in ORIENTATIONS},
+        horizon_profile=(geometry or {}).get('horizon_profil') or None,
     )
 
 

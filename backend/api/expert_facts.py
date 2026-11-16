@@ -124,51 +124,27 @@ def sync_envelope(building, author_sub='', author_name=''):
 # ── Environnement relevé → horizon par façade (N0/N1) ───────────────────────
 
 def env_horizon(building, footprint_xy, eave_m):
-    """Angle d'obstruction (degrés) par orientation, depuis les objets de l'environnement relié (bâtiments
-    et arbres, hors bâtiment étudié et terrain) — même règle que la chaîne (cône ±45° devant la façade,
-    hauteur mesurée depuis la mi-hauteur du bâtiment, 80 m au plus). None si rien d'exploitable."""
+    """Horizon par façade (degrés) et son profil (`api.horizon`) depuis les objets de l'environnement relié
+    (bâtiments et arbres) : `{'horizon_deg', 'horizon_profil'}`, ou None si rien d'exploitable."""
     env = building.environment
     if env is None or not footprint_xy:
         return None
     import shapely.geometry
+    from . import horizon as hz
     poly = shapely.geometry.Polygon(footprint_xy)
-    if not poly.is_valid or poly.area < 1:
+    if not poly.is_valid:
+        poly = poly.buffer(0)
+    if poly.is_empty or poly.area < 1:
         return None
-    c = poly.centroid
-    z_ref = eave_m / 2.0
-    ground = env.georef_ground_z if env.georef_ground_z is not None else 0.0
-    best = {o: 0.0 for o in ORIENTATIONS}
-    seen = False
-    from .observed_env import STATUS_ACTIVE, rings_to_poly
-    from .weather_source import to_local_azimuth
-    north = building.georef_north_offset_deg or 0.0
-    for obj in env.scene_objects or []:
-        if obj.get('kind') not in ('building', 'tree') or obj.get('status', STATUS_ACTIVE) != STATUS_ACTIVE:
-            continue   # bâtiment étudié, objets retirés, terrain : pas des obstacles
-        verts = obj.get('vertices') or []
-        if not verts:
-            continue
-        zs = [v[2] for v in verts]
-        top = max(zs) - (min(zs) if obj['kind'] == 'building' else ground)
-        if top <= 0:
-            continue
-        hull = rings_to_poly(obj.get('footprint')) if obj.get('footprint') else None
-        if hull is None or hull.is_empty:
-            hull = shapely.geometry.MultiPoint([(v[0], v[1]) for v in verts]).convex_hull
-        q = hull.centroid
-        seen = True
-        for o, az in (('N', 0.0), ('E', 90.0), ('S', 180.0), ('O', 270.0)):
-            local = to_local_azimuth(az, north)   # l'environnement est dans le repère du bâtiment
-            ux, uy = math.sin(math.radians(local)), math.cos(math.radians(local))
-            vx, vy = q.x - c.x, q.y - c.y
-            ahead = vx * ux + vy * uy
-            if ahead <= 1.0 or abs(vx * uy - vy * ux) > ahead:
-                continue
-            dist = max(poly.distance(hull), 1.0)
-            if dist > 80:
-                continue
-            best[o] = max(best[o], math.degrees(math.atan2(max(top - z_ref, 0.0), dist)))
-    return {o: round(v, 1) for o, v in best.items()} if seen else None
+    from . import croisement
+    mine = croisement.studied(building, env, poly)
+    z0 = min((float((o.get('info') or {}).get('base_z', 0.0) or 0.0) for o in mine), default=0.0)
+    obstacles, buildings = croisement.obstacles(env, {o['id'] for o in mine}, z0)
+    if not obstacles:
+        return None
+    degs, prof = hz.profile(poly, obstacles, eave_m, adjacency=[p for p, _h in buildings],
+                            north_deg=building.georef_north_offset_deg or 0.0)
+    return {'horizon_deg': degs, 'horizon_profil': prof}
 
 
 # ── Façades analysées → propositions ────────────────────────────────────────

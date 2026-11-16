@@ -55,20 +55,22 @@ class SchemaTest(Base):
         self.assertTrue(all(e['applique'] for e in flags.values()), [k for k, e in flags.items() if not e['applique']])
         self.assertEqual(set(flags['environnement.mode']['choix']), {'manuel', 'avant_n2', 'chaine'})
         d = reglages.defaults('orchestration')
-        self.assertEqual((d['environnement.mode'], d['environnement.rayon_m']), ('manuel', 150))
+        self.assertEqual((d['environnement.mode'], d['environnement.rayon_m']), ('chaine', 150))   # Lot 30
         with self.assertRaises(reglages.ReglageError):
             reglages.validate('orchestration', {'environnement.rayon_m': 400})
 
     def test_wanted(self):
         b = Building.objects.create(name='b', portfolio=self.p, georef_lat=47.39, georef_lon=0.69)
         hors = Building.objects.create(name='h', georef_lat=47.39, georef_lon=0.69)
-        self.assertFalse(environment_service.wanted(b, 'n2'))                 # défaut : à la demande
+        self.assertTrue(environment_service.wanted(b, 'chaine'))              # défaut (Lot 30) : dans la chaîne
+        self.mode('manuel')
+        self.assertFalse(environment_service.wanted(b, 'n2'))
         self.mode('avant_n2')
         self.assertTrue(environment_service.wanted(b, 'n2'))
         self.assertFalse(environment_service.wanted(b, 'chaine'))
         self.mode('chaine')
         self.assertTrue(environment_service.wanted(b, 'n2') and environment_service.wanted(b, 'chaine'))
-        self.assertFalse(environment_service.wanted(hors, 'n2'))              # hors parc : rien ne change
+        self.assertTrue(environment_service.wanted(hors, 'n2'))               # hors parc : le défaut (Lot 30)
         b.environment = Environment.objects.create(name='déjà', georef_lat=47.39, georef_lon=0.69)
         b.save()
         self.assertFalse(environment_service.wanted(b, 'chaine'))             # un environnement relié est gardé
@@ -194,6 +196,7 @@ class N2Test(Base):
         self.assertEqual(prep['already'], run.pk)
 
     def test_an_old_n2_without_environment_is_not_reused(self):
+        self.mode('manuel')                                           # un N2 d'abord sans environnement
         with tmy():
             run, _ = calc_service.start_n2(self.b, owner_sub='g')
             run = calc_service.run_n2(run)
@@ -217,6 +220,7 @@ class N2Test(Base):
         self.assertTrue(any('zone pas encore couverte' in lim for lim in run.inputs['limites']))
 
     def test_ground_reflection_passed_to_the_solver(self):
+        self.mode('manuel')                                           # un N2 d'abord sans environnement
         from .. import building_solver
         orig = building_solver.run_building_simulation
         seen = {}
@@ -240,11 +244,18 @@ class N2Test(Base):
         run0.refresh_from_db()
         self.assertTrue(calc_service.from_fiche(run0))
 
-    def test_outside_a_parc_nothing_is_generated(self):
+    def test_outside_a_parc_the_default_applies(self):
+        """Lot 30 : hors parc, le réglage par défaut (« pendant la récupération automatique ») vaut aussi."""
         hors = make_building(fiche(), name='hors')
         with tmy():
             run, _ = calc_service.start_n2(hors, owner_sub='g')
-        self.assertNotIn('environnement', run.settings)
+        self.assertEqual(run.settings['environnement'], {'generer': True})
         with tmy(), generating() as g:
             calc_service.run_n2(run)
-        g.assert_not_called()
+        g.assert_called_once()
+        with mock.patch('api.environment_service.auto_mode', return_value='manuel'):
+            other = make_building(fiche(), name='manuel')
+            Job.objects.update(status=Job.DONE)
+            with tmy():
+                run2, _ = calc_service.start_n2(other, owner_sub='g')
+            self.assertNotIn('environnement', run2.settings)

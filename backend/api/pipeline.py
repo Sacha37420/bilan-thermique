@@ -234,12 +234,14 @@ def _polygon_xy(ring_latlon, lat0, lon0):
     return shapely.geometry.Polygon([geodata.local_xy(la, lo, lat0, lon0) for la, lo in ring_latlon])
 
 
-def geometry_from_footprints(target, neighbours, height_m):
+def geometry_from_footprints(target, neighbours, height_m, obstacles=(), north_deg=0.0):
     """Géométrie simplifiée d'un bâtiment, dans un repère métrique local (x est, y nord).
 
-    target : Polygon ; neighbours : [(Polygon, hauteur)] ; height_m : hauteur à l'égout.
-    Rend : emprise, périmètre, surfaces de murs exposés par orientation (N/E/S/O), part
-    mitoyenne, horizon (angle d'obstruction, degrés) par orientation."""
+    target : Polygon ; neighbours : [(Polygon, hauteur)] — bâtiments voisins (mitoyenneté, masques) ;
+    height_m : hauteur à l'égout ; obstacles : [(Polygon, sommet)] en plus (arbres) ; north_deg : rotation
+    du repère (0 pour la chaîne). Rend : emprise, périmètre, surfaces de murs exposés par orientation
+    (N/E/S/O), part mitoyenne, horizon par orientation (`horizon_deg`, degrés) et son profil par
+    tranche d'azimut (`horizon_profil`, Lot 30 — `api.horizon`)."""
     poly = target if target.is_valid else target.buffer(0)
     if poly.geom_type == 'MultiPolygon':
         poly = max(poly.geoms, key=lambda p: p.area)
@@ -263,28 +265,15 @@ def geometry_from_footprints(target, neighbours, height_m):
             seg = shapely.ops.substring(shapely.geometry.LineString([(x1, y1), (x2, y2)]), 0.7, length - 0.7)
             shared = min(length, seg.intersection(nb_union).length * length / (length - 1.4))
         shared_len += shared
-        walls[cardinal_of(az)] += (length - shared) * height_m
-    horizon = {}
-    c = poly.centroid
-    for o, az in (('N', 0.0), ('E', 90.0), ('S', 180.0), ('O', 270.0)):
-        best = 0.0
-        ux, uy = math.sin(math.radians(az)), math.cos(math.radians(az))
-        for p, h in neighbours:
-            q = p.centroid
-            vx, vy = q.x - c.x, q.y - c.y
-            ahead = vx * ux + vy * uy
-            if ahead <= 1.0 or abs(vx * uy - vy * ux) > ahead:  # devant la façade, cône ±45°
-                continue
-            dist = max(poly.distance(p), 1.0)
-            if dist > 80:
-                continue
-            best = max(best, math.degrees(math.atan2(max(h - height_m / 2.0, 0.0), dist)))
-        horizon[o] = round(best, 1)
+        walls[cardinal_of((az + north_deg) % 360)] += (length - shared) * height_m
+    from . import horizon as hz
+    horizon, profil = hz.profile(poly, list(neighbours) + list(obstacles), height_m,
+                                 adjacency=[p for p, _h in neighbours], north_deg=north_deg)
     return {
         'emprise_m2': round(poly.area, 1), 'perimetre_m': round(perim, 1), 'hauteur_m': round(height_m, 2),
         'murs_exposes_m2': {o: round(v, 1) for o, v in walls.items()},
         'mitoyennete': round(shared_len / perim, 3) if perim else 0.0,
-        'horizon_deg': horizon,
+        'horizon_deg': horizon, 'horizon_profil': profil,
     }
 
 
@@ -432,11 +421,37 @@ def initialize(building, progress=None):
             geo_rows += [('identite.emprise_m2', g['emprise_m2'], 'infere', 0.65, 'BD TOPO (IGN)'),
                          ('identite.hauteur_m', round(height, 1), 'infere', 0.4 if approx else 0.65, 'BD TOPO (IGN)'),
                          ('identite.mitoyennete', min(0.9, g['mitoyennete']), 'infere', 0.6, 'BD TOPO (IGN), voisins accolés')]
+            from . import croisement
+            prev_auto = (building.pipeline or {}).get('envelope_auto')
+            auto_env = croisement._envelope_is_auto(building, building.pipeline or {})
             env = envelope_from_polygon(poly, height)
-            if env is not None and not building.envelope.get('triangles'):
+            if env is not None and (not building.envelope.get('triangles') or auto_env):
                 building.envelope = env
                 building.sun_visibility_stale = True
-            ok('A3', mitoyennete=g['mitoyennete'], n_voisins=len(neighbours))
+                report['envelope_auto'] = croisement._envelope_hash(env)
+            elif prev_auto:
+                report['envelope_auto'] = prev_auto
+            report['bdtopo'] = {k: report.get(k) for k in ('geometry', 'footprint_xy', 'neighbours', 'horizon_deg')}
+            report['geometrie'] = {'source': 'bdtopo'}
+            # Lot 30 : un environnement relevé déjà relié donne la géométrie croisée BD TOPO × LiDAR (emprise
+            # recalée, hauteur mesurée, toiture, voisins réels) à la place de la BD TOPO seule.
+            if building.environment_id:
+                try:
+                    c = croisement.cross(building, poly, height)
+                except croisement.NotCrossed as exc:
+                    report['geometrie'] = {'source': 'bdtopo', 'note': str(exc)}
+                else:
+                    report.update(geometry=c['geometry'], footprint_xy=c['footprint_xy'], neighbours=c['neighbours'],
+                                  horizon_deg=c['geometry']['horizon_deg'], geometrie=c['report'])
+                    geo_rows = c['rows']
+                    env3d = croisement._lidar_envelope(building, c['objects']) if auto_env else None
+                    if env3d is not None:
+                        building.envelope = env3d
+                        building.sun_visibility_stale = True
+                        report['envelope_auto'] = croisement._envelope_hash(env3d)
+                    report['sources'].append('LiDAR HD (IGN, Licence Ouverte 2.0)')
+            ok('A3', mitoyennete=report['geometry']['mitoyennete'], n_voisins=len(report['neighbours']),
+               geometrie=report['geometrie']['source'])
             report['sources'].append('BD TOPO (IGN, Licence Ouverte 2.0)')
         except Exception as exc:  # noqa: BLE001
             fail('A3', exc)
@@ -505,9 +520,10 @@ ENV_STAGES = {'lidar-index': 'dalles', 'lidar-read': 'lecture du nuage', 'bdtopo
 
 
 def apply_environment(building, progress=None):
-    """Étape A6 (réglage « environnement.mode = chaine » du parc) : génère l'environnement observé
-    (LiDAR HD × BD TOPO) s'il n'y en a pas de relié, **avant** N0/N1, qui en tirent l'horizon par
-    façade. Rend le compte rendu de l'étape, ou None si rien n'est à faire. Ne lève jamais."""
+    """Étape A6 (réglage « environnement.mode = chaine », par défaut depuis le Lot 30) : génère
+    l'environnement observé (LiDAR HD × BD TOPO) s'il n'y en a pas de relié, puis croise la géométrie du
+    bâtiment avec lui (`api.croisement`), **avant** N0/N1. Rend le compte rendu de l'étape, ou None si
+    rien n'est à faire. Ne lève jamais."""
     from . import environment_service
     if not environment_service.wanted(building, 'chaine'):
         return None
@@ -515,7 +531,12 @@ def apply_environment(building, progress=None):
     if progress:
         def cb(stage, pct):
             progress(f'Environnement observé (LiDAR HD) : {ENV_STAGES.get(stage, "préparation")}…', 95)
-    return environment_service.ensure_for_building(building, progress_cb=cb)
+    step = environment_service.ensure_for_building(building, progress_cb=cb)
+    if step.get('ok'):
+        # Lot 30 : la géométrie du bâtiment est aussitôt croisée avec l'environnement (avant N0/N1).
+        from . import croisement
+        step['geometrie'] = croisement.apply(building)
+    return step
 
 
 def auto_levels(building):

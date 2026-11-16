@@ -6,7 +6,20 @@ from django.test import SimpleTestCase, TestCase
 
 from .. import calc_service, facts, geometry_service as gs
 from ..models import Building
-from ..testing import box_envelope, client_for, patch_jwks, synthetic_year
+from ..testing import box_envelope, client_for, patch_jwks, synthetic_year, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 RECT = [[-5, -4], [5, -4], [5, 4], [-5, 4]]
 L_SHAPE = [[0, 0], [12, 0], [12, 5], [5, 5], [5, 10], [0, 10]]

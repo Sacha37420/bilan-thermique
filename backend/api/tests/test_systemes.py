@@ -6,7 +6,20 @@ from django.test import SimpleTestCase, TestCase
 from .. import calc_service, facts
 from ..engines import systems
 from ..models import Building
-from ..testing import synthetic_year
+from ..testing import synthetic_year, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 BASE = {'identite.usage': 'maison', 'ventilation.type': 'vmc_sf_auto', 'ventilation.debit_vol_h': 0.5}
 

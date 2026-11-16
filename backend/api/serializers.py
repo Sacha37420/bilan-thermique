@@ -332,7 +332,11 @@ class BuildingSerializer(serializers.Serializer):
 
     def get_pipeline(self, obj):
         p = obj.pipeline or {}
-        return {k: p.get(k) for k in ('steps', 'geometry', 'horizon_deg', 'sources', 'geocode_score') if k in p}
+        from .geometry_service import without_profile
+        out = {k: p.get(k) for k in ('steps', 'geometry', 'horizon_deg', 'sources', 'geocode_score', 'geometrie') if k in p}
+        if 'geometry' in out:
+            out['geometry'] = without_profile(out['geometry'])
+        return out
 
     def get_facades(self, obj):
         """Lot AK — analyse des façades, sans l'enveloppe de base (réservée à la

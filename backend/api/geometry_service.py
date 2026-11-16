@@ -61,8 +61,16 @@ def effective_summary(building, scenario=None):
         horizon = _env_horizon_cached(building, (summary or {}).get('footprint_xy') or auto_footprint(building),
                                       float((summary or {}).get('hauteur_m') or 6.0))
         if horizon is not None:
-            summary = {**(summary or {}), 'horizon_deg': horizon, 'horizon_source': 'environnement relevé'}
+            summary = {**(summary or {}), **horizon, 'horizon_source': 'environnement relevé'}
     return summary
+
+
+def without_profile(summary):
+    """Résumé sans le profil d'horizon (plusieurs milliers de valeurs) : pour l'afficher ou le figer dans un
+    calcul — le profil, lui, entre dans l'empreinte des entrées (`calc_service.inputs_hash_for`)."""
+    if not summary:
+        return summary
+    return {k: v for k, v in summary.items() if k != 'horizon_profil'}
 
 
 def _env_horizon_cached(building, footprint, eave):
@@ -71,8 +79,8 @@ def _env_horizon_cached(building, footprint, eave):
     env = building.environment
     if not footprint:
         return None
-    ident = f'{env.pk}:{stable_hash(env.updated_at.isoformat(), footprint, round(eave, 2))[:24]}'
-    payload = sources.cached('env_horizon', ident, lambda: {'h': expert_facts.env_horizon(building, footprint, eave)},
+    ident = f'{env.pk}:{stable_hash(env.updated_at.isoformat(), footprint, round(eave, 2), building.pk)[:24]}'
+    payload = sources.cached('env_horizon_profil', ident, lambda: {'h': expert_facts.env_horizon(building, footprint, eave)},
                              ttl_days=3650)
     return payload.get('h')
 

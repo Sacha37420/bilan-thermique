@@ -10,9 +10,22 @@ from .. import archetypes, facts, parc, pipeline, questionnaire, reglages, scena
 from ..calc_service import ENGINE_VERSION
 from ..models import (AIExtractionRun, Building, BuildingDocument, CalcRun, FactProposal, Portfolio, PortfolioMember,
                       Scenario)
-from ..testing import client_for, patch_jwks, synthetic_year
+from ..testing import client_for, patch_jwks, synthetic_year, without_auto_environment
 from .test_fiche_auto import SOURCES, fake_ign
 from .test_parc import WEATHER, fake_init
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 YEAR = synthetic_year()
 

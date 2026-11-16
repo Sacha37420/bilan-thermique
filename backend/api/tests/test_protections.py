@@ -10,8 +10,21 @@ from django.test import SimpleTestCase, TestCase
 from .. import building_solver, calc_service, facts, shading_service
 from ..engines import inputs, n1, shading
 from ..models import Building, ParoiModel, ShadingDevice
-from ..testing import box_with_window, client_for, patch_jwks, synthetic_year
+from ..testing import box_with_window, client_for, patch_jwks, synthetic_year, without_auto_environment
 from .test_moteurs import FLOOR, GLASS, ROOF, WALL
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 SUMMER = synthetic_year(days=45, start_day=180, t_mean=25.0, t_amp=0.0)
 CASQUETTE = {'depth_m': 1.0, 'gap_m': 0.2, 'window_height_m': 1.64, 'window_width_m': 5.48, 'extension_m': 2.0}
