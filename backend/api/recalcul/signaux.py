@@ -48,6 +48,12 @@ def _scenario_genere(scenario_id):
 
 def _cascade(kwargs):
     origin = kwargs.get('origin')
+    # `origin` est l'instance supprimée, ou le QuerySet quand la suppression vient de `QuerySet.delete()`
+    # (`nettoyer_brouillons`) : sans ce second cas, un signal planifiait un recalcul pour un bâtiment en cours de
+    # suppression et la transaction entière échouait sur la clé étrangère de `recalculs`.
+    model = getattr(origin, 'model', None)
+    if model is not None:
+        return model in (Building, Portfolio) or (model is Scenario and origin.filter(genere=True).exists())
     return isinstance(origin, (Building, Portfolio)) or (isinstance(origin, Scenario) and origin.genere)
 
 

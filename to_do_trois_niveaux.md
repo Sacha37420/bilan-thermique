@@ -27,10 +27,10 @@ un bâtiment. Remplace les décisions D37 et D44. Contrat : `chantiers/bt-trois-
 **Tests :** potentiels N0 ; parc par niveau (agrégats) ; tableau ; gabarits
 **Vérifié le :** 2026-11-16 — suite complète 742 tests OK (`essai.sh`, réseau fermé)
 
-## Lot 44 — Écran et intégration   ·   statut : à faire
-- [ ] Bâtiment : les trois niveaux côte à côte (réel), état des calculs, rafraîchissement automatique ; « Recalculer » pour un gestionnaire
-- [ ] Calculs : potentiels par bouquet sur trois niveaux ; simulation et historique cohérents avec le recalcul automatique
-- [ ] Parc : tableau et potentiels par niveau, progression des calculs du parc
-- [ ] Rendu : choix du niveau dans le constructeur, aperçu qui suit les recalculs
-- [ ] Intégration : déploiement, cloisonnement, parcours réel (affiner un bâtiment → recalcul visible partout), documentation (README, refonte.md D49+, Théorie, moteurs)
-**Vérifié le :**
+## Lot 44 — Écran et intégration   ·   statut : livré
+- [x] Bâtiment : les trois niveaux côte à côte (réel), état des calculs, rafraîchissement automatique ; « Recalculer » pour un gestionnaire
+- [x] Calculs : potentiels par bouquet sur trois niveaux ; simulation et historique cohérents avec le recalcul automatique
+- [x] Parc : tableau et potentiels par niveau, progression des calculs du parc
+- [x] Rendu : choix du niveau dans le constructeur, aperçu qui suit les recalculs
+- [x] Intégration : déploiement, cloisonnement, parcours réel (affiner un bâtiment → recalcul visible partout), documentation (README, refonte.md D49+, Théorie, moteurs)
+**Vérifié le :** 2026-11-16 — 743 tests (dont la suppression par QuerySet, défaut trouvé au parcours réel) ; cloisonnement `lab-runner` 3/3 ; premier calcul de tous les bâtiments en service (`planifier_tous`, 4 bâtiments : N2 et potentiels N0/N1/N2, verrou lourd occupé ⇒ replanifié puis fait) ; **parcours réel** (compte de test, 0 erreur console) : parc créé, bâtiment par son adresse (chaîne 76 s), puis **N0, N1, N2 et les potentiels des deux bouquets calculés sans geste en 50 s**, bandeau suivi sans recharger (« 7 restants » → « Tous les calculs sont à jour »), plus aucun appel de suivi une fois à jour ; `U des murs` corrigé à 0,25 ⇒ « Recalcul prévu — suite à : donnée mur.u », puis recalcul des 9 calculs (N1 réel 62 → 59 kWh/m²·an, N0 78 → 73), visibles dans Bâtiment, Calculs, Parc (onglets N0/N1/N2, « Les trois côte à côte ») et Rendu. Non joués en navigateur : lecteur du parc, `calcul.n2` coupé (tenus par les tests backend)
