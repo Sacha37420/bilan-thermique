@@ -195,8 +195,8 @@ def _bloc(b, portee, mesures):
             raise SpecError('Source de tableau inconnue.')
         cols = b.get('colonnes')
         connues = tableaux.colonnes(src, mesures)
-        if cols is None:
-            cols = tableaux.colonnes_defaut(src)
+        if cols is None or cols == []:
+            cols = tableaux.colonnes_defaut(src)  # tableau tout juste ajouté : colonnes par défaut, pas un refus
         if not isinstance(cols, list) or not cols or len(cols) > 25 or any(c not in connues for c in cols):
             raise SpecError('Colonnes de tableau inconnues.')
         tri = b.get('tri')

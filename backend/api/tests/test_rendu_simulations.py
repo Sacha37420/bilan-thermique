@@ -33,6 +33,8 @@ class ValidationTest(TestCase):
         for mauvais in (['N3'], 'N1', [1]):
             with self.assertRaises(spec_mod.SpecError):
                 spec_mod.valider(doc({'type': 'tableau', 'source': 'batiments', 'niveaux': mauvais}))
+        v = spec_mod.valider(doc({'type': 'tableau', 'source': 'batiments', 'colonnes': []}))
+        self.assertTrue(v['sections'][0]['blocs'][0]['colonnes'])          # tableau neuf : colonnes par défaut
         with self.assertRaises(spec_mod.SpecError):
             spec_mod.valider(doc({'type': 'carte', 'indicateur': 'heating_kwh_m2', 'niveaux': ['N0', 'N1']}))
 
