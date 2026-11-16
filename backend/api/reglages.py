@@ -63,9 +63,25 @@ def _orchestration():
         _e('calcul.n1', 'Calcul horaire simplifié (N1) automatique', 'bool', True, modeles=['N1'],
            aide='Lancé après la chaîne automatique, avec sa fourchette.', groupe='Calcul automatique'),
         _e('environnement.mode', 'Environnement observé (LiDAR HD × BD TOPO)', 'enum', 'manuel',
-           choix={'manuel': 'À la demande', 'avant_n2': 'Avant chaque calcul détaillé'}, modeles=['N2'], applique=False,
-           aide='Pas encore pris en compte : l’environnement se génère à la demande, depuis l’onglet Bâtiment.',
+           choix={'manuel': 'À la demande (onglet Bâtiment)',
+                  'avant_n2': 'Avant chaque calcul détaillé, s’il manque',
+                  'chaine': 'Pendant la récupération automatique, pour chaque bâtiment'},
+           modeles=['N0', 'N1', 'N2'],
+           aide='Bâtiments, arbres et terrain reconstruits depuis le LiDAR HD et la BD TOPO, albédo du sol relevé sur '
+                'les orthophotos. Relié au bâtiment, il donne l’horizon par façade de N0/N1 et les obstacles et la '
+                'réflexion du sol du calcul détaillé. Opération lourde : une à plusieurs minutes par bâtiment. '
+                '« Pendant la récupération automatique » l’ajoute à la chaîne de chaque bâtiment du parc (étape A6, '
+                'avant N0/N1) et couvre aussi le calcul détaillé ; « avant chaque calcul détaillé » le génère au début '
+                'd’un N2. Un environnement déjà relié (éventuellement retouché) est toujours gardé, et un échec '
+                'n’arrête rien : le calcul reprend les voisins BD TOPO.',
            groupe='Environnement'),
+        _e('environnement.rayon_m', 'Rayon de l’environnement', 'int', 150, unite='m', min=30, max=250,
+           aide='Demi-côté de la zone reconstruite autour du bâtiment (150 m, comme dans l’outil Environnement). '
+                'Le temps de calcul croît comme le carré du rayon.', groupe='Environnement'),
+        _e('environnement.vegetation', 'Arbres et massifs', 'bool', True,
+           aide='Houppiers relevés par le LiDAR, essence (conifère ou feuillu) par CoSIA.', groupe='Environnement'),
+        _e('environnement.terrain', 'Relief', 'bool', True,
+           aide='Maillage du terrain : masque d’un relief amont et sol de la réflexion.', groupe='Environnement'),
         _e('facades.mode', 'Analyse des façades (Panoramax)', 'enum', 'manuel', choix={'manuel': 'À la demande'},
            modeles=['N2'], aide='Seul mode disponible : l’analyse se lance depuis l’outil de maillage.', groupe='Façades'),
     ]

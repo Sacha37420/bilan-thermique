@@ -496,7 +496,27 @@ def initialize(building, progress=None):
     return report
 
 
-# ── Après la chaîne (A7, A8) : météo par défaut et calculs automatiques ──────
+# ── Après la chaîne (A6, A7, A8) : environnement, météo par défaut et calculs automatiques ──
+
+ENV_STAGES = {'lidar-index': 'dalles', 'lidar-read': 'lecture du nuage', 'bdtopo': 'emprises BD TOPO',
+              'cosia': 'essences des arbres', 'rasters': 'terrain et hauteurs', 'registration': 'recalage',
+              'buildings': 'bâtiments et toitures', 'lidar-only': 'bâtiments hors BD TOPO',
+              'vegetation': 'arbres', 'terrain': 'terrain', 'ortho': 'albédo du sol', 'save': 'enregistrement'}
+
+
+def apply_environment(building, progress=None):
+    """Étape A6 (réglage « environnement.mode = chaine » du parc) : génère l'environnement observé
+    (LiDAR HD × BD TOPO) s'il n'y en a pas de relié, **avant** N0/N1, qui en tirent l'horizon par
+    façade. Rend le compte rendu de l'étape, ou None si rien n'est à faire. Ne lève jamais."""
+    from . import environment_service
+    if not environment_service.wanted(building, 'chaine'):
+        return None
+    cb = None
+    if progress:
+        def cb(stage, pct):
+            progress(f'Environnement observé (LiDAR HD) : {ENV_STAGES.get(stage, "préparation")}…', 95)
+    return environment_service.ensure_for_building(building, progress_cb=cb)
+
 
 def auto_levels(building):
     """Niveaux calculés automatiquement après la chaîne : N0 et N1, sauf réglage contraire du parc."""

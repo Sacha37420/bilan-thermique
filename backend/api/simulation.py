@@ -6,6 +6,7 @@
 - `reliability` : confiance et complétude de la fiche, entrées **décisives** (influence × incertitude, un passage
   N1 vectorisé — `questionnaire.key_influence`), dispersion attendue du besoin et un verdict ;
 - `range` : la fourchette P10–P90 du dernier N1 s'il est à jour ;
+- `environment` : N2 d'un parc réglé pour générer l'environnement observé manquant avant le calcul ;
 - `estimate_s`, `blockers`, `can_launch`, `already` (un calcul terminé a déjà exactement ces entrées), `busy`.
 """
 
@@ -65,8 +66,14 @@ def prepare(building, level, scenario=None, can_manage=False):
         weather, wdesc = calc_service.resolve_weather(building, spec)
     except calc_service.CalcError as exc:
         blockers.append(str(exc))
-    engine, n_tri = None, None
+    engine, n_tri, env_plan = None, None, None
     if level == 'N2':
+        from . import environment_service
+        if environment_service.wanted(building, 'n2'):
+            from . import reglages
+            r = reglages.for_building(building, 'orchestration').get('environnement.rayon_m', 150)
+            env_plan = {'generer': True, 'rayon_m': r,
+                        'estimate_s': int(environment_service.ENV_ESTIMATE_S * (r / 150.0) ** 2)}
         if not can_manage:
             blockers.append('Le N2 est réservé aux gestionnaires du bâtiment.')
         try:
@@ -80,7 +87,9 @@ def prepare(building, level, scenario=None, can_manage=False):
         from . import geometry_service
         engine = {'params': calc_service.params_snapshot(p), 'geometry': geometry_service.effective_summary(building, scenario)}
     already = None
-    if wdesc is not None and not blockers:
+    if env_plan and isinstance(engine, dict):
+        engine = {**engine, 'obstacles': 'environnement observé, généré avant le calcul (réglage du parc)'}
+    if wdesc is not None and not blockers and not env_plan:
         h = calc_service.inputs_hash_for(building, level, scenario, wdesc.get('hash'), vals)
         done = CalcRun.objects.filter(building=building, level=level, scenario=scenario, status=Job.DONE,
                                       inputs_hash=h).order_by('-created_at').first()
@@ -95,6 +104,8 @@ def prepare(building, level, scenario=None, can_manage=False):
         'level': level, 'scenario': scenario.pk if scenario else None,
         'weather': wdesc, 'inputs': calc_service.facts_used(eff), 'engine': engine,
         'reliability': reliability(building, eff, weather),
-        'range': rng, 'estimate_s': _estimate(level, (wdesc or {}).get('n_hours'), n_tri),
+        'range': rng, 'estimate_s': _estimate(level, (wdesc or {}).get('n_hours'), n_tri)
+        + (env_plan['estimate_s'] if env_plan else 0),
+        'environment': env_plan,
         'blockers': blockers, 'can_launch': not blockers, 'already': already, 'busy': busy,
     }

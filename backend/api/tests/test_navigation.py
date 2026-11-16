@@ -73,9 +73,9 @@ class ReglagesApiTest(ParcCase):
         self.assertTrue(o['bdnb.actif'] and o['calcul.n0'] and o['calcul.n1'])
 
     def test_unbranched_entries_say_so(self):
+        # Depuis le 2026-11-16, tout l'orchestrateur est branché (environnement compris : test_environnement_orchestre).
         flags = {e['cle']: e['applique'] for e in reglages.schema('orchestration')}
-        self.assertFalse(flags['environnement.mode'])
-        self.assertTrue(flags['bdnb.actif'])
+        self.assertTrue(flags['environnement.mode'] and flags['bdnb.actif'])
 
     def test_put_by_manager_then_reset(self):
         r = self.g.put(self.url('parametrage'), {'surcharges': {'isolants.lambda_mur': 0.03}}, format='json')

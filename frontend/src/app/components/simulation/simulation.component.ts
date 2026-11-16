@@ -15,6 +15,8 @@ interface Prep {
                  verdict: string | null; verdict_text: string | null; decisive: Decisive[] };
   range: { heating_kwh_m2: number; heating_kwh_m2_p10: number; heating_kwh_m2_p90: number; run: number } | null;
   estimate_s: number; blockers: string[]; can_launch: boolean; already: number | null; busy: boolean;
+  /** N2 d'un parc réglé pour générer l'environnement observé manquant avant le calcul (orchestrateur). */
+  environment?: { generer: boolean; rayon_m: number; estimate_s: number } | null;
 }
 interface JobState { status: string; progress: number; message: string }
 

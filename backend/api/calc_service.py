@@ -103,7 +103,7 @@ def inputs_hash_for(building, level, scenario, weather_hash, values=None):
 def from_fiche(run):
     """Vrai pour un calcul lancé depuis la fiche (tous les N0/N1 ; un N2 du Lot 23). Faux pour un N2 de
     la page Calcul 3D, dont les réglages viennent du formulaire et dont on ne sait pas dire s'il est à jour."""
-    return run.level != 'N2' or (run.settings or {}).get('engine') == n2_inputs.ENGINE_VERSION
+    return run.level != 'N2' or (run.settings or {}).get('engine') in n2_inputs.FICHE_ENGINES
 
 
 def is_up_to_date(run):
@@ -248,7 +248,10 @@ def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=
     _weather, wdesc = resolve_weather(building, weather_spec)
     vals = facts.effective_values(building, scenario)
     inputs_hash = inputs_hash_for(building, 'N2', scenario, wdesc.get('hash'), vals)
-    if not force:
+    from . import environment_service
+    env_to_generate = environment_service.wanted(building, 'n2')
+    # Un environnement à générer changera les obstacles : aucun calcul terminé n'a ces entrées-là.
+    if not force and not env_to_generate:
         done = CalcRun.objects.filter(building=building, level='N2', scenario=scenario, status=Job.DONE,
                                       inputs_hash=inputs_hash).first()
         if done is not None:
@@ -264,6 +267,11 @@ def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=
                 'confidence': conf, 'completeness': compl,
                 'weather_spec': {k: v for k, v in (weather_spec or {}).items() if k in ('dataset_id', 'start', 'end')}}
     inputs = {**built['snapshot'], 'facts': used}
+    if env_to_generate:
+        # Orchestrateur du parc : environnement observé généré au début du calcul (run_n2), qui
+        # recalcule alors l'empreinte des entrées.
+        settings['environnement'] = {'generer': True}
+        inputs['obstacles'] = 'environnement observé, généré avant le calcul (réglage du parc)'
     holder = {}
 
     def created(job):
@@ -289,28 +297,54 @@ def run_n2(run, progress_cb=None):
     from . import shadow
     from .engines import systems
     from .building_solver import run_building_simulation
+    from . import environment_service, pipeline
+    from .tasks import _environment_ground
     t0 = time.monotonic()
     building, scenario = run.building, run.scenario
     say = progress_cb or (lambda pct, msg: None)
+    base = 0   # avancement déjà consommé par la génération de l'environnement
+    if (run.settings or {}).get('environnement', {}).get('generer'):
+        if environment_service.wanted(building, 'n2'):
+            def env_cb(stage, pct):
+                say(1 + int(pct * 0.39), f'Environnement observé (LiDAR HD) : {pipeline.ENV_STAGES.get(stage, "préparation")}…')
+            say(1, 'Environnement observé (LiDAR HD × BD TOPO)…')
+            report = environment_service.ensure_for_building(building, progress_cb=env_cb)
+        else:
+            report = {'ok': True, 'deja_relie': True, 'environment_id': building.environment_id}
+        run.settings = {**run.settings, 'environnement': {'generer': True, **report}}
+        base = 40
     vals = facts.effective_values(building, scenario)
     built = n2_inputs.build(building, scenario, vals)
-    weather, _wdesc = resolve_weather(building, (run.settings or {}).get('weather_spec') or None)
+    weather, wdesc = resolve_weather(building, (run.settings or {}).get('weather_spec') or None)
+    if base:
+        # L'environnement a changé les obstacles : empreinte et description refaites sur ce qui est calculé.
+        run.inputs_hash = inputs_hash_for(building, 'N2', scenario, wdesc.get('hash'), vals)
+        run.inputs = {**built['snapshot'], 'facts': (run.inputs or {}).get('facts')}
+        if not run.settings['environnement'].get('ok'):
+            run.inputs['limites'] = run.inputs.get('limites', []) + [
+                f"Environnement observé non généré ({run.settings['environnement'].get('error') or 'cause inconnue'}) : "
+                'obstacles réduits aux voisins BD TOPO.']
+        run.save(update_fields=['inputs_hash', 'inputs', 'settings'])
     w = n2_inputs.weather_for_n2(weather, building.georef_north_offset_deg or 0.0, built['residential'])
     envelope, env = built['envelope'], built['environment']
+    # Réflexion par le sol (Lot AI) : seulement avec un environnement relevé relié, qui porte l'albédo.
+    albedo, ground_ids = _environment_ground(building.environment) if building.environment_id else (None, set())
+    span = 100 - base
     if built['snapshot']['mode'] == 'experte' and not building.sun_visibility_stale and \
             building.sun_visibility.get('per_triangle'):
         sunvis = building.sun_visibility
     else:
-        say(2, 'Ombrage : visibilité du soleil…')
+        say(base + 2 * span // 100, 'Ombrage : visibilité du soleil…')
         sunvis = shadow.compute_visibility_grid(envelope, env)
-        say(12, 'Ombrage : vue du ciel…')
+        say(base + 12 * span // 100, 'Ombrage : vue du ciel…')
         sunvis['sky_view_factor'] = shadow.compute_sky_view_factors(envelope, env)
     payload = {**built['payload'], 'weather': w}
 
     def cb(done, total):
-        say(15 + int(done * 84 / total), f'Résolution heure par heure… {done}/{total}')
+        say(base + (15 + int(done * 84 / total)) * span // 100, f'Résolution heure par heure… {done}/{total}')
     res = run_building_simulation(envelope, built['layers'], sunvis, payload, environment_envelope=env,
-                                  progress_cb=cb, paroi_frame_by_id=built['frames'])
+                                  progress_cb=cb, paroi_frame_by_id=built['frames'],
+                                  ground_albedo=albedo, ground_obj_ids=ground_ids)
     a_floor = built['a_floor']
     phi = res.get('phi_hc_w') or []
     heat = [max(x, 0.0) for x in phi]
