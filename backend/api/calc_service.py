@@ -16,7 +16,7 @@ from .engines import n0, n1, n2_inputs
 from .fingerprint import stable_hash
 from .models import CalcRun, Job
 
-ENGINE_VERSION = {'N0': 'n0-2', 'N1': 'n1-2', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16)
+ENGINE_VERSION = {'N0': 'n0-3', 'N1': 'n1-3', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16) ; -3 : horizon par profil (Lot 30)
 
 
 class CalcError(ValueError):
@@ -149,7 +149,7 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
                 'confidence': facts.scores(eff)[0], 'completeness': facts.scores(eff)[1]}
     from . import geometry_service
     inputs = {'engine': ENGINE_VERSION[level], 'facts': settings['facts'], 'params': params_snapshot(p),
-              'geometry': geometry_service.effective_summary(building, scenario)}
+              'geometry': geometry_service.without_profile(geometry_service.effective_summary(building, scenario))}
     settings['uncertainty'] = bool(uncertainty and level == 'N1')
     try:
         with transaction.atomic():
@@ -309,6 +309,10 @@ def run_n2(run, progress_cb=None):
                 say(1 + int(pct * 0.39), f'Environnement observé (LiDAR HD) : {pipeline.ENV_STAGES.get(stage, "préparation")}…')
             say(1, 'Environnement observé (LiDAR HD × BD TOPO)…')
             report = environment_service.ensure_for_building(building, progress_cb=env_cb)
+            if report.get('ok'):
+                # Lot 30 : géométrie croisée BD TOPO × LiDAR (emprise recalée, hauteur mesurée, toiture).
+                from . import croisement
+                report['geometrie'] = croisement.apply(building)
         else:
             report = {'ok': True, 'deja_relie': True, 'environment_id': building.environment_id}
         run.settings = {**run.settings, 'environnement': {'generer': True, **report}}
@@ -319,7 +323,7 @@ def run_n2(run, progress_cb=None):
     if base:
         # L'environnement a changé les obstacles : empreinte et description refaites sur ce qui est calculé.
         run.inputs_hash = inputs_hash_for(building, 'N2', scenario, wdesc.get('hash'), vals)
-        run.inputs = {**built['snapshot'], 'facts': (run.inputs or {}).get('facts')}
+        run.inputs = {**built['snapshot'], 'facts': facts_used(facts.effective(building, scenario))}
         if not run.settings['environnement'].get('ok'):
             run.inputs['limites'] = run.inputs.get('limites', []) + [
                 f"Environnement observé non généré ({run.settings['environnement'].get('error') or 'cause inconnue'}) : "

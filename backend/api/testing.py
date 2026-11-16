@@ -55,6 +55,13 @@ def patch_jwks():
                              classmethod(lambda cls: _FakeJwks()))
 
 
+def without_auto_environment():
+    """Tests qui ne portent pas sur l'environnement relevé : réglage « à la demande ». Depuis le Lot 30, la
+    chaîne et le N2 génèrent par défaut l'environnement LiDAR — une vraie génération (réseau fermé : reprises
+    et délais) que ces tests n'ont pas à jouer. À poser dans `setUpModule` / `tearDownModule`."""
+    return mock.patch('api.environment_service.auto_mode', return_value='manuel')
+
+
 def client_for(sub=None, **kwargs):
     """APIClient authentifié par un jeton de test (`sub` donné ou tiré au hasard)."""
     c = APIClient()

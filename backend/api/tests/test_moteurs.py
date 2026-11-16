@@ -7,7 +7,20 @@ from django.test import SimpleTestCase, TestCase
 from .. import building_solver, calc_service, facts
 from ..engines import inputs, n0, n1
 from ..models import Building, CalcRun
-from ..testing import box_with_window, client_for, patch_jwks, synthetic_year
+from ..testing import box_with_window, client_for, patch_jwks, synthetic_year, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 # Seuil d'écart N1/N2 sur le besoin annuel de chauffage (décision D12 de refonte.md).
 N1_N2_TOLERANCE = 0.20

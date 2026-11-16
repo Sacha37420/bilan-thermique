@@ -24,17 +24,21 @@ def arrays(weather):
 
 
 def surface_irradiance(az, el, dni, dhi, surf_az_deg, tilt_deg, horizon_deg=0.0, albedo=DEFAULT_ALBEDO,
-                       beam_factor=None):
+                       beam_factor=None, horizon_profile=None):
     """Irradiance (W/m²) sur une surface d'azimut et d'inclinaison donnés, heure par heure.
 
-    horizon_deg : masque lointain simplifié (voisins) — le direct est coupé quand le soleil est
-    plus bas que l'horizon de la façade. beam_factor : facteur supplémentaire sur le direct
+    horizon_profile : profil d'horizon de la façade (Lot 30, `api.horizon`) — le direct est multiplié
+    par la part des points de la façade qui voient le soleil à son azimut. À défaut, horizon_deg
+    (résumé d'avant le Lot 30) : le direct est coupé quand le soleil est plus bas que cet angle. beam_factor : facteur supplémentaire sur le direct
     (protections solaires paramétriques, Lot 14), tableau horaire ou scalaire."""
     sa, st = np.radians(surf_az_deg), np.radians(tilt_deg)
     up = el > 0
     cos_inc = np.sin(el) * np.cos(st) + np.cos(el) * np.sin(st) * np.cos(az - sa)
     beam = dni * np.clip(cos_inc, 0.0, None) * up
-    if horizon_deg:
+    if horizon_profile:
+        from ..horizon import beam_visible
+        beam = beam * beam_visible(horizon_profile, az, el)
+    elif horizon_deg:
         beam = np.where(el < np.radians(horizon_deg), 0.0, beam)
     if beam_factor is not None:
         beam = beam * beam_factor

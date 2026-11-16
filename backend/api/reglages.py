@@ -62,18 +62,21 @@ def _orchestration():
            aide='Lancé après la chaîne automatique.', groupe='Calcul automatique'),
         _e('calcul.n1', 'Calcul horaire simplifié (N1) automatique', 'bool', True, modeles=['N1'],
            aide='Lancé après la chaîne automatique, avec sa fourchette.', groupe='Calcul automatique'),
-        _e('environnement.mode', 'Environnement observé (LiDAR HD × BD TOPO)', 'enum', 'manuel',
+        _e('environnement.mode', 'Environnement observé (LiDAR HD × BD TOPO)', 'enum', 'chaine',
            choix={'manuel': 'À la demande (onglet Bâtiment)',
                   'avant_n2': 'Avant chaque calcul détaillé, s’il manque',
                   'chaine': 'Pendant la récupération automatique, pour chaque bâtiment'},
            modeles=['N0', 'N1', 'N2'],
            aide='Bâtiments, arbres et terrain reconstruits depuis le LiDAR HD et la BD TOPO, albédo du sol relevé sur '
-                'les orthophotos. Relié au bâtiment, il donne l’horizon par façade de N0/N1 et les obstacles et la '
-                'réflexion du sol du calcul détaillé. Opération lourde : une à plusieurs minutes par bâtiment. '
-                '« Pendant la récupération automatique » l’ajoute à la chaîne de chaque bâtiment du parc (étape A6, '
-                'avant N0/N1) et couvre aussi le calcul détaillé ; « avant chaque calcul détaillé » le génère au début '
-                'd’un N2. Un environnement déjà relié (éventuellement retouché) est toujours gardé, et un échec '
-                'n’arrête rien : le calcul reprend les voisins BD TOPO.',
+                'les orthophotos. Relié au bâtiment, il donne sa géométrie croisée BD TOPO × LiDAR (emprise recalée, '
+                'hauteur à l’égout mesurée, toiture, voisins réels : la BD TOPO seule se trompe souvent de plusieurs '
+                'mètres sur la hauteur), l’horizon par façade de N0/N1, et les obstacles et la réflexion du sol du '
+                'calcul détaillé. Opération lourde : de quelques secondes à plusieurs minutes par bâtiment. '
+                '« Pendant la récupération automatique » (par défaut) l’ajoute à la chaîne de chaque bâtiment (étape '
+                'A6, avant N0/N1) et couvre aussi le calcul détaillé ; « avant chaque calcul détaillé » le génère au '
+                'début d’un N2 ; « à la demande » garde la géométrie BD TOPO seule tant qu’aucun environnement n’est '
+                'relié. Un environnement déjà relié (éventuellement retouché) est toujours gardé, et un échec '
+                'n’arrête rien : le calcul reprend la géométrie et les voisins BD TOPO.',
            groupe='Environnement'),
         _e('environnement.rayon_m', 'Rayon de l’environnement', 'int', 150, unite='m', min=30, max=250,
            aide='Demi-côté de la zone reconstruite autour du bâtiment (150 m, comme dans l’outil Environnement). '

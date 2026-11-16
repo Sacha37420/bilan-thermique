@@ -2,6 +2,20 @@
   <div class="rf-card-head"><h2 id="g-title">Géométrie</h2></div>
   <p class="rf-hint">Emprise vue de dessus (nord en haut, mètres). Faites glisser un sommet ; « + » au milieu d'un côté
     en ajoute un. Les bâtiments voisins (gris) servent à recalculer la mitoyenneté et les masques.</p>
+  @if (data()?.origine; as o) {
+    @if (o.source.startsWith('lidar')) {
+      <p class="rf-hint origine">Géométrie automatique <strong>croisée BD TOPO × LiDAR HD</strong> :
+        @if (o.decalage_m) { emprise recalée de {{ o.decalage_m | number: '1.0-1' }} m, } @else { emprise confirmée, }
+        @if (o.hauteur_egout_m) { hauteur à l'égout mesurée {{ o.hauteur_egout_m | number: '1.0-1' }} m
+          (faîtage {{ o.hauteur_faitage_m | number: '1.0-1' }} m@if (o.bdtopo?.hauteur_m) {, BD TOPO {{ o.bdtopo?.hauteur_m | number: '1.0-1' }} m }),
+        } @else { hauteur de la BD TOPO (toit non relevé), }
+        @if (o.toiture) { toiture {{ roofLabels[o.toiture] || o.toiture }}@if (o.pente_deg) { à {{ o.pente_deg | number: '1.0-0' }}° }, }
+        voisins et masques relevés.</p>
+    } @else {
+      <p class="rf-hint origine">Géométrie automatique : <strong>BD TOPO seule</strong>@if (o.note) { — {{ o.note }} }.
+        Relier un environnement relevé (LiDAR HD) la recale et mesure la hauteur.</p>
+    }
+  }
   @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
   @if (ok()) { <p class="rf-ok" role="status">{{ ok() }}</p> }
   @if (data()?.diff; as d) {

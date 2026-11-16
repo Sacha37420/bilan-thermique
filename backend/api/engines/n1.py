@@ -65,7 +65,8 @@ def solar_terms(p, az, el, dni, dhi, t_e=None, hidx=None, by_orientation=None):
             irr[o] = np.zeros(len(az))
             continue
         total, beam = solar.surface_irradiance(az, el, dni, dhi, solar.ORIENT_AZ[o], 90.0,
-                                               horizon_deg=p.horizon.get(o, 0.0) or 0.0)
+                                               horizon_deg=p.horizon.get(o, 0.0) or 0.0,
+                                               horizon_profile=(p.horizon_profile or {}).get(o))
         diffuse_part = total - beam
         if p.devices:
             fb, fd = sh.factors(p.devices, o, solar.ORIENT_AZ[o], az, el, hidx, total, t_e, p.g_window, occupied)

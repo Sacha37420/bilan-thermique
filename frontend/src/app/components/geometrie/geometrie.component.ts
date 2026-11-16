@@ -13,6 +13,13 @@ interface GeoPayload {
           envelope_regenerated: boolean } | null;
   current: { eave_height_m: number | null; levels: number | null; roof_type: string; roof_pitch_deg: number; ratios: Record<string, number | null> };
   neighbours: Pt[][]; has_manual_parois: boolean;
+  origine?: GeoOrigin;
+}
+/** Lot 30 : origine de la géométrie automatique — BD TOPO seule, ou croisée avec le LiDAR HD. */
+export interface GeoOrigin {
+  source: string; note?: string; decalage_m?: number | null; couverture_lidar?: number | null;
+  hauteur_egout_m?: number | null; hauteur_faitage_m?: number | null; toiture?: string | null; pente_deg?: number | null;
+  bdtopo?: { hauteur_m: number | null; emprise_m2: number | null; recouvrement: number | null };
 }
 
 /** Géométrie (refonte, Lot 15) : l'édition est une surcharge de la géométrie automatique. */
@@ -24,6 +31,7 @@ interface GeoPayload {
   styleUrl: './geometrie.component.scss',
 })
 export class GeometrieComponent implements OnChanges {
+  readonly roofLabels: Record<string, string> = { terrasse: 'terrasse', '2pans': 'deux pans', '4pans': 'quatre pans' };
   @Input({ required: true }) buildingId!: number;
   changed = output<void>();
   private rf = inject(RefonteApiService);

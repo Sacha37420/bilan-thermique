@@ -1,6 +1,6 @@
 """Géométrie corrigée (Lot 15, refonte). Routes nouvelles uniquement.
 
-GET    /api/batiments/<id>/geometrie/     emprise (automatique et corrigée), hauteurs, toiture, écarts, voisins
+GET    /api/batiments/<id>/geometrie/     emprise (automatique et corrigée), hauteurs, toiture, écarts, voisins, origine
 POST   /api/batiments/<id>/geometrie/     {footprint_xy, eave_height_m, levels, roof_type, roof_pitch_deg, regenerate_envelope?}
 DELETE /api/batiments/<id>/geometrie/     revenir à la géométrie automatique
 """
@@ -18,7 +18,9 @@ def payload(b):
     e = gs.active_edit(b)
     auto = (b.pipeline or {}).get('geometry') or {}
     return {
-        'auto_footprint_xy': gs.auto_footprint(b), 'auto': auto,
+        'auto_footprint_xy': gs.auto_footprint(b), 'auto': gs.without_profile(auto),
+        # Lot 30 : d'où vient la géométrie automatique (BD TOPO seule, ou croisée avec le LiDAR HD) et écarts.
+        'origine': (b.pipeline or {}).get('geometrie') or {'source': 'bdtopo'},
         'edit': ({'footprint_xy': e.footprint_xy, 'eave_height_m': e.eave_height_m, 'levels': e.levels,
                   'roof_type': e.roof_type, 'roof_pitch_deg': e.roof_pitch_deg, 'summary': e.summary} if e else None),
         'diff': gs.diff(b),

@@ -60,7 +60,7 @@ export const MODELE_MOTS: Record<string, string> = { N0: 'Mensuel', N1: 'Horaire
 /** Étapes de la chaîne automatique (compte rendu `Building.pipeline.steps`). */
 export const ETAPES: Record<string, string> = {
   A1: 'Identification (adresse, RNB)', A2: 'Fiche nationale BDNB et DPE', A3: 'Géométrie, mitoyenneté, masques (BD TOPO)',
-  A5: 'Compositions par archétype', A6: 'Environnement observé (LiDAR HD)', A7: 'Météo par défaut',
+  A5: 'Compositions par archétype', A6: 'Environnement observé et géométrie croisée (LiDAR HD)', A7: 'Météo par défaut',
   A8: 'Calculs automatiques N0 / N1',
 };
 

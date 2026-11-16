@@ -15,7 +15,10 @@ _BRIDGES = 'Ponts thermiques : non comptés (hors périmètre, comme le N2 — `
 _SYSTEMS = ('Du besoin à l’énergie finale, primaire, au CO₂ et au coût : rendement global = génération × émission × '
             'distribution × régulation (repères de la méthode 3CL). Aide à la décision, pas un DPE (D6).')
 _FICHE_IN = ['Fiche effective du bâtiment (valeur retenue par clé, avec sa provenance)',
-             'Géométrie simplifiée de la chaîne (emprise, murs exposés par orientation, mitoyenneté, horizon)',
+             'Géométrie simplifiée de la chaîne — croisée BD TOPO × LiDAR HD quand un environnement relevé est relié '
+             '(emprise recalée, hauteur à l’égout mesurée) : emprise, murs exposés par orientation, mitoyenneté, '
+             'horizon par façade (profil par tranche de 10° d’azimut, mesuré depuis des points de la façade à trois '
+             'hauteurs : le direct est réduit à la part de la façade qui voit le soleil ; le diffus n’est pas masqué)',
              'Protections solaires paramétriques (Lot 14)', 'Météo horaire (année type du site ou jeu choisi)']
 _DECLARE = ('Toute personne qui peut modifier la fiche : gestionnaire de parc, gestionnaire ou occupant du bâtiment ; '
             'un lecteur ne lance rien.')

@@ -8,7 +8,20 @@ from django.test import SimpleTestCase, TestCase
 from .. import calc_service, facts, geometry_service
 from ..engines import inputs, n1, n2_inputs
 from ..models import Building, BuildingAccess, CalcRun, Job, ParoiModel, Portfolio, PortfolioMember
-from ..testing import box_envelope, client_for, patch_jwks, synthetic_year
+from ..testing import box_envelope, client_for, patch_jwks, synthetic_year, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 FILMS = 1.0 / n2_inputs.H_I + 1.0 / n2_inputs.H_E
 WEATHER = synthetic_year()

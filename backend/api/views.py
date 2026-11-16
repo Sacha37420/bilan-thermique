@@ -115,9 +115,17 @@ class BuildingDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
         if not access.can_manage(self.request, serializer.instance):
             raise PermissionDenied("Action réservée aux gestionnaires de ce bâtiment.")
+        before = serializer.instance.environment_id
         building = serializer.save()
         if 'triangles' in self.request.data or 'vertices' in self.request.data:   # l'enveloppe a été réécrite
             _sync_expert(self.request, building)
+        if 'environment_id' in self.request.data and building.environment_id != before:
+            # Lot 30 : géométrie croisée avec l'environnement relié, ou BD TOPO rétablie s'il est détaché.
+            from . import croisement
+            if building.environment_id:
+                croisement.apply(building)
+            else:
+                croisement.restore(building)
 
     def perform_destroy(self, instance):
         if not access.can_manage(self.request, instance):

@@ -9,7 +9,20 @@ from django.utils import timezone
 
 from .. import facts, parc, tasks
 from ..models import Building, BuildingAccess, CalcRun, Invitation, Job, Portfolio, PortfolioMember
-from ..testing import client_for, patch_jwks, synthetic_year
+from ..testing import client_for, patch_jwks, synthetic_year, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 WEATHER = {'series': synthetic_year(days=60), 'source': 'synthétique'}
 CSV = ('﻿Nom;Adresse;Usage;Surface;Année;Énergie\n'

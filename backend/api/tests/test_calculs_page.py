@@ -6,7 +6,20 @@ from django.test import TestCase
 
 from .. import calc_service, facts
 from ..models import Building, CalcRun, Job, Portfolio, PortfolioMember, Scenario
-from ..testing import client_for, patch_jwks, synthetic_year
+from ..testing import client_for, patch_jwks, synthetic_year, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 WEATHER = synthetic_year(days=60)
 

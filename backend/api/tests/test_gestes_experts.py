@@ -7,7 +7,20 @@ from django.test import TestCase
 from .. import calc_service, expert_facts, facts, geometry_service
 from ..engines.inputs import u_from_layers
 from ..models import Building, BuildingDocument, Environment, FactProposal, ParoiModel
-from ..testing import box_envelope, client_for, patch_jwks, synthetic_year
+from ..testing import box_envelope, client_for, patch_jwks, synthetic_year, without_auto_environment
+
+
+# Lot 30 : environnement relevé « à la demande » pour ce module (voir api.testing.without_auto_environment).
+_NO_AUTO_ENV = without_auto_environment()
+
+
+def setUpModule():
+    _NO_AUTO_ENV.start()
+
+
+def tearDownModule():
+    _NO_AUTO_ENV.stop()
+
 
 WALL = [{'e': 0.20, 'lam': 1.0, 'rho': 2000, 'c': 1000, 'tau': 0, 'r': 0.4, 'alpha': 0.6},
         {'e': 0.10, 'lam': 0.04, 'rho': 30, 'c': 1400, 'tau': 0, 'r': 0.4, 'alpha': 0.6}]

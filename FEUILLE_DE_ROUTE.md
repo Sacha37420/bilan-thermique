@@ -637,6 +637,50 @@ Tours, parc en mode « pendant la récupération automatique », rayon 80 m) : c
 Limite relevée, antérieure au lot : l'horizon par façade (chaîne comme environnement) prend l'obstacle le plus haut
 du cône ±45° et l'applique à toute la façade — 71° au sud (BD TOPO) et 79° (environnement) sur ce cas, à revoir.
 
+## Lot 30 — Géométrie croisée BD TOPO × LiDAR HD, horizon par profil   ·   statut : livré
+**Objectif :** la BD TOPO ne peut pas servir seule de géométrie au bâtiment (propriétaire, 2026-11-16) : hauteur
+fausse de plusieurs mètres (10 m pour 14,8 m mesurés à l'égout sur l'hôtel de ville de Tours, 1,4 m pour 6 m à
+Langeais), emprises parfois décalées, bâtiments absents. La croiser avec le LiDAR, et refaire l'horizon des façades.
+**Tâches :**
+- [x] `api/croisement.py` : avec un environnement relevé relié (même repère), emprise recalée, hauteur à l'égout
+  mesurée (médiane pondérée du haut des murs), faîtage, toiture (terrasse / deux / quatre pans, pente), voisins
+  recalés à leur hauteur mesurée et arbres remplacent la BD TOPO ; faits `infere` « LiDAR HD × BD TOPO (IGN) »
+  (une correction de l'utilisateur prime) ; niveaux et surface déduits par la chaîne recalculés ; niveaux d'une
+  source automatique incohérents avec la hauteur (étage hors 2,3–5 m) recalculés ; géométrie BD TOPO gardée et
+  rétablie si l'environnement est détaché ; enveloppe 3D remplacée seulement si c'est encore celle de la chaîne
+- [x] Branché partout : chaîne A3 (environnement déjà relié), A6 (juste après la génération, avant N0/N1), N2
+  (génération au début du calcul), rattachement / détachement depuis la page du bâtiment
+- [x] Réglage `environnement.mode` : « pendant la récupération automatique » **par défaut**, hors parc aussi
+- [x] `api/horizon.py` : profil d'horizon par tranche de 10°, mesuré depuis des points de chaque façade exposée à
+  trois hauteurs ; le direct est réduit à la part de la façade qui voit le soleil (`engines.solar`) ; un mitoyen
+  n'est plus un masque, le bâtiment se masque lui-même (ailes) ; `horizon_deg` = angle face à la façade (±15°).
+  Moteurs N0 `n0-3`, N1 `n1-3` (calculs précédents périmés)
+- [x] Défaut corrigé au passage : le sommet d'un arbre de l'environnement était compté depuis l'altitude absolue
+  du terrain — aucun arbre ne masquait jamais rien
+- [x] Carte Géométrie : origine de la géométrie (BD TOPO seule, ou croisée : recalage, égout, faîtage, toiture)
+**Tests à passer avant de clore le lot :**
+- [x] `api/tests/test_geometrie_lidar.py` : profil (site dégagé, mur en face, mitoyen, immeuble de côté, aile,
+  moteur solaire), mesure des toitures, croisement (remplacement, voisins et arbres, priorité de l'utilisateur,
+  détachement, chaîne rejouée, enveloppe automatique seule, autre repère, objet retrouvé par l'emprise), niveaux
+  incohérents, rattachement par l'API, défaut du réglage
+- [x] Suite backend complète verte ; `ng build` sans erreur
+**Vérifié le :** 2026-11-16 — backend : **532 tests OK** (22 nouveaux). `ng build` OK. Essai réel (base jetable,
+réseau ouvert, bâtiments hors parc, réglages par défaut, rayon 150 m) : chaîne complète de 34 s (Chambray-lès-Tours)
+à 134 s (rue Colbert, Tours) ; égout mesuré / BD TOPO : 14,8 / 10 m (hôtel de ville de Tours), 12,7 / 9,3 m,
+6,3 / 5,1 m, 6,0 / 1,4 m (Langeais) ; toitures reconnues (deux pans à 50°, quatre pans à 36°…).
+**Limites :** le diffus du ciel n'est pas masqué ; l'enveloppe 3D d'un bâtiment créé avant ce lot n'est pas
+remplacée (elle ne sert qu'à l'affichage et au mode expert) ; hors couverture LiDAR la BD TOPO reste seule (lot 31).
+
+## Lot 31 — Repli MNS hors LiDAR   ·   statut : à faire
+**Objectif :** sans nuage LiDAR HD, recaler l'emprise et mesurer la hauteur sur un modèle numérique de surface.
+
+## Lot 32 — Sol simulé en 1D, couplé au sous-sol et au plancher bas   ·   statut : à faire
+**Objectif :** température du sol par profondeur et dans le temps, d'après la météo, à la place d'une température
+de sol constante.
+
+## Lot 33 — Protubérances   ·   statut : à faire
+**Objectif :** un mur qui dépasse du volume chauffé n'échange pas avec le nœud intérieur.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports
