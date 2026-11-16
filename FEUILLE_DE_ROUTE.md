@@ -769,6 +769,54 @@ annonçait un repli BD TOPO direct hors LiDAR.
 - [x] Suite backend complète verte ; `ng build` sans erreur
 **Vérifié le :** 2026-11-16 — backend : **553 tests OK**. `ng build` OK. Parcours réel rejoué après déploiement.
 
+## Lot 35 — Fondation des potentiels et du rendu   ·   statut : à faire
+**Objectif :** modèles, migrations, clés de faits, routes, conteneur de rendu déclaré. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+**Tâches :**
+- [ ] Voir `to_do_potentiels.md`, lot 35
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_potentiels.md`, lot 35
+**Vérifié le :**
+
+## Lot 36 — Protections paramétrables et physique des améliorations   ·   statut : à faire
+**Objectif :** catalogue de protections paramétrable (lames, épaisseurs, débords), végétalisation, albédos, ventilation nocturne, DH RE2020, résultats N2 par triangle. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+**Tâches :**
+- [ ] Voir `to_do_potentiels.md`, lot 36
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_potentiels.md`, lot 36
+**Vérifié le :**
+
+## Lot 37 — Actions, bouquets et potentiels   ·   statut : à faire
+**Objectif :** catalogue d'actions (conditions, indicateurs pertinents, application par niveau), bouquets « Économiser l'énergie » et « Minimiser les DH », potentiels par bâtiment et par parc. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+**Tâches :**
+- [ ] Voir `to_do_potentiels.md`, lot 37
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_potentiels.md`, lot 37
+**Vérifié le :**
+
+## Lot 38 — Rendu : document, figures et exports   ·   statut : à faire
+**Objectif :** document de rendu, figures Plotly construites par le serveur, exports HTML, Word, PDF par un conteneur de rendu. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+**Tâches :**
+- [ ] Voir `to_do_potentiels.md`, lot 38
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_potentiels.md`, lot 38
+**Vérifié le :**
+
+## Lot 39 — Rendu : interface   ·   statut : à faire
+**Objectif :** paramétrage et page de rendu, potentiels dans la fiche d'identité et le parc, vue 3D pertes d'hiver / gains d'été. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+**Tâches :**
+- [ ] Voir `to_do_potentiels.md`, lot 39
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_potentiels.md`, lot 39
+**Vérifié le :**
+
+## Lot 40 — Intégration et documentation   ·   statut : à faire
+**Objectif :** déploiement, parcours réel, actualisation complète de la documentation. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+**Tâches :**
+- [ ] Voir `to_do_potentiels.md`, lot 40
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_potentiels.md`, lot 40
+**Vérifié le :**
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports
