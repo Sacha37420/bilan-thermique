@@ -17,7 +17,7 @@ interface EnvironmentSummary {
 
 interface GenerateResult {
   environment_id: number;
-  source: 'lidar' | 'legacy';
+  source: 'lidar' | 'mns_lidar' | 'mns_correl' | 'legacy';
   warnings: string[];
 }
 

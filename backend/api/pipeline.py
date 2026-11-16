@@ -449,7 +449,7 @@ def initialize(building, progress=None):
                         building.envelope = env3d
                         building.sun_visibility_stale = True
                         report['envelope_auto'] = croisement._envelope_hash(env3d)
-                    report['sources'].append('LiDAR HD (IGN, Licence Ouverte 2.0)')
+                    report['sources'].append(f"{c['report']['libelle'].replace(' × BD TOPO (IGN)', '')} (IGN, Licence Ouverte 2.0)")
             ok('A3', mitoyennete=report['geometry']['mitoyennete'], n_voisins=len(report['neighbours']),
                geometrie=report['geometrie']['source'])
             report['sources'].append('BD TOPO (IGN, Licence Ouverte 2.0)')
@@ -513,7 +513,7 @@ def initialize(building, progress=None):
 
 # ── Après la chaîne (A6, A7, A8) : environnement, météo par défaut et calculs automatiques ──
 
-ENV_STAGES = {'lidar-index': 'dalles', 'lidar-read': 'lecture du nuage', 'bdtopo': 'emprises BD TOPO',
+ENV_STAGES = {'lidar-index': 'dalles', 'lidar-read': 'lecture du nuage', 'mns': 'modèle numérique de surface', 'bdtopo': 'emprises BD TOPO',
               'cosia': 'essences des arbres', 'rasters': 'terrain et hauteurs', 'registration': 'recalage',
               'buildings': 'bâtiments et toitures', 'lidar-only': 'bâtiments hors BD TOPO',
               'vegetation': 'arbres', 'terrain': 'terrain', 'ortho': 'albédo du sol', 'save': 'enregistrement'}

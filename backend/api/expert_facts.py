@@ -138,7 +138,7 @@ def env_horizon(building, footprint_xy, eave_m):
         return None
     from . import croisement
     mine = croisement.studied(building, env, poly)
-    z0 = min((float((o.get('info') or {}).get('base_z', 0.0) or 0.0) for o in mine), default=0.0)
+    z0 = min((float((o.get('info') or {}).get('base_z', 0.0) or 0.0) for o in mine), default=None)
     obstacles, buildings = croisement.obstacles(env, {o['id'] for o in mine}, z0)
     if not obstacles:
         return None

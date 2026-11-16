@@ -106,8 +106,9 @@
 
       @if (e.generation.source) {
         <div class="report">
-          <span class="badge" [class.badge-lidar]="e.generation.source === 'lidar'">
-            {{ e.generation.source === 'lidar' ? 'LiDAR HD × BD TOPO' : 'Repli BD TOPO / OpenStreetMap' }}
+          <span class="badge" [class.badge-lidar]="e.generation.source !== 'legacy'">
+            {{ e.generation.source === 'lidar' ? 'LiDAR HD × BD TOPO' : e.generation.source === 'mns_lidar' ? 'MNS LiDAR HD × BD TOPO'
+               : e.generation.source === 'mns_correl' ? 'MNS Correl × BD TOPO' : 'Repli BD TOPO / OpenStreetMap' }}
           </span>
           @if (e.generation.lidar?.acquisition?.length) {
             <span class="report-item">Relevé LiDAR du {{ e.generation.lidar!.acquisition!.join(', ') }}</span>

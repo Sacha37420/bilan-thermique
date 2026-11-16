@@ -106,7 +106,7 @@ def lidar_env(building, studied_poly, studied_h=None, roof='2pans', neighbours=(
         k += 1
     for poly, h in trees:
         v, t = oe.prism_solid(poly, 2.0, h)
-        objs.append(oe.make_object(k, 'tree', 'lidar', 'Arbre', v, t, poly, info={}))
+        objs.append(oe.make_object(k, 'vegetation', 'lidar', 'Feuillu', v, t, poly, info={}))
         k += 1
     return Environment.objects.create(
         name=f'env {Environment.objects.count()}', georef_lat=lat or building.georef_lat,

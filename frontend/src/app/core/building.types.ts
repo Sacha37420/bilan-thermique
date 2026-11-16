@@ -158,7 +158,7 @@ export interface EnvironmentObject {
 }
 
 export interface EnvironmentGeneration {
-  source?: 'lidar' | 'legacy';
+  source?: 'lidar' | 'mns_lidar' | 'mns_correl' | 'legacy';
   radius_m?: number;
   lidar?: { tiles?: string[]; acquisition?: string[]; classification?: string[] };
   stats?: Record<string, unknown>;

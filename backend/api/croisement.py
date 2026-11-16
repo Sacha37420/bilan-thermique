@@ -27,6 +27,10 @@ import shapely.geometry
 import shapely.ops
 
 SOURCE = 'LiDAR HD × BD TOPO (IGN)'
+# Lot 31 : sans nuage LiDAR, la même géométrie croisée vient d'un modèle numérique de surface (`api.mns_source`).
+LABELS = {'lidar': SOURCE, 'mns_lidar': 'MNS LiDAR HD × BD TOPO (IGN)', 'mns_correl': 'MNS Correl × BD TOPO (IGN)'}
+CONFIDENCE = {'lidar': 0.8, 'mns_lidar': 0.75, 'mns_correl': 0.6}
+ALL_LABELS = tuple(LABELS.values())
 SELF_IOU_MIN = 0.3
 SAME_FRAME_M = 0.5
 DERIVED_LEVELS = 'hauteur ÷ 3 m'
@@ -84,13 +88,17 @@ def studied(building, env=None, reference=None):
     return [best[1]] if best else []
 
 
-def obstacles(env, exclude_ids=(), z0=0.0):
+def obstacles(env, exclude_ids=(), z0=None):
     """[(emprise, sommet au-dessus de z0)] des bâtiments et arbres actifs, et la même liste pour les seuls
-    bâtiments. Les altitudes de l'environnement sont relatives au terrain à l'origine."""
+    bâtiments. Les altitudes de l'environnement sont relatives au terrain à l'origine ; z0 = base du bâtiment
+    étudié. Sans elle (bâtiment étudié non retrouvé, repli BD TOPO / OSM aux altitudes parfois absolues), chaque
+    obstacle compte pour sa hauteur propre (sommet − base), comme avant le Lot 30."""
     from .observed_env import STATUS_ACTIVE, rings_to_poly
     obs, buildings = [], []
     for obj in env.scene_objects or []:
-        if obj.get('kind') not in ('building', 'tree') or obj.get('status', STATUS_ACTIVE) != STATUS_ACTIVE:
+        # Les arbres sont des objets `vegetation` (observed_env) : jusqu'au Lot 30, l'horizon cherchait `tree`
+        # et n'en voyait donc aucun.
+        if obj.get('kind') not in ('building', 'vegetation') or obj.get('status', STATUS_ACTIVE) != STATUS_ACTIVE:
             continue
         if obj.get('id') in exclude_ids:
             continue
@@ -102,7 +110,7 @@ def obstacles(env, exclude_ids=(), z0=0.0):
             hull = _largest(shapely.geometry.MultiPoint([(v[0], v[1]) for v in verts]).convex_hull)
         if hull is None or hull.area < 0.5:
             continue
-        top = max(v[2] for v in verts) - z0
+        top = max(v[2] for v in verts) - (z0 if z0 is not None else min(v[2] for v in verts))
         if top <= 0:
             continue
         item = (hull, top)
@@ -197,8 +205,10 @@ def cross(building, bdtopo_poly=None, bdtopo_height=None):
     objs = studied(building, env, bdtopo_poly)
     if not objs:
         raise NotCrossed('Bâtiment étudié non retrouvé dans l’environnement relevé.')
-    if (env.generation or {}).get('source', 'lidar') != 'lidar':
-        raise NotCrossed('Environnement sans LiDAR (repli BD TOPO / OpenStreetMap) : géométrie BD TOPO gardée.')
+    kind = (env.generation or {}).get('source', 'lidar')
+    if kind not in LABELS:
+        raise NotCrossed('Environnement sans LiDAR ni MNS (repli BD TOPO / OpenStreetMap) : géométrie BD TOPO gardée.')
+    label, conf = LABELS[kind], CONFIDENCE[kind]
     north = building.georef_north_offset_deg or 0.0
     m = measure(objs, north)
     poly = m['poly']
@@ -220,7 +230,7 @@ def cross(building, bdtopo_poly=None, bdtopo_height=None):
     shifts = [s for s in (i.get('shift_m') for i in info) if s]
     covers = [c for c in (i.get('lidar_cover') for i in info) if c is not None]
     report = {
-        'source': 'lidar' if eave else 'lidar (emprise seule)', 'environment_id': env.pk,
+        'source': kind if eave else f'{kind} (emprise seule)', 'libelle': label, 'environment_id': env.pk,
         'objets': sorted(ids), 'emprise_m2': round(poly.area, 1),
         'decalage_m': round(max(math.hypot(*s) for s in shifts), 2) if shifts else None,
         'couverture_lidar': round(min(covers), 3) if covers else None,
@@ -230,13 +240,16 @@ def cross(building, bdtopo_poly=None, bdtopo_height=None):
                    'emprise_m2': round(bdtopo_poly.area, 1) if bdtopo_poly is not None else None,
                    'recouvrement': round(_iou(poly, bdtopo_poly), 2) if bdtopo_poly is not None else None},
     }
-    rows = [('identite.emprise_m2', round(poly.area, 1), 'infere', 0.8, SOURCE),
-            ('identite.mitoyennete', min(0.9, g['mitoyennete']), 'infere', 0.75, f'{SOURCE}, voisins accolés')]
+    if not eave:
+        report['note'] = ('Toit du bâtiment non vu par le relevé : emprise recalée, mais hauteur de la BD TOPO '
+                          'gardée — à vérifier.')
+    rows = [('identite.emprise_m2', round(poly.area, 1), 'infere', conf, label),
+            ('identite.mitoyennete', min(0.9, g['mitoyennete']), 'infere', conf - 0.05, f'{label}, voisins accolés')]
     if eave:
-        rows.append(('identite.hauteur_m', round(eave, 1), 'infere', 0.8, f'{SOURCE}, hauteur à l’égout mesurée'))
+        rows.append(('identite.hauteur_m', round(eave, 1), 'infere', conf, f'{label}, hauteur à l’égout mesurée'))
     if m['toiture']:
-        rows.append(('toiture.type', m['toiture'], 'infere', 0.6, f'{SOURCE}, pans relevés'))
-        rows.append(('toiture.pente_deg', m['pente_deg'], 'infere', 0.55, f'{SOURCE}, pans relevés'))
+        rows.append(('toiture.type', m['toiture'], 'infere', conf - 0.2, f'{label}, pans relevés'))
+        rows.append(('toiture.pente_deg', m['pente_deg'], 'infere', conf - 0.25, f'{label}, pans relevés'))
     return {'geometry': g, 'footprint_xy': footprint_xy, 'neighbours': neighbours, 'rows': rows,
             'report': report, 'objects': objs, 'height': height}
 
@@ -279,7 +292,7 @@ def _rederive(building):
         levels = max(1, round(float(h.value) / 3.0))
         rows.append(('identite.niveaux', int(levels), 'infere', 0.35, DERIVED_LEVELS))
     elif (niv is not None and not niv.author_sub and niv.method in ('infere', 'defaut') and h is not None
-          and str(h.source).startswith(SOURCE) and levels):
+          and str(h.source).startswith(ALL_LABELS) and levels):
         # Niveaux d'une source automatique (BDNB) incohérents avec la hauteur mesurée : 1 niveau pour 14,8 m
         # d'égout (hôtel de ville de Tours, 2026-11-16) donnait 720 m² chauffés pour 900 m² d'emprise.
         storey = float(h.value) / float(levels)
@@ -351,7 +364,11 @@ def restore(building):
         return False
     from django.utils import timezone
     from .models import BuildingFact
-    BuildingFact.objects.filter(building=building, source__startswith=SOURCE, author_sub='', retired_at__isnull=True,
+    from django.db.models import Q
+    crossed = Q()
+    for lab in ALL_LABELS:
+        crossed |= Q(source__startswith=lab)
+    BuildingFact.objects.filter(crossed, building=building, author_sub='', retired_at__isnull=True,
                                 superseded_by__isnull=True).update(retired_at=timezone.now())
     g = bd.get('geometry') or {}
     pipe.update(geometry=g, footprint_xy=bd.get('footprint_xy'), neighbours=bd.get('neighbours') or [],
