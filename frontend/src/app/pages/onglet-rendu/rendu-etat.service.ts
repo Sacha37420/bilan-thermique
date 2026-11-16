@@ -1,6 +1,7 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ContexteService, HORS_PARC } from '../../core/contexte.service';
 import { ErreurApi, RenduApiService, messageDe } from './rendu-api.service';
+import { EtatCalculsService } from '../../components/resultat-carte/etat-calculs.service';
 import { Bouquet, Cible, Dimension, Gabarits, Mesure, Modele, ModelesParc, Portee, Spec, specVide } from './contrat.types';
 
 const CLE_BROUILLON = 'bt-rendu-brouillon';
@@ -28,6 +29,7 @@ function ecrireBrouillon(cle: string, b: Brouillon | null): void {
 export class RenduEtatService {
   private api = inject(RenduApiService);
   private ctx = inject(ContexteService);
+  private calculs = inject(EtatCalculsService);
 
   readonly portee = signal<Portee>('parc');
 
@@ -76,11 +78,41 @@ export class RenduEtatService {
     return s ? { spec: s } : null;
   });
 
+  /** Incrémenté quand un calcul du parc (ou du bâtiment) courant se termine : aperçus et document se redemandent. */
+  readonly actualisation = signal(0);
+  /** Phrase d'avancement des calculs automatiques de la cible (vide quand tout est à jour). */
+  readonly calculsEnCours = computed(() => {
+    const c = this.cible();
+    if (!c) return '';
+    if ('parc' in c) {
+      const r = this.calculs.parcs()[c.parc]?.etat?.resume;
+      return r && r.calculs_restants ? `Calculs du parc en cours : ${r.calculs_restants} restant${r.calculs_restants > 1 ? 's' : ''}. L’aperçu se met à jour quand ils avancent.` : '';
+    }
+    const e = this.calculs.batiments()[c.batiment]?.etat;
+    return e && e.calculs_restants ? `Calculs du bâtiment en cours : ${e.calculs_restants} restant${e.calculs_restants > 1 ? 's' : ''}. L’aperçu se met à jour quand ils avancent.` : '';
+  });
+
   private parcCharge: number | null | undefined = undefined;
   private initialiseDe = '';
 
   constructor() {
     void this.chargerCatalogues();
+    // Suivi de l'état des calculs de la cible (I2) le temps que l'onglet Rendu est ouvert.
+    effect(onCleanup => {
+      const c = this.cible();
+      if (!c) return;
+      onCleanup(untracked(() => ('parc' in c ? this.calculs.suivreParc(c.parc) : this.calculs.suivreBatiment(c.batiment))));
+    });
+    let avance = -1, de = '';
+    effect(() => {
+      const c = this.cible();
+      const cle = c ? JSON.stringify(c) : '';
+      const a = !c ? -1 : 'parc' in c ? this.calculs.parcs()[c.parc]?.avance ?? -1 : this.calculs.batiments()[c.batiment]?.avance ?? -1;
+      untracked(() => {
+        if (cle === de && avance >= 0 && a > avance) this.actualisation.update(v => v + 1);
+        avance = a; de = cle;
+      });
+    });
     effect(() => {
       const p = this.parcReel();
       untracked(() => void this.chargerParc(p));

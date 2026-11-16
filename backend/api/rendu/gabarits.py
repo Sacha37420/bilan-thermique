@@ -2,6 +2,10 @@
 
 Les gabarits sont des `RapportModele` sans parc (`portfolio=None`, `par_defaut=True`), tenus à jour par
 `assurer()` : la spécification fait foi ici, dans le code (une modification de gabarit est un déploiement).
+
+Chantier bt-trois-niveaux (I5) : la fiche et la synthèse montrent les trois niveaux de calcul (réel et bouquets) par
+les questions `niveaux_*` (dimension « niveau » en abscisse ou en couleur) ; les autres blocs, sans niveau précisé,
+lisent chaque bâtiment au niveau le plus fin disponible et à jour (`donnees.AUTO`), ce que dit leur résumé.
 """
 
 from ..models import RapportModele
@@ -61,6 +65,16 @@ QUESTIONS = [
     ('actions_familles', 'Quelles familles d’actions chaque bouquet applique-t-il ?', TOUTES,
      _g('barres_empilees', 'bouquet', ['actions.nombre'], series='bouquets', couleur='famille_action',
         agregation='somme', titre='Actions appliquées par famille')),
+    # Chantier bt-trois-niveaux : réel et bouquets sur les trois niveaux de calcul.
+    ('niveaux_reel', 'Que donnent les trois niveaux de calcul (N0, N1, N2) pour l’état actuel ?', TOUTES,
+     _g('barres', 'niveau', ['heating_kwh_m2', 'primary_kwh_m2'], series='reel', agregation='moyenne',
+        titre='État actuel : besoin et énergie primaire par niveau de calcul')),
+    ('niveaux_bouquets', 'Les gains des bouquets se confirment-ils d’un niveau de calcul à l’autre ?', TOUTES,
+     _g('barres_groupees', 'bouquet', ['heating_kwh_m2'], couleur='niveau', agregation='moyenne',
+        titre='Besoin de chauffage : réel et potentiels par niveau de calcul')),
+    ('niveaux_dh', 'L’inconfort d’été, réel et bouquets, selon le niveau de calcul (N1, N2) ?', TOUTES,
+     _g('barres_groupees', 'bouquet', ['dh_re2020'], couleur='niveau', agregation='moyenne',
+        titre='DH RE2020 : réel et potentiels par niveau de calcul')),
     ('parallele_parc', 'Quels bâtiments cumulent besoin, carbone et inconfort ?', ['parc'],
      _g('parallele', 'batiment', ['heating_kwh_m2', 'co2_kg_m2', 'dh_re2020', 'confidence'], series='reel',
         titre='Bâtiments sur quatre indicateurs')),
@@ -91,6 +105,11 @@ FICHE = {
             {'type': 'indicateurs', 'cles': ['heating_kwh_m2', 'primary_kwh_m2', 'co2_kg_m2', 'dh_re2020', 'heures_inconfort'],
              'series': 'reel_et_bouquets'},
             _q('reel_vs_bouquets'), _q('dh_bouquets')]},
+        {'titre': 'Trois niveaux de calcul', 'blocs': [
+            {'type': 'texte', 'contenu': 'Le même bâtiment, réel et bouquets, calculé en **N0** (mensuel), **N1** '
+                                         '(horaire simplifié) et **N2** (détaillé par paroi). Ailleurs dans ce document, '
+                                         'chaque valeur est lue au niveau le plus fin disponible et à jour.'},
+            _q('niveaux_reel'), _q('niveaux_bouquets'), _q('niveaux_dh')]},
         {'titre': 'Au fil de l’année', 'blocs': [_q('besoins_mensuels'), _q('dh_mensuels')]},
         {'titre': 'Bilan et gains', 'blocs': [_q('postes_bilan'), _q('cascade_actions'),
                                               {'type': 'tableau', 'source': 'actions', 'colonnes': ['bouquet', 'action',
@@ -112,12 +131,14 @@ SYNTHESE = {
              'series': 'reel_et_bouquets'},
             {'type': 'carte', 'indicateur': 'heating_kwh_m2', 'series': 'reel'}]},
         {'titre': 'Réel et potentiels', 'blocs': [_q('reel_vs_bouquets'), _q('dh_bouquets'), _q('cascade_actions')]},
+        {'titre': 'Trois niveaux de calcul', 'blocs': [_q('niveaux_reel'), _q('niveaux_bouquets'), _q('niveaux_dh')]},
         {'titre': 'Lecture du parc', 'blocs': [_q('nuage_besoin_dh'), _q('boite_usage'), _q('periode_construction')]},
         {'titre': 'Au fil de l’année', 'blocs': [_q('besoins_mensuels'), _q('postes_bilan')]},
         {'titre': 'Bâtiments', 'blocs': [
             {'type': 'saut_de_page'},
             {'type': 'tableau', 'source': 'batiments', 'colonnes': ['batiment', 'usage', 'annee', 'heating_kwh_m2',
-                                                                    'dh_re2020', 'classe_dpe', 'approfondissement'],
+                                                                    'dh_re2020', 'classe_dpe', 'approfondissement',
+                                                                    'niveau_calcul'],
              'tri': 'heating_kwh_m2', 'ordre': 'desc', 'limite': 100},
             {'type': 'tableau', 'source': 'potentiels', 'colonnes': None, 'tri': 'batiment', 'ordre': 'asc',
              'limite': 200}]},

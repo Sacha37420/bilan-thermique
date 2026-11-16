@@ -64,6 +64,7 @@
       } @empty { <p class="rf-hint">Liste des grandeurs indisponible.</p> }
     </fieldset>
     <app-choix-series [valeur]="g.series" [bouquets]="bouquets()" nom="cg-series" (seriesChange)="series($event)" />
+    <app-choix-niveau [graphe]="g" nom="cg-niveau" (grapheChange)="grapheChange.emit($event)" />
     @if (portee() === 'parc') {
       <fieldset class="liste"><legend>Filtrer les bâtiments</legend>
         @for (u of USAGES; track u[0]) {

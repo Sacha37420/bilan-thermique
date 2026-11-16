@@ -4,7 +4,9 @@
     <h2 id="res-title">
       @if (niveau) { Résultat — {{ mots[niveau] }} ({{ niveau }}) } @else { Dernier résultat }
     </h2>
-    @if (r) {
+    @if (suivi(r?.level ?? niveau); as st) {
+      <span [class]="'rf-badge st ' + classes[st]" [title]="aides[st]">{{ statutMots[st] }}</span>
+    } @else if (r) {
       @if (r.up_to_date === true) { <span class="rf-badge m-mesure">à jour</span> }
       @else if (r.up_to_date === false) { <span class="rf-badge m-infere" title="Une donnée du bâtiment a changé depuis ce calcul">à refaire — les données ont changé</span> }
       @else { <span class="rf-badge m-defaut">lancé depuis l'outil Calcul 3D</span> }

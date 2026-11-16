@@ -27,6 +27,7 @@
   </section>
 </div>
 
+@if (etat.calculsEnCours(); as m) { <p class="rf-hint no-print" role="status" aria-live="polite">{{ m }}</p> }
 @if (!etat.cible()) {
   <p class="rf-hint">{{ etat.portee() === 'parc' ? 'Choisissez un parc dans le bandeau pour voir son rendu.' : 'Choisissez un bâtiment dans le bandeau pour voir sa fiche.' }}</p>
 } @else if (chargement() && !doc()) {

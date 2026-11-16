@@ -5,6 +5,11 @@ Contexte = une portée (`parc` ou `batiment`) et l'utilisateur de la requête : 
 
 Séries : « réel » = dernier calcul terminé de l'état actuel (I3, `CalcRun.indicators`) ; bouquet = calcul du
 potentiel (`Potentiel.run`, I0), compté s'il est « fait » (à jour ou non, comme les agrégats I5.b).
+
+Niveau (chantier bt-trois-niveaux, I5) : sans niveau précisé (ni dimension « niveau », ni filtre), chaque couple
+(bâtiment, série) est lu au niveau **le plus fin disponible et à jour** — N2, sinon N1, sinon N0 ; à défaut d'un
+calcul à jour, le dernier calcul terminé (N1, sinon N2, sinon N0, comme avant) — et la figure le dit dans
+`layout.meta.resume` (`Contexte.resume_niveaux`).
 """
 
 from django.db.models import Q
@@ -13,6 +18,9 @@ from .. import access, calc_service, facts, parc
 from ..models import Bouquet, Building, CalcRun, Job, Portfolio, Potentiel
 from . import catalogue
 
+AUTO = 'auto'
+ORDRE_FIN = ('N2', 'N1', 'N0')          # le plus fin d'abord
+ORDRE_REPLI = ('N1', 'N2', 'N0')        # sans calcul à jour : le comportement d'avant (N1 d'abord)
 HEURES_MOIS = [744, 672, 744, 720, 744, 720, 744, 744, 720, 744, 720, 744]
 
 
@@ -58,6 +66,9 @@ class Contexte:
         self._pots = {}
         self._commun = {}
         self._sources = {}
+        self._auto = {}
+        self._a_jour = {}
+        self.choix_auto = {}
         self.cible = {key: pk}
 
     # ── Sources des autres secteurs (appelées une fois) ──
@@ -120,6 +131,55 @@ class Contexte:
             self._runs[k] = r
         return self._runs[k]
 
+    def a_jour(self, b, s, niveau):
+        """Le calcul lu pour (bâtiment, série, niveau) correspond-il aux entrées d'aujourd'hui ? (sans calcul)"""
+        k = (b.pk, s, niveau)
+        if k not in self._a_jour:
+            ok = False
+            run = self.run(b, s, niveau)
+            if run is not None:
+                if s == 'reel':
+                    ok = calc_service.is_up_to_date(run) is True
+                else:
+                    from ..ameliorations import potentiels
+                    p = self.potentiel(b, s, niveau)
+                    ok = p is not None and p.empreinte == potentiels.empreinte(b, self._bq[s], niveau)
+            self._a_jour[k] = ok
+        return self._a_jour[k]
+
+    def niveau_auto(self, b, s):
+        """(niveau, à_jour) le plus fin disponible et à jour pour (bâtiment, série), ou None sans aucun calcul."""
+        k = (b.pk, s)
+        if k not in self._auto:
+            choix = next(((n, True) for n in ORDRE_FIN if self.run(b, s, n) is not None and self.a_jour(b, s, n)),
+                         None)
+            if choix is None:
+                choix = next(((n, False) for n in ORDRE_REPLI if self.run(b, s, n) is not None), None)
+            self._auto[k] = choix
+        return self._auto[k]
+
+    def niveaux_pour(self, b, s, niveaux, grain=None):
+        if list(niveaux) != [AUTO]:
+            return list(niveaux)
+        choix = self.niveau_auto(b, s)
+        if choix is None:
+            return ['N1'] if grain == 'action' else []
+        self.choix_auto.setdefault(choix, set()).add((b.pk, s))
+        return [choix[0]]
+
+    def resume_niveaux(self):
+        """Phrase dite dans `layout.meta.resume` quand le niveau a été choisi automatiquement ('' sinon)."""
+        if not self.choix_auto:
+            return ''
+        parts = []
+        for n in ORDRE_FIN:
+            ok, old = len(self.choix_auto.get((n, True), ())), len(self.choix_auto.get((n, False), ()))
+            if ok:
+                parts.append(f"{n} pour {ok} série{'s' if ok > 1 else ''}")
+            if old:
+                parts.append(f"{n} pas à jour pour {old} série{'s' if old > 1 else ''}")
+        return 'Niveau de calcul : le plus fin disponible et à jour (N2, sinon N1, sinon N0) — ' + ', '.join(parts) + '.'
+
     def commun(self, b):
         if b.pk not in self._commun:
             eff = facts.effective(b)
@@ -148,7 +208,9 @@ class Contexte:
 
     # ── Lignes ──
     def lignes(self, grain, series_spec, niveaux, besoins_faits=False):
+        """`niveaux` : liste de niveaux, ou `[AUTO]` (le plus fin disponible et à jour, par bâtiment et série)."""
         out = []
+        self.choix_auto = {}
         series = self.series(series_spec)
         mes = self.mesures()
         fam_lib, actions = self.familles() if grain == 'action' else ({}, {})
@@ -157,7 +219,7 @@ class Contexte:
             for s in series:
                 if grain in catalogue.SERIES_HORS_REEL_GRAINS and s == 'reel':
                     continue
-                for niv in niveaux:
+                for niv in self.niveaux_pour(b, s, niveaux, grain):
                     run = self.run(b, s, niv)
                     if run is None and grain != 'action':
                         continue
@@ -285,10 +347,14 @@ def filtrer(rows, filtre):
 
 
 def niveaux_de(graphe):
+    """Niveaux lus pour un graphe : les trois si « niveau » est une dimension, celui du filtre s'il y en a un, sinon
+    `[AUTO]` (le plus fin disponible et à jour)."""
     dims = {graphe.get('x'), graphe.get('couleur'), graphe.get('facettes')}
     f = (graphe.get('filtre') or {}).get('niveau')
     if 'niveau' in dims:
         lv = ['N0', 'N1', 'N2']
+    elif not f:
+        return [AUTO]
     else:
         lv = ['N1']
     if f:
@@ -301,4 +367,4 @@ def bouquets_visibles(ctx):
     return [{'id': b.pk, 'nom': b.nom, 'objectif': b.objectif} for b in ctx.bouquets]
 
 
-__all__ = ['Contexte', 'CibleError', 'filtrer', 'niveaux_de', 'Building', 'CalcRun']
+__all__ = ['AUTO', 'Contexte', 'CibleError', 'filtrer', 'niveaux_de', 'Building', 'CalcRun']

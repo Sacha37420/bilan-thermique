@@ -1,0 +1,7 @@
+// Pastilles d'état des calculs (I2) — tokens Foyer seulement. Incluse par les composants qui affichent un état.
+.rf-badge.m-erreur { background: var(--danger-tint); color: var(--danger); border-color: var(--danger); }
+.rf-badge.st { white-space: nowrap; text-transform: none; letter-spacing: 0; }
+.rf-badge.m-document.st::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+  animation: bt-pulse 1.2s ease-in-out infinite; }
+@keyframes bt-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .rf-badge.m-document.st::before { animation: none; } }

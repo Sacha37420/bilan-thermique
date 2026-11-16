@@ -8,7 +8,10 @@ import { ContexteService } from '../../core/contexte.service';
 import { APPROFONDISSEMENT_LABELS, USAGE_LABELS } from '../../core/refonte.types';
 import { Building } from '../../core/building.types';
 import { ContexteBarComponent } from '../../components/contexte-bar/contexte-bar.component';
-import { ResultatCarteComponent, NIVEAU_MOTS } from '../../components/resultat-carte/resultat-carte.component';
+import { NIVEAU_MOTS } from '../../components/resultat-carte/resultat-carte.component';
+import { EtatCalculsComponent } from '../../components/resultat-carte/etat-calculs.component';
+import { ResultatNiveauxComponent } from '../../components/resultat-carte/resultat-niveaux.component';
+import { PotentielsComponent } from '../../components/scenarios/potentiels.component';
 import { QuestionnaireComponent } from '../../components/questionnaire/questionnaire.component';
 import { GeometrieComponent } from '../../components/geometrie/geometrie.component';
 import { ProtectionsComponent } from '../../components/protections/protections.component';
@@ -26,12 +29,13 @@ import { BLOCS_PHYSIQUE, BuildingInfo, ParoiModelSummary, STEP_LABELS, VUES_BATI
  * Onglet « Bâtiment » (chantier bt-navigation) : le bâtiment courant du bandeau, vu sous toutes ses
  * faces — synthèse, données et provenance, géométrie (un seul endroit), physique (enveloppe,
  * systèmes, protections), météo (seul endroit où on la choisit), environnement et façades, mesures.
- * On n'y lance aucun calcul : la synthèse renvoie vers l'onglet Calculs.
+ * Les calculs se refont d'eux-mêmes (bt-trois-niveaux) : la synthèse montre les trois niveaux, l'état des calculs
+ * et les potentiels par bouquet ; « Recalculer » (gestionnaire) est le seul geste de calcul ici.
  */
 @Component({
   selector: 'app-onglet-batiment',
   standalone: true,
-  imports: [RouterLink, DecimalPipe, ContexteBarComponent, ResultatCarteComponent, QuestionnaireComponent,
+  imports: [RouterLink, DecimalPipe, ContexteBarComponent, EtatCalculsComponent, ResultatNiveauxComponent, PotentielsComponent, QuestionnaireComponent,
     GeometrieComponent, ProtectionsComponent, SystemesComponent, MeteoCarteComponent, MesuresComponent,
     FacadePanelComponent, BatimentComponent, EnvironnementComponent, DonneesComponent,
     Vue3dBatimentComponent],
@@ -64,6 +68,8 @@ export class OngletBatimentComponent implements OnDestroy {
   paroiModels = signal<ParoiModelSummary[]>([]);
   /** Incrémenté à chaque changement des données : relit résultat, questionnaire, systèmes. */
   version = signal(0);
+  /** Incrémenté quand une donnée change ou qu'un calcul automatique se termine : relit résultats et potentiels. */
+  resultats = signal(0);
   initJob = signal<{ id: number; status: string; progress: number; message: string } | null>(null);
   error = signal('');
   private initTimer?: ReturnType<typeof setInterval>;
@@ -102,6 +108,13 @@ export class OngletBatimentComponent implements OnDestroy {
   /** Données modifiées (correction, questionnaire, météo, géométrie…) : tout ce qui en dépend se relit. */
   onChanged(): void {
     this.version.update(v => v + 1);
+    this.resultats.update(v => v + 1);
+    void this.ctx.rafraichirBatiments();
+  }
+
+  /** Un calcul automatique s'est terminé (I2) : résultats, potentiels et tableau du parc se relisent. */
+  onAvance(): void {
+    this.resultats.update(v => v + 1);
     void this.ctx.rafraichirBatiments();
   }
 

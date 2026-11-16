@@ -961,6 +961,13 @@
             une dizaine de secondes. Pour un parc, deux moteurs réduits lisent la <em>même fiche</em> que lui
             (surface, U des parois, baies par orientation, ventilation, inertie, consignes, masques) :
           </p>
+          <p>
+            Les trois niveaux ne sont pas des options exclusives : le serveur les <strong>calcule tous, sans geste</strong>,
+            après la chaîne d'initialisation et après chaque affinage de la fiche (fait corrigé, protection, géométrie,
+            météo, amélioration), après un court regroupement. N0 et N1 d'abord, puis N2 et les potentiels des bouquets,
+            un calcul lourd à la fois ; un calcul dont l'empreinte des entrées n'a pas changé n'est pas refait. Les rendus
+            montrent par défaut le niveau le plus fin à jour, et le disent.
+          </p>
           <ul>
             <li><strong>N1 — modèle horaire 5R1C</strong> (ISO 13790 annexe C, repris par l'ISO 52016-1) : trois nœuds
               — air <span class="sym">θ_air</span>, surfaces <span class="sym">θ_s</span>, masse <span class="sym">θ_m</span> —, cinq

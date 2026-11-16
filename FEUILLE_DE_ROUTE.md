@@ -946,21 +946,21 @@ d'ouverture des fenêtres, réglage désactivé par défaut — décision du pro
 - [x] Voir `to_do_trois_niveaux.md`, lot 41
 **Vérifié le :** 2026-11-16 — voir `to_do_trois_niveaux.md`
 
-## Lot 42 — Calculs automatiques   ·   statut : à faire
+## Lot 42 — Calculs automatiques   ·   statut : livré
 **Objectif :** N0, N1, N2 du réel et des potentiels calculés et recalculés d'eux-mêmes. Détail : `to_do_trois_niveaux.md`.
 **Tâches :**
-- [ ] Voir `to_do_trois_niveaux.md`, lot 42
+- [x] Voir `to_do_trois_niveaux.md`, lot 42
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_trois_niveaux.md`, lot 42
-**Vérifié le :**
+- [x] Voir `to_do_trois_niveaux.md`, lot 42
+**Vérifié le :** 2026-11-16 — voir `to_do_trois_niveaux.md`
 
-## Lot 43 — Données à trois niveaux   ·   statut : à faire
+## Lot 43 — Données à trois niveaux   ·   statut : livré
 **Objectif :** potentiels N0/N1/N2, tableau du parc et rendu par niveau. Détail : `to_do_trois_niveaux.md`.
 **Tâches :**
-- [ ] Voir `to_do_trois_niveaux.md`, lot 43
+- [x] Voir `to_do_trois_niveaux.md`, lot 43
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_trois_niveaux.md`, lot 43
-**Vérifié le :**
+- [x] Voir `to_do_trois_niveaux.md`, lot 43
+**Vérifié le :** 2026-11-16 — voir `to_do_trois_niveaux.md`
 
 ## Lot 44 — Écran et intégration   ·   statut : à faire
 **Objectif :** trois niveaux et état des calculs dans Parc, Bâtiment, Calculs, Rendu. Détail : `to_do_trois_niveaux.md`.

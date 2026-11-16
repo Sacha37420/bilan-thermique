@@ -13,7 +13,7 @@ import math
 import statistics
 
 from . import catalogue, spec as spec_mod
-from .donnees import filtrer, niveaux_de
+from .donnees import AUTO, filtrer, niveaux_de
 
 MAX_FACETTES = 12
 MAX_TRACES = 60
@@ -183,7 +183,8 @@ def construire(ctx, g):
     if not fig['data']:
         return vide('Aucune donnée : les calculs trouvés ne portent pas ces mesures.', g.get('titre'))
     fig['data'] = fig['data'][:MAX_TRACES]
-    fig['layout']['meta']['resume'] = _resume(g, mes, ctx, points, n_bat, series, extra)
+    fig['layout']['meta']['resume'] = _resume(g, mes, ctx, points, n_bat, series,
+                                              ' '.join(x for x in (extra, ctx.resume_niveaux()) if x))
     fig['vide'] = False
     return fig
 
@@ -446,11 +447,14 @@ def _cascade(ctx, g, mes, _rows=None, _series=None):
     par_m2 = m.endswith('_m2')
     deltas = {p[0]: [] for p in catalogue.POSTES}
     reels, pots, n = [], [], 0
-    rows = filtrer([{**ctx.commun(b)['raw'], '_b': b.pk, '_niveau': 'N1', '_obj': b} for b in ctx.batiments],
-                   {k: v for k, v in g['filtre'].items() if k not in ('mois', 'famille_action', 'application')})
+    impose = [n for n in ('N0', 'N1', 'N2') if n in set(g['filtre'].get('niveau') or [])][:1]
+    rows = filtrer([{**ctx.commun(b)['raw'], '_b': b.pk, '_obj': b} for b in ctx.batiments],
+                   {k: v for k, v in g['filtre'].items() if k not in ('mois', 'famille_action', 'application', 'niveau')})
+    choix = {}
     for r in rows:
         b = r['_obj']
-        r0, r1 = ctx.run(b, 'reel', 'N1'), ctx.run(b, s, 'N1')
+        niv = impose[0] if impose else _niveau_commun(ctx, b, s)
+        r0, r1 = ctx.run(b, 'reel', niv), ctx.run(b, s, niv)
         if r0 is None or r1 is None:
             continue
         b0, b1 = (r0.results or {}).get('balance') or {}, (r1.results or {}).get('balance') or {}
@@ -460,13 +464,14 @@ def _cascade(ctx, g, mes, _rows=None, _series=None):
             continue
         k = 1.0 / surf if par_m2 else 1.0
         n += 1
+        choix[niv] = choix.get(niv, 0) + 1
         reels.append(h0 * k)
         pots.append(h1 * k)
         for cle, _lib, sens in catalogue.POSTES:
             d = (b1.get(cle, 0.0) - b0.get(cle, 0.0)) * k
             deltas[cle].append(d if sens == 'perte' else -d)
     if not n:
-        return vide('Aucune donnée : il faut, pour un même bâtiment, le calcul N1 réel et celui du bouquet.',
+        return vide('Aucune donnée : il faut, pour un même bâtiment, le calcul réel et celui du bouquet au même niveau.',
                     g.get('titre'))
     agg = 'somme' if g['agregation'] == 'somme' and not par_m2 else 'moyenne'
     a = (lambda v: sum(v)) if agg == 'somme' else (lambda v: sum(v) / len(v))
@@ -485,8 +490,21 @@ def _cascade(ctx, g, mes, _rows=None, _series=None):
     gain = v_reel - v_pot
     lay['meta']['resume'] = (f"{_titre_mesure(mes, m)} : du réel ({_fmt(v_reel, mes[m]['unite'])}) au bouquet « {nom} » "
                              f"({_fmt(v_pot, mes[m]['unite'])}), soit {_fmt(gain, mes[m]['unite'])} de moins — "
-                             f"{n} bâtiment{'s' if n > 1 else ''}, {'somme' if agg == 'somme' else 'moyenne'}.")
+                             f"{n} bâtiment{'s' if n > 1 else ''}, {'somme' if agg == 'somme' else 'moyenne'}."
+                             + (' Niveau de calcul : ' + ', '.join(f"{lv} pour {c} bâtiment{'s' if c > 1 else ''}"
+                                                                   for lv, c in sorted(choix.items(), reverse=True))
+                                + (' (imposé par le filtre).' if impose else
+                                   ' (le plus fin où le réel et le bouquet sont tous deux à jour, sinon N1).')))
     return {'data': data, 'layout': lay, 'vide': False}
+
+
+def _niveau_commun(ctx, b, s):
+    """Cascade : le niveau le plus fin où le réel et le bouquet sont calculés et à jour tous les deux, sinon N1."""
+    for niv in ('N2', 'N1', 'N0'):
+        if (ctx.run(b, 'reel', niv) is not None and ctx.run(b, s, niv) is not None
+                and ctx.a_jour(b, 'reel', niv) and ctx.a_jour(b, s, niv)):
+            return niv
+    return 'N1'
 
 
 def carte(ctx, indicateur, serie):
@@ -497,7 +515,7 @@ def carte(ctx, indicateur, serie):
         return vide('Indicateur de carte inconnu.')
     if serie != 'reel' and serie not in ctx._bq:
         return vide('Aucune donnée : ce bouquet n’est pas visible ici.')
-    rows = [r for r in ctx.lignes('batiment', [serie] if serie != 'reel' else 'reel', ['N1'],
+    rows = [r for r in ctx.lignes('batiment', [serie] if serie != 'reel' else 'reel', [AUTO],
                                   mes[indicateur]['source'] == 'fait')
             if r.get('lat') is not None and r.get('lon') is not None]
     sans = [r for r in rows if r.get(indicateur) is None]
@@ -521,7 +539,8 @@ def carte(ctx, indicateur, serie):
     lay['meta']['resume'] = (f"{_titre_mesure(mes, indicateur)} ({ctx.libelle_serie(serie)}) de {len(rows)} bâtiment"
                              f"{'s' if len(rows) > 1 else ''} situé{'s' if len(rows) > 1 else ''} ; le plus élevé : "
                              f"{hi['batiment']} ({_fmt(hi[indicateur], u)})."
-                             + (f" {len(sans)} sans valeur." if sans else ''))
+                             + (f" {len(sans)} sans valeur." if sans else '')
+                             + (' ' + ctx.resume_niveaux() if ctx.resume_niveaux() else ''))
     return {'data': data, 'layout': lay, 'vide': False}
 
 

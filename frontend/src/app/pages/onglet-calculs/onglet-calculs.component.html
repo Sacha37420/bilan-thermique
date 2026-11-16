@@ -58,6 +58,7 @@
     </section>
   } @else {
     @let bid = ctx.batimentId()!;
+    <app-etat-calculs [buildingId]="bid" [refresh]="version()" (avance)="onAvance()" />
     @switch (vue()) {
       @case ('simulation') {
         <div class="sel" role="radiogroup" aria-label="Simulation">
@@ -69,6 +70,8 @@
         @if (niveau(); as n) {
           <p class="rf-hint">{{ moteur(n)?.resume }} {{ quand[n] }}
             <button type="button" class="linkbtn" (click)="setVue('catalogue')">Documentation</button></p>
+          <p class="rf-hint" role="note">Les simulations se refont d'elles-mêmes quand le bâtiment change (voir « État des calculs »).
+            Vous pouvez aussi en lancer une ici à la main : elle apparaît dans l'état et dans l'historique comme les autres.</p>
           <app-simulation [buildingId]="bid" [niveau]="n" [refresh]="version()" (launched)="onLance($event)" />
           <app-resultat-carte [buildingId]="bid" [niveau]="n" [refresh]="version()" />
           <p class="rf-hint">
@@ -87,7 +90,7 @@
         }
       }
       @case ('ameliorations') {
-        <app-potentiels [buildingId]="bid" />
+        <app-potentiels [buildingId]="bid" [refresh]="version()" />
         <app-scenarios [buildingId]="bid" />
       }
       @case ('historique') {

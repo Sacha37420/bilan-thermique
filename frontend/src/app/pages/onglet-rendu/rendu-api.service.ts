@@ -66,12 +66,15 @@ export class RenduApiService {
 
   // ── I5 ──
   potentielsBatiment(id: number): Promise<PotentielsBatiment> { return this.get(`/batiments/${id}/potentiels/`, 'Potentiels'); }
-  calculerPotentielsBatiment(id: number, corps: { bouquets?: number[]; niveau: 'N1' | 'N2' }): Promise<PotentielsBatiment> {
+  calculerPotentielsBatiment(id: number, corps: { bouquets?: number[]; niveau: 'N0' | 'N1' | 'N2' }): Promise<PotentielsBatiment> {
     return this.post(`/batiments/${id}/potentiels/`, corps, 'Calcul des potentiels');
   }
-  potentielsParc(id: number): Promise<PotentielsParc> { return this.get(`/parcs/${id}/potentiels/`, 'Potentiels du parc'); }
-  calculerPotentielsParc(id: number, bouquets?: number[]): Promise<PotentielsParc> {
-    return this.post(`/parcs/${id}/potentiels/`, bouquets ? { bouquets, niveau: 'N1' } : { niveau: 'N1' }, 'Calcul des potentiels du parc');
+  /** I3 bt-trois-niveaux : `?niveau=N0|N1|N2` (défaut serveur N1) — potentiels et agrégats du niveau demandé. */
+  potentielsParc(id: number, niveau: 'N0' | 'N1' | 'N2' = 'N1'): Promise<PotentielsParc> {
+    return this.get(`/parcs/${id}/potentiels/?niveau=${niveau}`, 'Potentiels du parc');
+  }
+  calculerPotentielsParc(id: number, bouquets?: number[], niveau: 'N0' | 'N1' | 'N2' = 'N1'): Promise<PotentielsParc> {
+    return this.post(`/parcs/${id}/potentiels/`, bouquets ? { bouquets, niveau } : { niveau }, 'Calcul des potentiels du parc');
   }
 
   // ── I7 ──
