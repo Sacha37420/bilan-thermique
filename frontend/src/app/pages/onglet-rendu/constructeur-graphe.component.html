@@ -1,0 +1,85 @@
+<div class="cg">
+  <section class="etape" aria-labelledby="cg-q">
+    <h4 id="cg-q"><span class="num">1</span> Quelle question voulez-vous poser ?</h4>
+    @if (questions().length) {
+      <ul class="questions">
+        @for (q of questions(); track q.cle) {
+          <li><button type="button" class="q" [class.active]="questionChoisie() === q.cle" [attr.aria-pressed]="questionChoisie() === q.cle"
+                      (click)="partirDe(q)">{{ q.question }}</button></li>
+        }
+        <li><button type="button" class="q libre" (click)="aZero()">Partir de zéro</button></li>
+      </ul>
+    } @else {
+      <p class="rf-hint">Aucune question proposée par le serveur pour l’instant.
+        <button type="button" class="rf-btn small" (click)="aZero()">Partir de zéro</button></p>
+    }
+  </section>
+
+  <details class="etape" [open]="reglagesOuverts() || !vierge()" (toggle)="reglagesOuverts.set($any($event.target).open)">
+    <summary><span class="num">2</span> Régler le graphe</summary>
+    @if (catalogueErreur()) { <p class="rf-hint">{{ catalogueErreur() }}</p> }
+    @let g = graphe();
+    <div class="rf-row">
+      <label class="rf-field grow"><span>Titre</span>
+        <input type="text" maxlength="150" [value]="g.titre" (change)="poser('titre', $any($event.target).value)" /></label>
+      <label class="rf-field"><span>Forme</span>
+        <select (change)="poser('forme', $any($event.target).value)">
+          @for (f of FORMES; track f.cle) { <option [value]="f.cle" [selected]="g.forme === f.cle">{{ f.libelle }}</option> }
+        </select></label>
+    </div>
+    <div class="rf-row">
+      <label class="rf-field"><span>En abscisse (x)</span>
+        <select (change)="poser('x', dim($any($event.target).value))">
+          <option value="" [selected]="!g.x">—</option>
+          @for (d of dimsForme(); track d.cle) { <option [value]="d.cle" [selected]="g.x === d.cle">{{ d.libelle }}</option> }
+        </select></label>
+      <label class="rf-field"><span>Couleur selon</span>
+        <select (change)="poser('couleur', dim($any($event.target).value))">
+          <option value="" [selected]="!g.couleur">aucune</option>
+          @for (d of dimsForme(); track d.cle) { <option [value]="d.cle" [selected]="g.couleur === d.cle">{{ d.libelle }}</option> }
+        </select></label>
+      <label class="rf-field"><span>Un petit graphe par</span>
+        <select (change)="poser('facettes', dim($any($event.target).value))">
+          <option value="" [selected]="!g.facettes">aucun</option>
+          @for (d of dimsForme(); track d.cle) { <option [value]="d.cle" [selected]="g.facettes === d.cle">{{ d.libelle }}</option> }
+        </select></label>
+      @if (avecTaille()) {
+        <label class="rf-field"><span>Taille des points selon</span>
+          <select (change)="poser('taille', dim($any($event.target).value))">
+            <option value="" [selected]="!g.taille">aucune</option>
+            @for (m of mesForme(); track m.cle) { <option [value]="m.cle" [selected]="g.taille === m.cle">{{ libelleMesure(m) }}</option> }
+          </select></label>
+      }
+      <label class="rf-field"><span>Agrégation</span>
+        <select (change)="poser('agregation', $any($event.target).value)">
+          <option value="moyenne" [selected]="g.agregation === 'moyenne'">Moyenne</option>
+          <option value="mediane" [selected]="g.agregation === 'mediane'">Médiane</option>
+          <option value="somme" [selected]="g.agregation === 'somme'">Somme</option>
+          <option value="aucune" [selected]="g.agregation === 'aucune'">Aucune (une valeur par bâtiment)</option>
+        </select></label>
+    </div>
+    <fieldset class="liste"><legend>Grandeurs représentées (y)</legend>
+      @for (m of mesForme(); track m.cle) {
+        <label class="check"><input type="checkbox" [checked]="g.y.includes(m.cle)" (change)="basculerY(m.cle, $any($event.target).checked)" />{{ libelleMesure(m) }}</label>
+      } @empty { <p class="rf-hint">Liste des grandeurs indisponible.</p> }
+    </fieldset>
+    <app-choix-series [valeur]="g.series" [bouquets]="bouquets()" nom="cg-series" (seriesChange)="series($event)" />
+    @if (portee() === 'parc') {
+      <fieldset class="liste"><legend>Filtrer les bâtiments</legend>
+        @for (u of USAGES; track u[0]) {
+          <label class="check"><input type="checkbox" [checked]="usageCoche(u[0])" (change)="basculerUsage(u[0], $any($event.target).checked)" />{{ u[1] }}</label>
+        }
+        <label class="rf-field an"><span>Construits à partir de</span>
+          <input type="number" min="1600" max="2100" step="1" [value]="g.filtre.periode?.[0] ?? ''" (change)="periode(0, $any($event.target).value)" /></label>
+        <label class="rf-field an"><span>jusqu’à</span>
+          <input type="number" min="1600" max="2100" step="1" [value]="g.filtre.periode?.[1] ?? ''" (change)="periode(1, $any($event.target).value)" /></label>
+      </fieldset>
+    }
+    <label class="check"><input type="checkbox" [checked]="g.axe_y_log" (change)="poser('axe_y_log', $any($event.target).checked)" />Échelle logarithmique en ordonnée</label>
+  </details>
+
+  <section class="etape apercu" aria-live="polite">
+    <h4><span class="num">3</span> Aperçu</h4>
+    <app-graphe [figure]="figure()" [titre]="graphe().titre" [chargement]="chargement()" [erreur]="figureErreur()" [hauteur]="320" [telechargeable]="false" />
+  </section>
+</div>

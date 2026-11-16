@@ -1,10 +1,11 @@
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
 import { Building, Job, CalcRunSummary } from '../../core/building.types';
 import { MeshViewerComponent } from '../../components/mesh-viewer/mesh-viewer.component';
+import { couleurA, echelle } from '../../components/graphe/palette';
 import { VENTILATION_PROFILES } from '../../core/ventilation-profiles';
 import {
   USAGE_PROFILES, UsageProfile, UsageProfileId, OccupationCalendar,
@@ -85,28 +86,6 @@ const POLL_INTERVAL_MS = 2000;
 const CHART_W = 960;
 const CHART_H = 260;
 const MARGIN = { top: 16, right: 16, bottom: 32, left: 46 };
-
-// Échelle divergente bleu/rouge (skill dataviz) pour une grandeur continue
-// (température) — distincte de la palette catégorielle des séries.
-// EXCEPTION DOCUMENTÉE à « aucune couleur en dur » (identité Foyer, Lot 5 de la refonte) : ces
-// trois valeurs colorent les SOMMETS d'un maillage three.js (WebGL), qui ne lit pas les variables
-// CSS ; elles encodent une donnée (température), pas le thème, et doivent rester identiques en
-// clair et en sombre pour que la légende garde son sens.
-const COLD_HEX = '#2a78d6';
-const HOT_HEX = '#e34948';
-const MID_HEX = '#c9c7bd';
-
-function hexToRgb(hex: string): [number, number, number] {
-  const v = parseInt(hex.slice(1), 16);
-  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-}
-
-function lerpColor(a: [number, number, number], b: [number, number, number], t: number): string {
-  const r = Math.round(a[0] + (b[0] - a[0]) * t);
-  const g = Math.round(a[1] + (b[1] - a[1]) * t);
-  const bl = Math.round(a[2] + (b[2] - a[2]) * t);
-  return `#${[r, g, bl].map(x => x.toString(16).padStart(2, '0')).join('')}`;
-}
 
 @Component({
   selector: 'app-calcul-3d',
@@ -451,7 +430,8 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   private pollHandle?: ReturnType<typeof setInterval>;
   error = signal('');
 
-  colorMode: 'interior' | 'exterior' = 'interior';
+  /** Surface colorée sur le viewer : un signal, pour que la bascule recrée la fonction de couleur. */
+  colorMode = signal<'interior' | 'exterior'>('interior');
 
   ngOnInit(): void {
     this.api.getBuildings().subscribe({
@@ -895,24 +875,34 @@ export class Calcul3DComponent implements OnInit, OnDestroy {
   }
 
   // ── Couleur du viewer 3D (résultat) ───────────────────────────────────
-  colorForResultTriangle = (index: number): string => {
+  /** Températures de la surface choisie et leurs bornes, calculées une fois par résultat et par bascule. */
+  private resultTemps = computed(() => {
     const r = this.result;
-    if (!r) return '--border';
-    const values = this.colorMode === 'interior' ? r.final_interior_surface_temp : r.final_exterior_surface_temp;
-    const v = values[index];
-    if (v === undefined) return '--border';
-    const min = Math.min(...values), max = Math.max(...values);
-    if (max - min < 0.01) return MID_HEX;
-    const t = (v - min) / (max - min);
-    return t < 0.5
-      ? lerpColor(hexToRgb(COLD_HEX), hexToRgb(MID_HEX), t / 0.5)
-      : lerpColor(hexToRgb(MID_HEX), hexToRgb(HOT_HEX), (t - 0.5) / 0.5);
-  };
+    if (!r) return null;
+    const values = (this.colorMode() === 'interior' ? r.final_interior_surface_temp : r.final_exterior_surface_temp) ?? [];
+    let min = Infinity, max = -Infinity;
+    for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
+    return values.length ? { values, min, max } : { values, min: 0, max: 0 };
+  });
+
+  /** Nouvelle fonction à chaque résultat ou bascule de surface : le viewer repeint. Échelle divergente
+   * des jetons (`palette.ts`), relue à chaque recalcul. */
+  colorForResultTriangle = computed<(index: number) => string>(() => {
+    const d = this.resultTemps();
+    if (!d) return () => '--border';
+    const e = echelle('divergente');
+    const { values, min, max } = d;
+    const flat = max - min < 0.01;
+    return (index: number): string => {
+      const v = values[index];
+      if (v === undefined) return '--border';
+      return couleurA(e, flat ? 0.5 : (v - min) / (max - min));
+    };
+  });
 
   resultTempRange(): { min: number; max: number } {
-    const r = this.result;
-    if (!r) return { min: 0, max: 0 };
-    const values = this.colorMode === 'interior' ? r.final_interior_surface_temp : r.final_exterior_surface_temp;
-    return { min: Math.min(...values), max: Math.max(...values) };
+    const d = this.resultTemps();
+    return d ? { min: d.min, max: d.max } : { min: 0, max: 0 };
   }
+
 }

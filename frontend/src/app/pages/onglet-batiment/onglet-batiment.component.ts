@@ -19,6 +19,7 @@ import { FacadePanelComponent } from '../../components/facade-panel/facade-panel
 import { BatimentComponent } from '../batiment/batiment.component';
 import { EnvironnementComponent } from '../environnement/environnement.component';
 import { DonneesComponent } from './donnees.component';
+import { Vue3dBatimentComponent } from '../../components/vue3d-resultats/vue3d-batiment.component';
 import { BLOCS_PHYSIQUE, BuildingInfo, ParoiModelSummary, STEP_LABELS, VUES_BATIMENT, VueBatiment } from './onglet-batiment.types';
 
 /**
@@ -32,7 +33,8 @@ import { BLOCS_PHYSIQUE, BuildingInfo, ParoiModelSummary, STEP_LABELS, VUES_BATI
   standalone: true,
   imports: [RouterLink, DecimalPipe, ContexteBarComponent, ResultatCarteComponent, QuestionnaireComponent,
     GeometrieComponent, ProtectionsComponent, SystemesComponent, MeteoCarteComponent, MesuresComponent,
-    FacadePanelComponent, BatimentComponent, EnvironnementComponent, DonneesComponent],
+    FacadePanelComponent, BatimentComponent, EnvironnementComponent, DonneesComponent,
+    Vue3dBatimentComponent],
   templateUrl: './onglet-batiment.component.html',
   styleUrl: './onglet-batiment.component.scss',
 })

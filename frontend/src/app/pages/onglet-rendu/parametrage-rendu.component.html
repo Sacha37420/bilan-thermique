@@ -1,0 +1,114 @@
+@if (etat.gabaritsErreur() && !etat.spec()) {
+  <p class="rf-hint" role="status">{{ etat.gabaritsErreur() }}</p>
+}
+
+<section class="rf-card" aria-labelledby="pr-mod">
+  <div class="rf-card-head"><h2 id="pr-mod">Modèle de document</h2>
+    <button type="button" class="rf-btn" (click)="voirRendu.emit()" [disabled]="!etat.spec()">Voir le rendu</button></div>
+  <div class="rf-row">
+    <label class="rf-field grow"><span>Partir de</span>
+      <select (change)="choisirModele($any($event.target).value)">
+        @if (etat.modeleId() === null) { <option value="" selected>Document en cours (sans modèle)</option> }
+        @if (etat.modeles().parc.length) {
+          <optgroup label="Modèles du parc">
+            @for (m of etat.modeles().parc; track m.id) { <option [value]="m.id" [selected]="etat.modeleId() === m.id">{{ m.nom }}{{ m.par_defaut ? ' (par défaut)' : '' }}</option> }
+          </optgroup>
+        }
+        @if (etat.modeles().lab.length) {
+          <optgroup label="Gabarits du lab">
+            @for (m of etat.modeles().lab; track m.id) { <option [value]="m.id" [selected]="etat.modeleId() === m.id">{{ m.nom }}</option> }
+          </optgroup>
+        }
+        <option value="__vide">Document vide</option>
+      </select></label>
+  </div>
+  <p class="rf-hint">{{ origine(etat.modeleCourant()) }}@if (etat.modifie()) {&#32;— <strong>modifié</strong>, non enregistré (aperçu dans ce navigateur)}.</p>
+  @if (etat.modelesErreur()) { <p class="rf-hint">{{ etat.modelesErreur() }}</p> }
+
+  <div class="pied">
+    @if (etat.peutEcrire()) {
+      @if (etat.modeleCourant()?.modifiable) {
+        <button type="button" class="rf-btn primary" (click)="enregistrer()" [disabled]="!etat.modifie() || etat.enregistrement()">
+          {{ etat.enregistrement() ? 'Enregistrement…' : 'Enregistrer le modèle' }}</button>
+      }
+      <label class="rf-field"><span>Nom du nouveau modèle</span>
+        <input type="text" maxlength="150" [value]="nouveauNom()" (input)="nouveauNom.set($any($event.target).value)" (keyup.enter)="enregistrerSous()" /></label>
+      <button type="button" class="rf-btn" (click)="enregistrerSous()" [disabled]="!nouveauNom().trim() || etat.enregistrement()">Enregistrer comme nouveau modèle</button>
+      @if (etat.modeleCourant()?.modifiable) {
+        @if (confirmerSuppression()) {
+          <button type="button" class="rf-btn danger" (click)="supprimer()">Confirmer la suppression</button>
+          <button type="button" class="rf-btn" (click)="confirmerSuppression.set(false)">Garder</button>
+        } @else {
+          <button type="button" class="rf-btn danger" (click)="confirmerSuppression.set(true)" [disabled]="etat.enregistrement()">Supprimer ce modèle</button>
+        }
+      }
+    } @else {
+      <p class="rf-hint">
+        @if (!etat.parcReel()) { Hors parc : ce réglage ne vaut que pour votre aperçu. }
+        @else { Seul un gestionnaire du parc enregistre un modèle ; vos réglages ne valent que pour votre aperçu. }
+      </p>
+    }
+    @if (etat.modifie()) { <button type="button" class="rf-btn small" (click)="etat.revenir()">Annuler les modifications</button> }
+  </div>
+  @if (etat.info()) { <p class="rf-ok" role="status">{{ etat.info() }}</p> }
+  @if (etat.erreur()) { <p class="rf-error" role="alert">{{ etat.erreur() }}</p> }
+</section>
+
+@if (etat.spec(); as s) {
+  <section class="rf-card" aria-labelledby="pr-doc">
+    <div class="rf-card-head"><h2 id="pr-doc">Document</h2></div>
+    <div class="rf-row">
+      <label class="rf-field grow"><span>Titre (vide : titre automatique)</span>
+        <input type="text" maxlength="200" [value]="s.titre" (change)="titre($any($event.target).value)" /></label>
+      <label class="rf-field"><span>Format</span>
+        <select (change)="mep('format', $any($event.target).value)">
+          <option value="A4" [selected]="s.mise_en_page.format === 'A4'">A4</option>
+          <option value="A3" [selected]="s.mise_en_page.format === 'A3'">A3</option>
+        </select></label>
+      <label class="rf-field"><span>Orientation</span>
+        <select (change)="mep('orientation', $any($event.target).value)">
+          <option value="portrait" [selected]="s.mise_en_page.orientation === 'portrait'">Portrait</option>
+          <option value="paysage" [selected]="s.mise_en_page.orientation === 'paysage'">Paysage</option>
+        </select></label>
+    </div>
+    <label class="check"><input type="checkbox" [checked]="s.mise_en_page.sommaire" (change)="mep('sommaire', $any($event.target).checked)" />Sommaire</label>
+    <label class="check"><input type="checkbox" [checked]="s.mise_en_page.numeros" (change)="mep('numeros', $any($event.target).checked)" />Numéros de page</label>
+  </section>
+
+  @for (sec of s.sections; track $index; let i = $index) {
+    <section class="rf-card section" [attr.aria-label]="'Section ' + (i + 1)">
+      <div class="sec-tete">
+        <label class="rf-field grow"><span>Section {{ i + 1 }}</span>
+          <input type="text" maxlength="200" [value]="sec.titre" (change)="titreSection(i, $any($event.target).value)" /></label>
+        <div class="outils">
+          <button type="button" class="rf-btn small" (click)="deplacerSection(i, -1)" [disabled]="i === 0" aria-label="Monter la section">↑</button>
+          <button type="button" class="rf-btn small" (click)="deplacerSection(i, 1)" [disabled]="i === s.sections.length - 1" aria-label="Descendre la section">↓</button>
+          <button type="button" class="rf-btn small danger" (click)="supprimerSection(i)" aria-label="Supprimer la section">Supprimer</button>
+        </div>
+      </div>
+      <ol class="blocs">
+        @for (b of sec.blocs; track $index; let k = $index) {
+          @let cle = i + '-' + k;
+          <li class="bloc" [class.ouvert]="ouvert() === cle">
+            <div class="bloc-tete">
+              <button type="button" class="bloc-nom" (click)="basculer(cle)" [attr.aria-expanded]="ouvert() === cle">
+                <strong>{{ libelleType(b.type) }}</strong> <small>{{ resumeBloc(b) }}</small></button>
+              <button type="button" class="rf-btn small" (click)="deplacerBloc(i, k, -1)" [disabled]="k === 0" aria-label="Monter le bloc">↑</button>
+              <button type="button" class="rf-btn small" (click)="deplacerBloc(i, k, 1)" [disabled]="k === sec.blocs.length - 1" aria-label="Descendre le bloc">↓</button>
+              <button type="button" class="rf-btn small danger" (click)="supprimerBloc(i, k)" aria-label="Supprimer le bloc">✕</button>
+            </div>
+            @if (ouvert() === cle) {
+              <div class="bloc-corps"><app-editeur-bloc [bloc]="b" [id]="'b' + cle" (blocChange)="majBloc(i, k, $event)" /></div>
+            }
+          </li>
+        } @empty { <li class="rf-hint">Section vide.</li> }
+      </ol>
+      <label class="rf-field ajout"><span>Ajouter un bloc</span>
+        <select (change)="ajouterBloc(i, $any($event.target).value); $any($event.target).value = ''">
+          <option value="">— choisir —</option>
+          @for (t of TYPES_BLOC; track t.cle) { <option [value]="t.cle">{{ t.libelle }}</option> }
+        </select></label>
+    </section>
+  }
+  <button type="button" class="rf-btn" (click)="ajouterSection()">Ajouter une section</button>
+}

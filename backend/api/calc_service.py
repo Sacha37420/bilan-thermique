@@ -16,7 +16,7 @@ from .engines import n0, n1, n2_inputs
 from .fingerprint import stable_hash
 from .models import CalcRun, Job
 
-ENGINE_VERSION = {'N0': 'n0-4', 'N1': 'n1-4', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16) ; -3 : horizon par profil (Lot 30) ; -4 : sol simulé (Lot 32)
+ENGINE_VERSION = {'N0': 'n0-5', 'N1': 'n1-5', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16) ; -3 : horizon par profil (Lot 30) ; -4 : sol simulé (Lot 32) ; -5 : protections v2, améliorations I2, DH RE2020 (lot 36)
 
 
 class CalcError(ValueError):
@@ -64,12 +64,28 @@ def resolve_weather(building, spec=None):
 
 
 def params_for(building, scenario=None, values=None):
+    """Paramètres N0/N1 : fiche effective (faits de l'amélioration compris), protections (état actuel + amélioration)
+    et surcharges de l'amélioration (lot 36, I2 — `engines.surcharges`)."""
     vals = values if values is not None else facts.effective_values(building, scenario)
     from . import geometry_service
-    p = engine_inputs.from_fiche(vals, geometry_service.effective_summary(building, scenario))
-    from . import shading_service
-    shading_service.apply(p, building, scenario)
+    geom = geometry_service.effective_summary(building, scenario)
+    p = _params_from(building, scenario, vals, geom)
     return p, vals
+
+
+def _params_from(building, scenario, vals, geom):
+    from . import shading_service
+    from .engines import surcharges
+    p = engine_inputs.from_fiche(vals, geom)
+    shading_service.apply(p, building, scenario)
+    surcharges.apply_to_params(p, surcharges.of(scenario), vals, geom, building.georef_north_offset_deg or 0.0)
+    return p
+
+
+def scenario_weather(weather, scenario):
+    """Série météo vue par le bâtiment : rafraîchissement de l'air de l'amélioration appliqué (hypothèse, lot 36)."""
+    from .engines import surcharges
+    return surcharges.corrected_weather(weather, surcharges.of(scenario))
 
 
 def n2_context_hash(building, scenario):
@@ -95,9 +111,10 @@ def inputs_hash_for(building, level, scenario, weather_hash, values=None):
     from . import geometry_service, shading_service
     vals = values if values is not None else facts.effective_values(building, scenario)
     extra = n2_context_hash(building, scenario) if level == 'N2' else None
+    from .engines import surcharges
     return stable_hash(level, ENGINE_VERSION[level], stable_hash(sorted(vals.items())), weather_hash,
                        shading_service.signature(building, scenario), geometry_service.effective_summary(building, scenario),
-                       *([extra] if extra else []))
+                       surcharges.of(scenario), *([extra] if extra else []))
 
 
 def from_fiche(run):
@@ -127,9 +144,17 @@ def params_snapshot(p):
             'inertie': {'c_m_j_k_m2': p.c_m, 'a_m': p.a_m_factor}, 'renouvellement_vol_h': round(p.n_vent, 3),
             'apports_w_m2': p.gains_w_m2, 'consigne_chauffage_c': p.t_heat, 'consigne_froid_c': p.t_cool,
             'occupation': 'logement (constante)' if p.residential else 'tertiaire : 8 h–19 h, lundi–vendredi',
-            'horizon_deg': p.horizon, 'protections': [{k: d[k] for k in ('kind', 'orientation', 'mode')} for d in p.devices],
+            'horizon_deg': p.horizon,
+            'protections': [{k: d.get(k) for k in ('id', 'kind', 'orientation', 'mode', 'params', 'control')} for d in p.devices],
             'plancher_bas': {'type': p.floor_type, 'perimetre_expose_m': round(p.floor_perimeter, 1),
-                             'profondeur_sous_sol_m': p.basement_depth, 'modele_sol': p.ground_model}}
+                             'profondeur_sous_sol_m': p.basement_depth, 'modele_sol': p.ground_model},
+            # Lot 36 : leviers des améliorations, tels que les moteurs les ont reçus.
+            'albedo_abords': p.albedo, 'absorptance_toiture': round(p.alpha_roof, 3),
+            'u_toiture_effectif': round(p.u_roof_eff, 3),
+            'u_murs_effectifs': {o: round(p.u_wall_eff(o), 3) for o in p.walls},
+            'toiture_vegetalisee': p.green_roof, 'murs_vegetalises': p.green_walls,
+            'arbres_plantes': len(p.trees or []),
+            'surventilation_nocturne': {'vol_h': p.night_vent, 'seuil_c': p.night_vent_threshold} if p.night_vent else None}
 
 
 def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub='', force=False, job=None,
@@ -139,6 +164,7 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
     if not weather_spec and scenario is not None and (scenario.weather or {}).get('dataset_id'):
         weather_spec = {'dataset_id': scenario.weather['dataset_id']}  # météo propre à la variante (Lot 18)
     weather, wdesc = resolve_weather(building, weather_spec)
+    weather = scenario_weather(weather, scenario)
     p, vals = params_for(building, scenario)
     inputs_hash = inputs_hash_for(building, level, scenario, wdesc.get('hash'), vals)
     if not force:
@@ -150,8 +176,10 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
     settings = {'engine': ENGINE_VERSION[level], 'facts': facts_used(eff),
                 'confidence': facts.scores(eff)[0], 'completeness': facts.scores(eff)[1]}
     from . import geometry_service
+    from .engines import surcharges as engine_surcharges
     inputs = {'engine': ENGINE_VERSION[level], 'facts': settings['facts'], 'params': params_snapshot(p),
-              'geometry': geometry_service.without_profile(geometry_service.effective_summary(building, scenario))}
+              'geometry': geometry_service.without_profile(geometry_service.effective_summary(building, scenario)),
+              'ameliorations': engine_surcharges.describe(building, scenario, level)}
     settings['uncertainty'] = bool(uncertainty and level == 'N1')
     try:
         with transaction.atomic():
@@ -228,11 +256,8 @@ def run_n1_with_range(building, scenario, eff, weather, nominal_params):
     geom = geometry_service.effective_summary(building, scenario)
     samples = uncertainty.sample_values(eff, seed=seed)
     params = [nominal_params]
-    from . import shading_service
     for vals in samples[1:]:
-        q = engine_inputs.from_fiche(vals, geom)
-        shading_service.apply(q, building, scenario)
-        params.append(q)
+        params.append(_params_from(building, scenario, vals, geom))
     results = n1.run(params, weather, keep_series=False)
     nominal = n1.run_one(nominal_params, weather)
     heat = [r['heating_kwh'] for r in results]
@@ -299,6 +324,11 @@ def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=
     return holder['run'], True
 
 
+def shading_service_devices(building, scenario):
+    from . import shading_service
+    return shading_service.devices_of(building, scenario)
+
+
 def run_n2(run, progress_cb=None):
     """Exécute un N2 préparé par `start_n2` (appelé par la tâche Celery). Termine le `CalcRun`."""
     from . import shadow
@@ -327,6 +357,7 @@ def run_n2(run, progress_cb=None):
     vals = facts.effective_values(building, scenario)
     built = n2_inputs.build(building, scenario, vals)
     weather, wdesc = resolve_weather(building, (run.settings or {}).get('weather_spec') or None)
+    weather = scenario_weather(weather, scenario)          # lot 36 : rafraîchissement de l'air (hypothèse)
     if base:
         # L'environnement a changé les obstacles : empreinte et description refaites sur ce qui est calculé.
         run.inputs_hash = inputs_hash_for(building, 'N2', scenario, wdesc.get('hash'), vals)
@@ -338,26 +369,58 @@ def run_n2(run, progress_cb=None):
         run.save(update_fields=['inputs_hash', 'inputs', 'settings'])
     t_g, ground_desc = n2_inputs.ground_for(built, weather)                 # Lot 32 : sol simulé
     w = n2_inputs.weather_for_n2(weather, building.georef_north_offset_deg or 0.0, built['residential'], t_g)
+    # Lot 36 : mois de chaque point (périodes des cumuls par triangle, saison des arbres) et heures où la
+    # surventilation nocturne peut jouer (`engines.surcharges.night_static_mask`).
+    from .engines import shading as eng_shading, surcharges as eng_surcharges, vegetation as eng_vegetation
+    hidx = [p.get('hour_index') if p.get('hour_index') is not None else i for i, p in enumerate(weather)]
+    months = eng_shading.month_of(hidx)
+    noct = built.get('nocturne')
+    night = eng_surcharges.night_static_mask(hidx, [p['t_ext'] for p in weather], noct['seuil_c']) if noct else None
+    for i, p in enumerate(w):
+        p['mois'] = int(months[i])
+        if night is not None and night[i]:
+            p['nocturne'] = True
     run.inputs = {**(run.inputs or {}), 'sol': ground_desc}
     envelope, env = built['envelope'], built['environment']
-    # Réflexion par le sol (Lot AI) : seulement avec un environnement relevé relié, qui porte l'albédo.
+    # Réflexion par le sol (Lot AI) : seulement avec un environnement relevé relié, qui porte l'albédo ; lot 36 :
+    # albédo des abords d'une amélioration (`abords.albedo`) = grille remplacée par cette valeur.
     albedo, ground_ids = _environment_ground(building.environment) if building.environment_id else (None, set())
+    trees = built.get('arbres') or []
     span = 100 - base
-    if built['snapshot']['mode'] == 'experte' and not building.sun_visibility_stale and \
-            building.sun_visibility.get('per_triangle'):
+    sunvis_winter = None
+    reuse = built['snapshot']['mode'] == 'experte' and not building.sun_visibility_stale and \
+        building.sun_visibility.get('per_triangle') and scenario is None and not trees and \
+        not any(d['kind'] in eng_shading.GEOMETRIC and d['mode'] != 'geometrique'
+                for d in shading_service_devices(building, scenario))
+    if reuse:
         sunvis = building.sun_visibility
     else:
+        from . import shading_service
+        env_summer = shading_service.merge_envelopes(env, eng_vegetation.tree_meshes(trees, 'ete')) if trees else env
         say(base + 2 * span // 100, 'Ombrage : visibilité du soleil…')
-        sunvis = shadow.compute_visibility_grid(envelope, env)
+        sunvis = shadow.compute_visibility_grid(envelope, env_summer)
+        if trees:
+            say(base + 8 * span // 100, 'Ombrage : arbres sans feuilles…')
+            env_winter = shading_service.merge_envelopes(env, eng_vegetation.tree_meshes(trees, 'hiver'))
+            sunvis_winter = shadow.compute_visibility_grid(envelope, env_winter)
         say(base + 12 * span // 100, 'Ombrage : vue du ciel…')
-        sunvis['sky_view_factor'] = shadow.compute_sky_view_factors(envelope, env)
+        sunvis['sky_view_factor'] = shadow.compute_sky_view_factors(envelope, env_summer)
+        if sunvis_winter is not None:
+            sunvis_winter['sky_view_factor'] = sunvis['sky_view_factor']
+        env = env_summer
     payload = {**built['payload'], 'weather': w}
+    facteurs = n2_inputs.mobile_factors(built, weather)
+    if facteurs:
+        payload['baies_facteurs'] = facteurs
+    if noct:
+        payload['nocturne'] = {'debit_m3h': noct['debit_m3h']}
 
     def cb(done, total):
         say(base + (15 + int(done * 84 / total)) * span // 100, f'Résolution heure par heure… {done}/{total}')
     res = run_building_simulation(envelope, built['layers'], sunvis, payload, environment_envelope=env,
                                   progress_cb=cb, paroi_frame_by_id=built['frames'],
-                                  ground_albedo=albedo, ground_obj_ids=ground_ids)
+                                  ground_albedo=albedo, ground_obj_ids=ground_ids, sun_visibility_winter=sunvis_winter,
+                                  ground_albedo_constant=built.get('albedo_abords'))
     a_floor = built['a_floor']
     phi = res.get('phi_hc_w') or []
     heat = [max(x, 0.0) for x in phi]
@@ -383,6 +446,12 @@ def run_n2(run, progress_cb=None):
         'monthly_heating_kwh': [round(sum(heat[a:b]) / 1000.0, 1) for a, b in zip(months[:-1], months[1:])],
     })
     t_ext = [p['t_ext'] for p in w]
+    # Lot 36 (I3, I4) : confort RE2020 et séries mensuelles ; cumuls par triangle (jamais dans `compact()`).
+    from .engines import comfort
+    out['confort'], out['mensuel'] = comfort.indicators(res['t_op'][1:], t_ext, hidx, built['residential'], phi)
+    out['par_triangle'] = calc_runs.triangle_results(envelope, built['layers'], res['par_triangle'])
+    if noct:
+        out['surventilation_nocturne_heures_possibles'] = int(sum(1 for p in w if p.get('nocturne')))
     out['energy'] = systems.evaluate(vals, out['heating_kwh'], out['cooling_kwh'] or 0.0, a_floor,
                                      a_floor * engine_inputs.CEILING_H, phi, t_ext)
     ind = calc_runs.indicators_from(out, a_floor, 'N2')

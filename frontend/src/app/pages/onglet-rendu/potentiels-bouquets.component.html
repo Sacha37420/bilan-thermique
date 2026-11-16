@@ -1,0 +1,58 @@
+@let pb = potentiels();
+<p class="reel">État réel — calcul {{ pb.reel.niveau }}@if (pb.reel.calcule_le) {&#32;du {{ date(pb.reel.calcule_le) }}}
+  @if (!pb.reel.indicateurs) { <span class="rf-badge m-defaut">pas encore calculé</span> }
+  @else if (!pb.reel.a_jour) { <span class="rf-badge m-infere">calculé avant les dernières données</span> }</p>
+
+<div class="bouquets">
+  @for (p of entrees(); track p.bouquet.id + p.niveau) {
+    <article class="bq">
+      <header>
+        <h4>{{ p.bouquet.nom }}</h4>
+        <p class="meta">{{ OBJECTIFS[p.bouquet.objectif] || p.bouquet.objectif }} · {{ p.niveau }}@if (p.calcule_le) {&#32;· {{ date(p.calcule_le) }}}
+          <span class="rf-badge" [class.m-mesure]="p.statut === 'fait' && p.a_jour" [class.m-infere]="p.statut !== 'fait' || !p.a_jour">{{ statut(p) }}</span></p>
+      </header>
+      @if (p.statut === 'erreur' && p.message) { <p class="rf-hint">{{ p.message }}</p> }
+      @if (p.indicateurs) {
+        <table class="rf-table">
+          <thead><tr><th>Indicateur</th><th class="num">Avec le bouquet</th><th class="num">Écart au réel</th></tr></thead>
+          <tbody>
+            @for (k of cles(p); track k) {
+              <tr>
+                <td>{{ libelle(k) }}@if (unite(k)) { <small> ({{ unite(k) }})</small> }</td>
+                <td class="num">{{ val(p.indicateurs[k]) }}</td>
+                <td class="num" [class.bon]="bonSens(k, p.ecarts[k]) === true">{{ ecart(p.ecarts[k]) }}
+                  @if (p.ecarts_pct?.[k] !== undefined) { <small>{{ pct(p.ecarts_pct![k]) }}</small> }</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+      @if (p.actions.length) {
+        <div class="actions">
+          <div>
+            <h5>Améliorations appliquées ({{ appliquees(p).length }})</h5>
+            <ul>
+              @for (a of appliquees(p); track a.cle) {
+                <li><strong>{{ a.libelle }}</strong>
+                  @if (a.effets.length) { <span class="effets">{{ a.effets.join(' · ') }}</span> }
+                  @for (w of a.avertissements ?? []; track $index) { <span class="avert">{{ w }}</span> }</li>
+              } @empty { <li class="rf-hint">Aucune.</li> }
+            </ul>
+          </div>
+          @if (ecartees(p).length) {
+            <div>
+              <h5>Écartées pour ce bâtiment ({{ ecartees(p).length }})</h5>
+              <ul>
+                @for (a of ecartees(p); track a.cle) { <li><strong>{{ a.libelle }}</strong> <span class="effets">{{ a.raison || 'non applicable' }}</span></li> }
+              </ul>
+            </div>
+          }
+        </div>
+      }
+    </article>
+  } @empty {
+    <p class="rf-hint">Aucun bouquet d’améliorations n’est défini pour ce bâtiment.</p>
+  }
+</div>
+<p class="rf-hint">Chaque bouquet est un potentiel atteignable : toutes ses améliorations applicables à ce bâtiment, ensemble.
+  Aide à la décision, pas un DPE.</p>

@@ -1,11 +1,12 @@
 /** Types propres à l'onglet Bâtiment (chantier bt-navigation). */
 
-export type VueBatiment = 'synthese' | 'donnees' | 'geometrie' | 'physique' | 'meteo' | 'environnement' | 'mesures';
+export type VueBatiment = 'synthese' | 'donnees' | 'geometrie' | 'resultats-3d' | 'physique' | 'meteo' | 'environnement' | 'mesures';
 
 export const VUES_BATIMENT: { id: VueBatiment; label: string }[] = [
   { id: 'synthese', label: 'Synthèse' },
   { id: 'donnees', label: 'Données et provenance' },
   { id: 'geometrie', label: 'Géométrie' },
+  { id: 'resultats-3d', label: 'Résultats en 3D' },
   { id: 'physique', label: 'Enveloppe et systèmes' },
   { id: 'meteo', label: 'Météo' },
   { id: 'environnement', label: 'Environnement et façades' },

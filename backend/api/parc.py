@@ -319,3 +319,25 @@ def to_csv(rows):
             line.append('' if v is None else str(v))
         w.writerow(line)
     return '﻿' + buf.getvalue()
+
+
+# ── Chantier bt-potentiels (I5, secteur A) : agrégats des potentiels d'un parc ──
+
+NON_ADDITIVE_KEYS = {'confidence', 'completeness'}
+
+
+def _additive(key):
+    return not (key.endswith('_m2') or key.endswith('_pct') or key in NON_ADDITIVE_KEYS)
+
+
+def agregats_potentiels(indicators):
+    """{clé: {somme, moyenne, mediane, n}} sur une liste de dictionnaires d'indicateurs (un par bâtiment ayant une
+    valeur). `somme` vaut None pour une grandeur non additive (par m², en %, confiance, complétude)."""
+    import statistics
+    values = {}
+    for ind in indicators:
+        for k, v in (ind or {}).items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                values.setdefault(k, []).append(float(v))
+    return {k: {'somme': round(sum(vs), 3) if _additive(k) else None, 'moyenne': round(sum(vs) / len(vs), 3),
+                'mediane': round(statistics.median(vs), 3), 'n': len(vs)} for k, vs in sorted(values.items())}

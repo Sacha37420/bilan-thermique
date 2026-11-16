@@ -1,0 +1,10 @@
+:host { display: grid; gap: var(--space-3); }
+.rf-field.plein { width: 100%; }
+.rf-field.court { min-width: 7rem; }
+.liste { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3);
+         display: flex; flex-wrap: wrap; column-gap: var(--space-4); max-height: 16rem; overflow-y: auto; }
+.liste legend { color: var(--text-mute); font-size: var(--text-xs); padding: 0 var(--space-1); }
+.check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; cursor: pointer; font-size: var(--text-sm); }
+.check input { width: 20px; height: 20px; accent-color: var(--accent); }
+.rf-hint { margin: 0; }
+@media (max-width: 899px) { .rf-field { flex: 1 1 100%; } }

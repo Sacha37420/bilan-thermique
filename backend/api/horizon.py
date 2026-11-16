@@ -132,3 +132,15 @@ def beam_visible(rows, az_rad, el_rad):
     P = np.radians(np.asarray(rows, dtype=float))                    # (points, N_BINS)
     bins = ((np.degrees(az_rad) % 360 + STEP_DEG / 2.0) // STEP_DEG).astype(int) % N_BINS
     return (el_rad[None, :] >= P[:, bins]).mean(axis=0)
+
+
+def facade_points(poly, eave_m, adjacency=(), north_deg=0.0):
+    """Points d'observation des façades exposées par orientation, à trois hauteurs : {o: [(x, y, z)]} — mêmes
+    points que le profil (lot 36 : arbres plantés, `engines.vegetation.tree_beam_factor`)."""
+    poly = poly if poly.is_valid else poly.buffer(0)
+    if poly.geom_type == 'MultiPolygon':
+        poly = max(poly.geoms, key=lambda p: p.area)
+    eave = max(float(eave_m or 0.0), 1.0)
+    zs = [eave * f for f in HEIGHT_FRACTIONS]
+    return {o: [(x, y, z) for x, y, _a in pts for z in zs]
+            for o, pts in _points(poly, list(adjacency), north_deg).items()}

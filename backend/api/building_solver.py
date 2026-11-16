@@ -37,6 +37,8 @@ import scipy.sparse.linalg as spla
 
 from . import solver as wall_solver
 from . import shadow
+from .engines.surcharges import NIGHT_INDOOR_TRIGGER_C, NIGHT_MARGIN_C
+from .engines.vegetation import ALPHA_FOLIAGE, delta_over_delta_gamma
 
 DT_SECONDS = 3600.0
 MAX_TOTAL_DOF = 60_000
@@ -292,7 +294,8 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
                       occluder_intersector=None, centroids=None, vegetation_scene=None,
                       air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None,
                       frame_g=None, shading_fs_dir=None, shading_fs_dif=None, volet_closed=False,
-                      diagnostics=None, ground_reflect_factor=None, outside=None, h_outside=25.0):
+                      diagnostics=None, ground_reflect_factor=None, outside=None, h_outside=25.0,
+                      tri_beam=None, tri_dif=None, evapo=None, evapo_ratio=0.0, absorbed_out=None):
     """h_e_vec : la valeur DE CETTE HEURE, PAR TRIANGLE (Lot R — constante du
     run ou dérivée du vent, uniforme par défaut ; Lot J — réduite pour les
     triangles dont le volet/store est fermé, voir SHADING_PROFILES/
@@ -390,6 +393,13 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
             e_dif_i = e_dif * shading_fs_dif[i]
         else:
             e_dir_i, e_dif_i = e_dir, e_dif
+        # Lot 36 : protections d'une baie appliquées par triangle (mobiles, lames, vitrages, végétation) — facteurs de
+        # l'heure sur le direct et sur le diffus (le réfléchi par le sol suit le diffus).
+        dif_f = 1.0
+        if tri_beam is not None:
+            e_dir_i *= tri_beam[i]
+            dif_f = tri_dif[i]
+            e_dif_i *= dif_f
         e_glo = e_dir_i * cos_ti + e_dif_i * f_ciel
         if geom.get('boundary') == 'adiabatic':
             e_glo = 0.0  # mitoyen (Lot 12) : face extérieure contre le voisin, jamais au soleil
@@ -397,7 +407,7 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
         # y compris vis-à-vis d'un store fermé (même facteur que e_dif).
         if ground_reflect_factor is not None and ground_reflect_factor[i]:
             fs = shading_fs_dif[i] if (volet_closed and shading_fs_dif is not None) else 1.0
-            e_glo += ground_reflect_factor[i] * ghi * fs
+            e_glo += ground_reflect_factor[i] * ghi * fs * dif_f
 
         # Lot K : un triangle 'ground' échange avec la température de sol
         # constante plutôt qu'avec l'air extérieur — même conductance h_e
@@ -410,7 +420,10 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
         is_out = outside is not None and outside[i]
         if is_out:
             f_local[n - 1] += h_outside * t_ext      # Lot 33 : seconde face dehors aussi
+        absorbed_i = 0.0
         for kind, ref, value in wall_solver._propagate_solar(layers, e_glo, mesh):
+            if kind != 'interior':
+                absorbed_i += value
             if kind == 'surface':
                 f_local[ref] += value
             elif kind == 'interior' and is_out:
@@ -437,6 +450,12 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
                     f_local[el_] += contrib
                     f_local[el_ + 1] += contrib
 
+        # Lot 36 : puits d'évapotranspiration d'une paroi végétalisée, à la face extérieure (Priestley-Taylor,
+        # `engines.vegetation`) : evapo[i] · Δ/(Δ+γ)(T_ext) · solaire absorbé par le feuillage (α = 0,75, comme N1).
+        if evapo is not None and evapo[i] and e_glo > 0:
+            f_local[0] -= evapo[i] * evapo_ratio * ALPHA_FOLIAGE * e_glo
+        if absorbed_out is not None:
+            absorbed_out[i] = absorbed_i
         F[off:off + n] += f_local * area
 
         # Cadre de fenêtre (Lot I) : résistance directe vers le nœud d'air,
@@ -530,9 +549,23 @@ def _factorize_for(K_global_base, C_global, air_idx, mode, g_vent, h_e_addition)
     }
 
 
+PERIODS = {'hiver': (10, 11, 12, 1, 2, 3, 4), 'ete': (6, 7, 8)}   # lot 36 (I4) : cumuls par triangle
+LEAF_MONTHS = (5, 6, 7, 8, 9)
+
+
+def _month_of_point(point, hour_idx):
+    m = point.get('mois')
+    if m is not None:
+        return int(m)
+    from .engines.shading import month_of
+    h = point.get('hour_index')
+    return int(month_of([h if h is not None else hour_idx])[0])
+
+
 def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibility, payload,
                              environment_envelope=None, progress_cb=None, paroi_frame_by_id=None,
-                             ground_albedo=None, ground_obj_ids=()):
+                             ground_albedo=None, ground_obj_ids=(), sun_visibility_winter=None,
+                             ground_albedo_constant=None):
     """payload : {dx_max, h_e, h_e_dynamic?, interior: {mode, h_i?, h_i_auto?, c_air_int,
     t_int?, t_min?, t_max?, debit_vent_m3h?, eta_recup_vent?, apports_internes_w?}, t_init,
     weather: [{t_ext, sun_azimuth, sun_elevation, e_dir, e_dif, wind_m_s?, t_min?, t_max?}, ...],
@@ -647,6 +680,22 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     pour le garde-fou. apports_internes_w, lui, n'affecte que F (déjà recalculé
     à chaque heure) : aucun problème de factorisation de ce côté.
 
+    Lot 36 (chantier bt-potentiels) :
+    - `payload['baies_facteurs']` (facultatif) : [{'triangles': [i…], 'beam': [T], 'diffuse': [T], 'r_add': [T]}] —
+      protections appliquées par triangle de baie, heure par heure : facteurs sur le direct et sur le diffus, et
+      résistance ajoutée côté extérieur (ΔR des fermetures au prorata de la position, h = 1/(1/h_e + ΔR)) ;
+      `engines.n2_inputs.mobile_factors` les construit avec les mêmes fonctions que N0/N1 ;
+    - `payload['nocturne']` (facultatif) : {'debit_m3h'} — débit ajouté aux heures dont le point météo porte
+      `nocturne: true` (nuit d'été sous le seuil), si l'air intérieur de l'heure précédente dépasse 24 °C et l'extérieur
+      de 1 °C (`engines.surcharges`) ; modes 'free'/'thermostat' ;
+    - triangle `evapo` (facultatif) : puits d'évapotranspiration à la face extérieure, `engines.vegetation` ;
+    - `sun_visibility_winter` (facultatif) : seconde grille d'ombrage utilisée hors saison de feuilles
+      (arbres plantés à transmission saisonnière) ; le mois vient du point météo (`mois`, sinon `hour_index`) ;
+    - `ground_albedo_constant` (facultatif) : albédo uniforme des abords, qui remplace la grille relevée ;
+    - sortie `par_triangle` : cumuls par triangle sur l'hiver (oct.–avr.) et l'été (juin–août) — pertes
+      Σ h_i·A_i·(T_air − T_si)⁺, gains Σ h_i·A_i·(T_si − T_air)⁺ (kWh), solaire absorbé (kWh), T_si moyenne d'hiver
+      et maximale d'été, et le flux net de toute la série (contrôle : Σ_i = Σ_h envelope_flux_w).
+
     'precomputed' : utilise la grille d'ombrage + facteur de vue du ciel déjà
     calculés (api.shadow, Lot C) — rapide, discrétisé sur une grille
     (azimuth, élévation), nécessite d'avoir lancé le précalcul au préalable.
@@ -747,7 +796,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # albédo relevé (environnement observé) — sinon aucun terme, exactement le
     # comportement antérieur (obstacles et sol noirs).
     ground_reflect_factor = None
-    if ground_albedo:
+    if ground_albedo_constant is not None:
+        a_c = float(ground_albedo_constant)
+        ground_reflect_factor = shadow.compute_ground_reflection_factors(
+            building_envelope, environment_envelope, lambda x, y: np.full(np.shape(x), a_c),
+            ground_obj_ids=set(ground_obj_ids),
+        )
+    elif ground_albedo:
         if shadow_mode == 'realtime' or not (sun_visibility or {}).get('ground_reflect_factor'):
             from . import observed_env
             ground_reflect_factor = shadow.compute_ground_reflection_factors(
@@ -794,6 +849,19 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             shading_delta_r.append(profile['delta_r'])
             shading_fs_dir.append(profile['fs_dir'])
             shading_fs_dif.append(profile['fs_dif'])
+
+    # Lot 36 : protections par triangle de baie, surventilation nocturne, évapotranspiration (voir la docstring).
+    n_tri = len(triangles)
+    baies = payload.get('baies_facteurs') or []
+    for g in baies:
+        if any(len(g[k]) != len(weather) for k in ('beam', 'diffuse', 'r_add')):
+            raise BuildingSimulationError("Facteurs de baie : une valeur par heure de la météo est attendue.")
+        if any(not (0 <= int(i) < n_tri) for i in g['triangles']):
+            raise BuildingSimulationError("Facteurs de baie : triangle hors de l'enveloppe.")
+    baie_idx = [np.asarray(g['triangles'], dtype=int) for g in baies]
+    evapo = [float(tri.get('evapo') or 0.0) for tri in triangles]
+    evapo = evapo if any(evapo) else None
+    g_night = 0.34 * float((payload.get('nocturne') or {}).get('debit_m3h') or 0.0)
 
     systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max)
     K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(
@@ -919,6 +987,12 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     }
     hour_diagnostics = {} if track_balance else None
 
+    h_area = np.asarray(h_i_list, dtype=float) * np.asarray(areas, dtype=float)
+    outside_arr = np.asarray(is_outside, dtype=bool)
+    acc = {'net': np.zeros(n_tri), 'solar_ete': np.zeros(n_tri), 't_si_hiver_sum': np.zeros(n_tri),
+           't_si_ete_max': np.full(n_tri, -np.inf), 'n_hiver': 0, 'n_ete': 0,
+           **{f'{k}_{p}': np.zeros(n_tri) for k in ('gain', 'loss') for p in PERIODS}}
+
     n_hours_total = len(weather)
     for hour_idx, point in enumerate(weather):
         # Créneau horaire de CE point (Lot AB1) : `hour_index` porté par le point
@@ -960,7 +1034,12 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         else:
             volet_closed = False
 
-        key = (g_vent, h_e, volet_closed)
+        # Lot 36 : surventilation nocturne (conditions statiques portées par le point, air intérieur plus chaud).
+        if g_night and point.get('nocturne') and mode in ('free', 'thermostat') and \
+                t_air_series[-1] > point['t_ext'] + NIGHT_MARGIN_C and t_air_series[-1] > NIGHT_INDOOR_TRIGGER_C:
+            g_vent = g_vent + g_night
+        r_key = tuple(round(float(g['r_add'][hour_idx]), 2) for g in baies)
+        key = (g_vent, h_e, volet_closed, r_key)
         bundle = bundles.get(key)
         if bundle is None:
             if len(bundles) >= MAX_DISTINCT_BOUNDARY_COMBOS:
@@ -979,14 +1058,34 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
                 else (1.0 / (1.0 / h_e + shading_delta_r[i]) if volet_closed else h_e)
                 for i in range(len(triangles))
             ]
+            for gi, r in enumerate(r_key):
+                if r > 0:
+                    for i in baie_idx[gi]:
+                        if h_e_vec[i] > 0 and not is_ground[i]:
+                            h_e_vec[i] = 1.0 / (1.0 / h_e_vec[i] + r)
             h_e_addition = _h_e_diagonal(h_e_vec, systems, offsets, n_dof, areas)
             bundle = _factorize_for(K_global, C_global, air_idx, mode, g_vent, h_e_addition)
             bundle['h_e_vec'] = h_e_vec
             bundles[key] = bundle
 
+        month = _month_of_point(point, hour_idx)
+        grid = sun_visibility_grid
+        if sun_visibility_winter is not None and grid is not None and month not in LEAF_MONTHS:
+            grid = sun_visibility_winter
+        tri_beam = tri_dif = None
+        if baies:
+            tri_beam = np.ones(n_tri)
+            tri_dif = np.ones(n_tri)
+            for gi, g in enumerate(baies):
+                tri_beam[baie_idx[gi]] *= g['beam'][hour_idx]
+                tri_dif[baie_idx[gi]] *= g['diffuse'][hour_idx]
+        absorbed_hour = np.zeros(n_tri)
         F = _assemble_F_hour(
             systems, areas, offsets, n_dof, triangles, bundle['h_e_vec'], point,
-            sky_view_factor=sky_view_factor, sun_visibility_grid=sun_visibility_grid,
+            tri_beam=tri_beam, tri_dif=tri_dif, evapo=evapo,
+            evapo_ratio=float(delta_over_delta_gamma(point['t_ext'])) if evapo else 0.0,
+            absorbed_out=absorbed_hour,
+            sky_view_factor=sky_view_factor, sun_visibility_grid=grid,
             occluder_intersector=occluder_intersector, centroids=centroids,
             vegetation_scene=vegetation_scene,
             air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w,
@@ -1053,16 +1152,23 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         # tous les triangles, de h_i*A_i*(T_surface,i - T_air) — c'est
         # exactement ce que chaque paroi injecte dans le nœud d'air. h_i_list[i]
         # (Lot R) remplace l'ancien h_i scalaire unique.
-        flux = 0.0
         t_air_next = T_next[air_idx]
-        for i, (mesh, K, C, layers) in enumerate(systems):
-            if is_outside[i]:
-                continue
-            off = offsets[i]
-            n = mesh['n_wall_nodes']
-            t_surf = T_next[off + n - 1]
-            flux += h_i_list[i] * areas[i] * (t_surf - t_air_next)
+        t_si = T_next[inner_idx]
+        flux_tri = np.where(outside_arr, 0.0, h_area * (t_si - t_air_next))
+        flux = float(flux_tri.sum())
         flux_series.append(flux)
+        # Lot 36 (I4) : cumuls par triangle.
+        acc['net'] += flux_tri
+        for pname, months in PERIODS.items():
+            if month in months:
+                acc[f'gain_{pname}'] += np.clip(flux_tri, 0.0, None)
+                acc[f'loss_{pname}'] += np.clip(-flux_tri, 0.0, None)
+                acc[f'n_{pname}'] += 1
+                if pname == 'hiver':
+                    acc['t_si_hiver_sum'] += t_si
+                else:
+                    acc['t_si_ete_max'] = np.maximum(acc['t_si_ete_max'], t_si)
+                    acc['solar_ete'] += absorbed_hour * np.asarray(areas)
 
         if track_balance:
             # Chaque poste est une PUISSANCE NETTE vers l'air, évaluée à la fin
@@ -1111,8 +1217,19 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         balance['storage_kwh'] = storage_j / 3.6e6
         balance['closure_error_kwh'] = (total_j - storage_j) / 3.6e6
 
+    j_kwh = DT_SECONDS / 3.6e6
+    par_triangle = {
+        'net_kwh': (acc['net'] * j_kwh).tolist(),
+        'solaire_ete_kwh': (acc['solar_ete'] * j_kwh).tolist(),
+        't_si_hiver_moy_c': (acc['t_si_hiver_sum'] / acc['n_hiver']).tolist() if acc['n_hiver'] else [None] * n_tri,
+        't_si_ete_max_c': acc['t_si_ete_max'].tolist() if acc['n_ete'] else [None] * n_tri,
+        'heures': {'hiver': acc['n_hiver'], 'ete': acc['n_ete']},
+        'hors_volume': [bool(x) for x in is_outside],
+        **{f'{k}_{p}_kwh': (acc[f'{k}_{p}'] * j_kwh).tolist() for k in ('gain', 'loss') for p in PERIODS},
+    }
     return {
         'hours': len(weather),
+        'par_triangle': par_triangle,
         'protrusions': protrusion_report,
         'balance': balance,
         't_air': t_air_series,

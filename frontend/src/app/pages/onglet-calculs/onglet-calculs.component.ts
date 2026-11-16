@@ -7,6 +7,7 @@ import { ContexteBarComponent } from '../../components/contexte-bar/contexte-bar
 import { SimulationComponent } from '../../components/simulation/simulation.component';
 import { ResultatCarteComponent } from '../../components/resultat-carte/resultat-carte.component';
 import { ScenariosComponent } from '../../components/scenarios/scenarios.component';
+import { PotentielsComponent } from '../../components/scenarios/potentiels.component';
 import { CalculsComponent } from '../../components/calculs/calculs.component';
 import { MOTEURS_REPLI, Moteur, QUAND, TypeSimulation, VUES_CALCULS, VueCalculs } from './moteurs';
 
@@ -20,7 +21,7 @@ const TYPES: TypeSimulation[] = ['N0', 'N1', 'N2', '1D', '3D'];
 @Component({
   selector: 'app-onglet-calculs',
   standalone: true,
-  imports: [RouterLink, ContexteBarComponent, SimulationComponent, ResultatCarteComponent, ScenariosComponent, CalculsComponent],
+  imports: [RouterLink, ContexteBarComponent, SimulationComponent, ResultatCarteComponent, ScenariosComponent, PotentielsComponent, CalculsComponent],
   templateUrl: './onglet-calculs.component.html',
   styleUrl: './onglet-calculs.component.scss',
 })

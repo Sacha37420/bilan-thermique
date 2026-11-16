@@ -19,7 +19,9 @@ from .models import Scenario, WeatherDataset
 def _scenario(s, building):
     return {'id': s.pk, 'name': s.name, 'description': s.description, 'bundles': (s.weather or {}).get('bundles', []),
             'dataset_id': (s.weather or {}).get('dataset_id'), 'created_at': s.created_at,
-            'differences': sc_service.differences(building, s), 'vigilance': sc_service.vigilance(s)}
+            'differences': sc_service.differences(building, s), 'vigilance': sc_service.vigilance(s),
+            # Chantier bt-potentiels : amélioration générée par le calcul d'un potentiel (recréée à chaque calcul).
+            'genere': s.genere, 'bouquet': {'id': s.bouquet_id, 'nom': s.bouquet.nom} if s.bouquet_id else None}
 
 
 def _building(request, pk, write=False):
@@ -56,14 +58,14 @@ class BundlesView(APIView):
 class ScenariosView(APIView):
     def get(self, request, pk):
         b = _building(request, pk)
-        return Response({'results': [_scenario(s, b) for s in b.scenarios.all()]})
+        return Response({'results': [_scenario(s, b) for s in b.scenarios.select_related('bouquet')]})
 
     def post(self, request, pk):
         b = _building(request, pk, write=True)
         name = str(request.data.get('name') or '').strip()[:150]
         if not name:
             return Response({'detail': 'Nom de la variante attendu.'}, status=status.HTTP_400_BAD_REQUEST)
-        if b.scenarios.count() >= 20:
+        if b.scenarios.filter(genere=False).count() >= 20:
             return Response({'detail': 'Vingt variantes au plus par bâtiment.'}, status=status.HTTP_400_BAD_REQUEST)
         weather = {}
         did = request.data.get('dataset_id')

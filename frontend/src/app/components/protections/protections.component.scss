@@ -1,7 +1,28 @@
 :host { display: block; }
-.devs { list-style: none; padding: 0; margin: 0 0 var(--space-3); display: grid; gap: var(--space-2); font-size: var(--text-sm); }
-.devs li { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
-.devs small { color: var(--text-mute); flex: 1 1 12rem; }
+.devs { list-style: none; padding: 0; margin: 0 0 var(--space-3); display: grid; gap: var(--space-3); font-size: var(--text-sm); }
+.devs li { display: flex; gap: var(--space-2) var(--space-3); align-items: flex-end; flex-wrap: wrap;
+  padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+.devs li.cur { border-bottom-color: var(--accent); }
+.txt { flex: 1 1 16rem; min-width: 0; }
+.txt small { display: block; color: var(--text-mute); overflow-wrap: anywhere; }
+.where { color: var(--text-mute); }
+.acts { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: flex-end; }
+.att { min-width: 0; }
+select, input[type=number], input[type=text] { min-height: 44px; max-width: 100%; box-sizing: border-box; }
+.edit { border-top: 1px solid var(--border); padding-top: var(--space-3); margin-bottom: var(--space-4); }
+.edit h3 { margin: 0 0 var(--space-3); font-size: var(--text-base); }
+fieldset { border: 1px solid var(--border); border-radius: var(--radius-sm); margin: var(--space-3) 0; padding: var(--space-3); min-width: 0; }
+legend { font-weight: 600; padding: 0 var(--space-1); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr)); gap: var(--space-3); }
+.cell { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.cell .rf-field { min-width: 0; }
+.cell input[type=number], .cell select { width: 100%; }
+.chk { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; cursor: pointer; font-size: var(--text-sm); }
+.chk input { width: 22px; height: 22px; margin: 0; }
+.aide { color: var(--text-mute); font-size: var(--text-xs); }
+.aide em { font-family: var(--font-mono); font-style: normal; white-space: nowrap; }
+.sub { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-xs); color: var(--text-mute); font-weight: 600; }
+details { margin: var(--space-3) 0; font-size: var(--text-sm); }
 details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
-.add { padding: var(--space-2) 0 var(--space-3); }
-.add input[type=number] { width: 8rem; }
+dt { font-family: var(--font-mono); color: var(--accent); }
+dd { margin: 0 0 var(--space-2); color: var(--text-mute); }

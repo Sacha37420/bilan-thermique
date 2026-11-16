@@ -42,51 +42,95 @@ def schedules(hidx, residential, t_heat):
     return np.where(occ, 2.2, 0.3), np.where(occ, t_heat, t_heat - 3.0)
 
 
-def solar_terms(p, az, el, dni, dhi, t_e=None, hidx=None, by_orientation=None):
-    """(gains solaires par les baies, gains par les parois opaques, irradiance par orientation) — W.
+def envelope_terms(p, az, el, dni, dhi, t_e=None, hidx=None, by_orientation=None, evapo=True):
+    """Termes horaires d'enveloppe d'un jeu de paramètres :
+    {'win' : apports solaires par les baies (W), 'opq' : apports par les parois opaques, puits d'évapotranspiration
+    déduits (W), 'irr' : irradiance par orientation, 'h_w' : conductance des vitrages (W/K), ΔR des fermetures compris}.
 
-    Protections solaires (Lot 14) : `p.devices` → facteurs horaires sur le direct et le diffus des
-    baies de chaque orientation (`engines.shading.factors`). `by_orientation` (dict, facultatif) reçoit
-    les gains par les baies de chaque orientation (kWh), pour la restitution par façade."""
+    Protections solaires (Lot 14, lot 36) : `p.devices` → facteurs sur le direct et le diffus des baies, bandes de mur
+    ombrées par les débords, résistance ajoutée par les fermetures (`engines.shading.orientation_effects`). Lot 36 :
+    albédo des abords, absorptance de toiture, arbres plantés (`engines.vegetation.tree_beam_factor`), toiture et
+    murs végétalisés (U, absorptance du feuillage, puits d'évapotranspiration si `evapo`). `by_orientation` (dict,
+    facultatif) reçoit les gains par les baies de chaque orientation (kWh), pour la restitution par façade."""
     from . import shading as sh
-    win = np.zeros(len(az))
-    opq = np.zeros(len(az))
+    from . import vegetation as veg
+    T = len(az)
+    win = np.zeros(T)
+    opq = np.zeros(T)
+    h_w = np.zeros(T)
     irr = {}
     if hidx is None:
-        hidx = np.arange(len(az))
+        hidx = np.arange(T)
     if t_e is None:
-        t_e = np.full(len(az), 20.0)
+        t_e = np.full(T, 20.0)
     occupied = None
     if p.devices and not p.residential:
         hour, day = hidx % 24, (hidx // 24) % 7
         occupied = (hour >= 8) & (hour < 19) & (day < 5)
+    months = sh.month_of(hidx) if p.trees else None
     for o in ORIENTATIONS:
         w = p.walls[o]
         if w['window'] <= 0 and w['opaque'] <= 0:
-            irr[o] = np.zeros(len(az))
+            irr[o] = np.zeros(T)
             continue
         total, beam = solar.surface_irradiance(az, el, dni, dhi, solar.ORIENT_AZ[o], 90.0,
                                                horizon_deg=p.horizon.get(o, 0.0) or 0.0,
-                                               horizon_profile=(p.horizon_profile or {}).get(o))
+                                               horizon_profile=(p.horizon_profile or {}).get(o), albedo=p.albedo)
+        if p.trees and p.facade_points and p.facade_points.get(o):
+            tf = veg.tree_beam_factor(p.facade_points[o], p.trees, az, el, months, p.north_deg)
+            total, beam = total - beam * (1.0 - tf), beam * tf
         diffuse_part = total - beam
-        if p.devices:
-            fb, fd = sh.factors(p.devices, o, solar.ORIENT_AZ[o], az, el, hidx, total, t_e, p.g_window, occupied)
-            beam, diffuse_part = beam * fb, diffuse_part * fd
-        total_win = beam + diffuse_part
         irr[o] = total
-        gains_o = w['window'] * p.g_window * p.frame_factor * total_win
+        r_add = None
+        zones = []
+        if p.devices:
+            eff = sh.orientation_effects(p.devices, o, solar.ORIENT_AZ[o], az, el, hidx, total, t_e, p.g_window, occupied)
+            beam_w, diffuse_w = beam * eff['beam'], diffuse_part * eff['diffuse']
+            r_add = eff['r_add']
+            zones = sh.opaque_zone(eff, w['opaque'], w['window'], p.wall_height)
+        else:
+            beam_w, diffuse_w = beam, diffuse_part
+        gains_o = w['window'] * p.g_window * p.frame_factor * (beam_w + diffuse_w)
         win += gains_o
+        if w['window'] > 0:
+            h_w += w['window'] / (1.0 / max(w['uw'], 1e-9) + (r_add if r_add is not None else 0.0))
         if by_orientation is not None:
             by_orientation[o] = round(float(gains_o.sum() / 1000.0), 1)
-        opq += p.absorptance * R_SE * w['u'] * w['opaque'] * total
-    roof_total, _ = solar.surface_irradiance(az, el, dni, dhi, 180.0, 0.0)
-    opq += p.absorptance * R_SE * p.u_roof * p.roof_area * roof_total
+        a_o, u_o = p.alpha_wall(o), p.u_wall_eff(o)
+        shaded_area = sum(z[0] for z in zones)
+        received = (w['opaque'] - shaded_area) * total
+        for area, zb, zd in zones:
+            received = received + area * (beam * zb + diffuse_part * zd)
+        opq += a_o * R_SE * u_o * received
+        g = p.green_walls
+        if evapo and g and o in (g.get('orientations') or []) and w['opaque'] > 0:
+            mean_irr = received / max(w['opaque'], 1e-9)
+            opq -= R_SE * u_o * w['opaque'] * veg.latent_flux(veg.ALPHA_FOLIAGE * mean_irr, t_e, g['lai'], g['part'])
+    roof_total, _ = solar.surface_irradiance(az, el, dni, dhi, 180.0, 0.0, albedo=p.albedo)
+    u_r = p.u_roof_eff
+    opq += p.alpha_roof * R_SE * u_r * p.roof_area * roof_total
+    if evapo and p.green_roof and p.roof_area > 0:
+        g = p.green_roof
+        opq -= R_SE * u_r * p.roof_area * veg.latent_flux(veg.ALPHA_FOLIAGE * roof_total, t_e, g['lai'], g['part'])
     irr['H'] = roof_total
-    return win, opq, irr
+    return {'win': win, 'opq': opq, 'irr': irr, 'h_w': h_w}
+
+
+def solar_terms(p, az, el, dni, dhi, t_e=None, hidx=None, by_orientation=None, evapo=True):
+    """(gains solaires par les baies, gains par les parois opaques, irradiance par orientation) — W."""
+    e = envelope_terms(p, az, el, dni, dhi, t_e, hidx, by_orientation, evapo)
+    return e['win'], e['opq'], e['irr']
 
 
 def run(params, weather, *, t_init=None, keep_series=True):
-    """Simule S jeux de paramètres (liste de `Params`) sur la série météo. Rend une liste de résultats."""
+    """Simule S jeux de paramètres (liste de `Params`) sur la série météo. Rend une liste de résultats.
+
+    Lot 36 : conductance des vitrages horaire (ΔR des fermetures), surventilation nocturne (débit ajouté quand
+    `engines.surcharges.night_static_mask`, air intérieur de l'heure précédente au-dessus de 24 °C et plus chaud que dehors
+    de 1 °C),
+    indicateurs de confort RE2020 et séries mensuelles (`engines.comfort`)."""
+    from . import comfort
+    from .surcharges import NIGHT_INDOOR_TRIGGER_C, NIGHT_MARGIN_C, night_static_mask
     if not weather:
         raise N1Error('Série météo vide.')
     if len(weather) > 8784:
@@ -117,7 +161,6 @@ def run(params, weather, *, t_init=None, keep_series=True):
     a_m = vec(lambda p: p.a_m_factor) * a_f
     a_t = A_T_FACTOR * a_f
     c_m = vec(lambda p: p.c_m) * a_f
-    h_w = vec(lambda p: p.h_tr_w)
     h_op = vec(lambda p: p.h_tr_op_air)
     h_fl = vec(lambda p: p.floor_area) * u_fl
     h_ve = np.maximum(vec(lambda p: p.h_ve), 1e-6)
@@ -126,70 +169,87 @@ def run(params, weather, *, t_init=None, keep_series=True):
     h_op_tot = h_op + h_fl
     h_em = 1.0 / np.maximum(1.0 / np.maximum(h_op_tot, 1e-9) - 1.0 / h_ms, 1e-9)
     floor_share = np.where(h_op_tot > 0, h_fl / np.maximum(h_op_tot, 1e-9), 0.0)
-    h1 = 1.0 / (1.0 / h_ve + 1.0 / h_is)
-    h2 = h1 + h_w
-    h3 = 1.0 / (1.0 / h2 + 1.0 / h_ms)
 
     gain_f, _ = schedules(hidx, ps[0].residential, 0.0)
     phi_int = vec(lambda p: p.gains_w_m2)[:, None] * a_f[:, None] * gain_f[None, :]
     sol_w = np.zeros((S, T))
     sol_o = np.zeros((S, T))
+    h_w_all = np.zeros((S, T))
     irr0 = None
     by_o = [{} for _ in ps]
     for i, p in enumerate(ps):
-        w, o, irr = solar_terms(p, az, el, dni, dhi, t_e, hidx, by_o[i])
-        sol_w[i], sol_o[i] = w, o
+        e = envelope_terms(p, az, el, dni, dhi, t_e, hidx, by_o[i])
+        sol_w[i], sol_o[i], h_w_all[i] = e['win'], e['opq'], e['h_w']
         if irr0 is None:
-            irr0 = irr
+            irr0 = e['irr']
     phi_sol = sol_w + sol_o
     t_cool = np.array([p.t_cool if p.t_cool is not None else np.inf for p in ps])
+    # Surventilation nocturne (lot 36) : conductance ajoutée, part « statique » (nuit d'été, air sous le seuil).
+    h_night = vec(lambda p: 0.34 * p.night_vent * p.volume)
+    night_ok = np.zeros((S, T), dtype=bool)
+    for i, p in enumerate(ps):
+        if p.night_vent > 0:
+            night_ok[i] = night_static_mask(hidx, t_e, p.night_vent_threshold)
+    any_night = bool(night_ok.any())
 
     phi_ia = 0.5 * phi_int
     share_m = a_m / a_t
-    share_s = 1.0 - share_m - h_w / (H_MS * a_t)
-    phi_m_all = share_m[:, None] * (0.5 * phi_int + phi_sol)
-    phi_st_all = share_s[:, None] * (0.5 * phi_int + phi_sol)
 
     theta_m = np.full(S, t_init if t_init is not None else float(ps[0].t_heat))
     cap = c_m / 3600.0
     t_air = np.empty((S, T))
     t_s = np.empty((S, T))
     phi_hc = np.empty((S, T))
+    h_ve_used = np.empty((S, T)) if any_night else None
 
-    def step(tm_prev, te, tg, phi_ia_t, phi_st_t, phi_m_t, phi):
+    def step(tm_prev, te, tg, phi_ia_t, phi_st_t, phi_m_t, phi, hw, h1, h2, h3, hve):
         # Plancher : sa part de H_tr_em échange avec le sol (θ_g) et non avec l'air extérieur.
         te_m = te + floor_share * (tg - te)
-        phi_mtot = phi_m_t + h_em * te_m + h3 * (phi_st_t + h_w * te + h1 * ((phi_ia_t + phi) / h_ve + te)) / h2
+        phi_mtot = phi_m_t + h_em * te_m + h3 * (phi_st_t + hw * te + h1 * ((phi_ia_t + phi) / hve + te)) / h2
         tm = (tm_prev * (cap - 0.5 * (h3 + h_em)) + phi_mtot) / (cap + 0.5 * (h3 + h_em))
         tm_avg = 0.5 * (tm + tm_prev)
-        ts = (h_ms * tm_avg + phi_st_t + h_w * te + h1 * (te + (phi_ia_t + phi) / h_ve)) / (h_ms + h_w + h1)
-        ta = (h_is * ts + h_ve * te + phi_ia_t + phi) / (h_is + h_ve)
+        ts = (h_ms * tm_avg + phi_st_t + hw * te + h1 * (te + (phi_ia_t + phi) / hve)) / (h_ms + hw + h1)
+        ta = (h_is * ts + hve * te + phi_ia_t + phi) / (h_is + hve)
         return tm, ts, ta
 
     zero = np.zeros(S)
     test = PHI_TEST_W_M2 * a_f
+    t_prev = theta_m.copy()
     for k in range(T):
         te = t_e[k]
-        args = (t_g_all[:, k], phi_ia[:, k], phi_st_all[:, k], phi_m_all[:, k])
-        tm0, ts0, ta0 = step(theta_m, te, *args, zero)
+        hw = h_w_all[:, k]
+        hve = h_ve
+        if any_night:
+            hve = h_ve + np.where(night_ok[:, k] & (t_prev > te + NIGHT_MARGIN_C) & (t_prev > NIGHT_INDOOR_TRIGGER_C),
+                                  h_night, 0.0)
+            h_ve_used[:, k] = hve
+        h1 = 1.0 / (1.0 / hve + 1.0 / h_is)
+        h2 = h1 + hw
+        h3 = 1.0 / (1.0 / h2 + 1.0 / h_ms)
+        share_s = 1.0 - share_m - hw / (H_MS * a_t)
+        base_k = 0.5 * phi_int[:, k] + phi_sol[:, k]
+        coef = (hw, h1, h2, h3, hve)
+        args = (t_g_all[:, k], phi_ia[:, k], share_s * base_k, share_m * base_k)
+        tm0, ts0, ta0 = step(theta_m, te, *args, zero, *coef)
         need_h = ta0 < t_heat[:, k]
         need_c = ta0 > t_cool
         phi = zero.copy()
         if need_h.any() or need_c.any():
-            _, _, ta10 = step(theta_m, te, *args, test)
+            _, _, ta10 = step(theta_m, te, *args, test, *coef)
             slope = (ta10 - ta0) / test
             slope = np.where(np.abs(slope) < 1e-12, 1e-12, slope)
             phi = np.where(need_h, (t_heat[:, k] - ta0) / slope, phi)
             phi = np.where(need_c, (t_cool - ta0) / slope, phi)
-            tm0, ts0, ta0 = step(theta_m, te, *args, phi)
+            tm0, ts0, ta0 = step(theta_m, te, *args, phi, *coef)
         theta_m = tm0
+        t_prev = ta0
         t_air[:, k], t_s[:, k], phi_hc[:, k] = ta0, ts0, phi
 
     heat = np.clip(phi_hc, 0, None)
     cool = np.clip(-phi_hc, 0, None)
     t_op = 0.3 * t_air + 0.7 * t_s
-    loss_tr = (h_w + h_op)[:, None] * (t_air - t_e[None, :]) + h_fl[:, None] * (t_air - t_g_all)
-    loss_ve = h_ve[:, None] * (t_air - t_e[None, :])
+    loss_tr = (h_w_all + h_op[:, None]) * (t_air - t_e[None, :]) + h_fl[:, None] * (t_air - t_g_all)
+    loss_ve = (h_ve_used if any_night else h_ve[:, None]) * (t_air - t_e[None, :])
     dur = time.monotonic() - t0
     results = []
     month_edges = MONTH_HOURS[MONTH_HOURS <= T].tolist()
@@ -214,6 +274,12 @@ def run(params, weather, *, t_init=None, keep_series=True):
             'sol': ground_desc[i],
         }
         if keep_series:
+            ind, mens = comfort.indicators(t_op[i], t_e, hidx, ps[i].residential, phi_hc[i])
+            r['confort'] = ind
+            r['mensuel'] = mens
+            if any_night and ps[i].night_vent > 0:
+                extra = (h_ve_used[i] - h_ve[i]) > 0
+                r['surventilation_nocturne_h'] = int(extra.sum())
             r['t_air'] = [round(float(x), 2) for x in t_air[i]]
             r['t_op'] = [round(float(x), 2) for x in t_op[i]]
             r['phi_hc_w'] = [round(float(x), 1) for x in phi_hc[i]]

@@ -5,7 +5,7 @@ from django.test import TestCase
 
 from .. import facts
 from ..models import Bouquet, Building, ExportRendu, Portfolio, Potentiel, RapportModele, Scenario
-from ..testing import client_for, patch_jwks
+
 
 ROUTES = ['indicateurs/', 'calculs/1/triangles/', 'batiments/1/potentiels/', 'parcs/1/potentiels/',
           'ameliorations/actions/', 'parcs/1/bouquets/', 'bouquets/1/', 'rendu/schema/', 'rendu/dimensions/',
@@ -37,13 +37,10 @@ class FactKeysTest(TestCase):
             self.assertEqual(facts.BY_KEY[k].weight, 0, k)
 
 
-@patch_jwks()
 class RoutesTest(TestCase):
-    def test_declared_routes(self):
-        c = client_for('g')
-        for r in ROUTES:
-            resp = c.get('/api/' + r)
-            self.assertEqual(resp.status_code, 501, r)
-            self.assertEqual(resp.json(), {'detail': 'Pas encore disponible.'})
+    """Lot 40 : toutes les routes de la fondation sont réalisées par leur secteur ; chacune refuse un appel sans jeton."""
+
+    def test_declared_routes_require_authentication(self):
         from rest_framework.test import APIClient
-        self.assertIn(APIClient().get('/api/rendu/schema/').status_code, (401, 403))
+        for r in ROUTES:
+            self.assertIn(APIClient().get('/api/' + r).status_code, (401, 403), r)

@@ -85,7 +85,8 @@ CELERY_RESULT_SERIALIZER = 'json'
 # Refonte (Lot 11, décision D13) : un seul worker (concurrence 1) écoute `celery` (interactif) puis
 # `parc` (traitement de parc, un bâtiment par tâche). Avec la stratégie « priority » du transport
 # Redis, la file `celery` est toujours consultée d'abord ; une tâche à la fois (prefetch 1).
-CELERY_TASK_ROUTES = {'api.tasks.process_parc_next': {'queue': 'parc'}}
+CELERY_TASK_ROUTES = {'api.tasks.process_parc_next': {'queue': 'parc'},
+                      'api.ameliorations.taches.potentiels_parc_suivant': {'queue': 'parc'}}
 CELERY_BROKER_TRANSPORT_OPTIONS = {'queue_order_strategy': 'priority'}
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
@@ -207,3 +208,8 @@ VAULT_ENCRYPTION_KEY = config('VAULT_ENCRYPTION_KEY', default='')
 # DL-2 de DEMANDES_LAB.md. Tant qu'elle n'est pas accordée, le texte seul est gardé.
 STORAGE_DOCUMENTS_ENABLED = config('STORAGE_DOCUMENTS_ENABLED', default=False, cast=bool)
 STORAGE_API_URL = config('STORAGE_API_URL', default='http://storage-backend:8000')
+
+# Chantier bt-potentiels (lot 38) : service de rendu (Chromium isolé, réseau interne) et exports transitoires.
+RENDU_SERVICE_URL = config('RENDU_SERVICE_URL', default='http://bilan-thermique-rendu:3000')
+RENDU_SERVICE_KEY = config('RENDU_SERVICE_KEY', default='')
+RENDU_EXPORTS_DIR = config('RENDU_EXPORTS_DIR', default='/data/rendu-exports')

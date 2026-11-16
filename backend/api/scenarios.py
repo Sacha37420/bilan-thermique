@@ -65,8 +65,10 @@ def apply_bundles(building, scenario, keys, author_sub='', author_name=''):
                 values[k] = v
         if 'device' in bundle:
             d = bundle['device']
+            from .engines import shading as _sh   # protection complète et validée (catalogue I1, lot 40)
             ShadingDevice.objects.create(building=building, scenario=scenario, kind=d['kind'], orientation=d['orientation'],
-                                         params=d.get('params', {}), control=d.get('control', {}), label=label,
+                                         params=_sh.validate_params(d['kind'], d.get('params', {})),
+                                         control=_sh.validate_control(d['kind'], d.get('control', {})), label=label,
                                          author_sub=author_sub)
         done.append(key)
     meta = dict(scenario.weather or {})

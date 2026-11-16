@@ -6,7 +6,9 @@ import { ContexteService, HORS_PARC } from '../../core/contexte.service';
 
 interface Bundle { key: string; label: string; vigilance: string[]; }
 interface Sc { id: number; name: string; bundles: string[]; differences: { label: string; value: unknown; unit: string }[];
-  vigilance: { bundle: string; message: string }[]; }
+  vigilance: { bundle: string; message: string }[];
+  /** Amélioration générée par un calcul de potentiel (I5) et son bouquet d'origine. */
+  genere?: boolean; bouquet?: { id: number; nom: string } | null; }
 interface Row { scenario: number | null; scenario_name: string; weather: number | null; weather_label: string;
   indicators: Record<string, number | string>; error?: string; }
 interface Ds { id: number; kind: string; label: string; }

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{# Aucune ressource externe : tout est dans ce fichier (bibliothèques, styles, données). #}
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:">
+<meta name="generator" content="bilan-thermique — rendu (lot 38)">
+<title>{{ doc.titre }}</title>
+<style>
+@page { size: {{ page.format }} {{ page.orientation }}; margin: {{ page.marges_mm }}mm; }
+:root { --texte: #222; --doux: #5f6368; --trait: #d9d9d9; --fond-tete: #f3f5f8; --accent: #1c3266; }
+* { box-sizing: border-box; }
+html { background: #eceff3; }
+body { margin: 0; font-family: Inter, "Segoe UI", Arial, sans-serif; color: var(--texte); font-size: 10.5pt; line-height: 1.45; }
+.feuille { background: #fff; max-width: {{ page.largeur_mm }}mm; margin: 0 auto; padding: 12mm 0; }
+@media screen { .feuille { padding: 14mm 12mm; margin: 16px auto; box-shadow: 0 1px 6px rgba(0,0,0,.15); max-width: calc({{ page.largeur_mm }}mm + 24mm); } }
+header.titre h1 { font-size: 22pt; margin: 0 0 4pt; color: var(--accent); }
+header.titre p { margin: 0; color: var(--doux); }
+nav.sommaire { margin: 10mm 0; padding: 4mm 6mm; border: 1px solid var(--trait); border-radius: 4px; }
+nav.sommaire h2 { font-size: 12pt; margin: 0 0 3mm; border: 0; }
+nav.sommaire ol { margin: 0; padding-left: 6mm; }
+nav.sommaire a { color: var(--accent); text-decoration: none; }
+nav.sommaire a:hover, nav.sommaire a:focus { text-decoration: underline; }
+section.doc > h2 { font-size: 15pt; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 2pt; margin: 9mm 0 4mm; break-after: avoid; }
+h3 { font-size: 11.5pt; margin: 5mm 0 2mm; break-after: avoid; }
+h4 { font-size: 10.5pt; margin: 3mm 0 1mm; }
+.bloc { margin: 0 0 6mm; }
+.figure { width: 100%; height: 105mm; break-inside: avoid; }
+figure { margin: 0; break-inside: avoid; }
+figcaption { font-size: 9pt; color: var(--doux); margin-top: 1mm; }
+.resume { font-size: 9pt; color: var(--doux); margin: 1mm 0 0; }
+table { border-collapse: collapse; width: 100%; font-size: 9pt; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th, td { border: 1px solid var(--trait); padding: 1.6mm 2mm; text-align: left; vertical-align: top; }
+th { background: var(--fond-tete); font-weight: 600; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.indisponible { color: var(--doux); font-style: italic; border-left: 3px solid var(--trait); padding-left: 3mm; }
+.saut { break-after: page; height: 0; }
+.vue3d { position: relative; width: 100%; height: 110mm; border: 1px solid var(--trait); break-inside: avoid; cursor: grab; touch-action: none; }
+.vue3d canvas { display: block; width: 100% !important; height: 100% !important; }
+.legende3d { position: absolute; right: 3mm; bottom: 3mm; background: rgba(255,255,255,.9); padding: 1.5mm 2mm; font-size: 8pt; border: 1px solid var(--trait); }
+.legende3d .barre { width: 40mm; height: 3mm; background: linear-gradient(to right, {{ degrade }}); }
+.legende3d .bornes { display: flex; justify-content: space-between; }
+.fiche-section { break-inside: avoid; }
+.note { font-size: 8.5pt; color: var(--doux); }
+@media print { html { background: #fff; } .feuille { margin: 0; padding: 0; box-shadow: none; max-width: none; } nav.sommaire { break-after: page; } .vue3d { cursor: default; } }
+</style>
+</head>
+<body>
+<main class="feuille">
+<header class="titre">
+  <h1 id="haut">{{ doc.titre }}</h1>
+  <p>{{ sous_titre }}</p>
+</header>
+{% if doc.mise_en_page.sommaire %}
+<nav class="sommaire" aria-label="Sommaire">
+  <h2>Sommaire</h2>
+  <ol>{% for s in sections %}<li><a href="#{{ s.ancre }}">{{ s.titre }}</a></li>{% endfor %}</ol>
+</nav>
+{% endif %}
+{% for s in sections %}
+<section class="doc" id="{{ s.ancre }}" aria-labelledby="{{ s.ancre }}-t">
+  <h2 id="{{ s.ancre }}-t">{{ s.titre }}</h2>
+  {% for b in s.blocs %}
+  {% if b.type == 'saut_de_page' %}<div class="saut" aria-hidden="true"></div>
+  {% elif b.indisponible %}<p class="bloc indisponible">{{ b.indisponible }}</p>
+  {% elif b.type == 'texte' %}<div class="bloc texte">{{ b.html_sur }}</div>
+  {% elif b.type == 'graphe' or b.type == 'carte' %}
+  <figure class="bloc" id="{{ b.ancre }}">
+    {% if b.figure.vide %}<p class="indisponible">{{ b.figure.layout.meta.resume }}</p>
+    {% else %}<div class="figure" data-rendu-figure="{{ b.json_id }}" role="img" aria-label="{{ b.figure.layout.meta.resume }}"></div>{{ b.figure|json_script:b.json_id }}{% endif %}
+    <figcaption>Figure {{ b.numero }} — {{ b.legende }}</figcaption>
+    {% if not b.figure.vide %}<p class="resume">{{ b.figure.layout.meta.resume }}</p>{% endif %}
+  </figure>
+  {% elif b.type == 'vue3d' %}
+  <figure class="bloc" id="{{ b.ancre }}">
+    <div class="vue3d" data-rendu-3d="{{ b.json_id }}" role="img" aria-label="{{ b.libelle }}">
+      <div class="legende3d"><div>{{ b.libelle }}{% if b.unite %} ({{ b.unite }}){% endif %}</div><div class="barre"></div>
+        <div class="bornes"><span data-min></span><span data-max></span></div></div>
+    </div>{{ b.donnees3d|json_script:b.json_id }}
+    <figcaption>Figure {{ b.numero }} — {{ b.libelle }} (calcul N2 n° {{ b.calcul_id }}) <span class="note">— faites glisser pour tourner, molette pour zoomer.</span></figcaption>
+  </figure>
+  {% elif b.type == 'indicateurs' %}
+  <div class="bloc"><table>
+    <thead><tr><th scope="col">Indicateur</th>{% for c in b.colonnes %}<th scope="col">{{ c.libelle }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for l in b.lignes_vue %}<tr><th scope="row">{{ l.libelle }}</th>{% for v in l.cellules %}<td class="n">{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+  </table></div>
+  {% elif b.type == 'tableau' %}
+  <div class="bloc"><table>
+    <thead><tr>{% for c in b.colonnes %}<th scope="col">{{ c.libelle }}{% if c.unite %} ({{ c.unite }}){% endif %}</th>{% endfor %}</tr></thead>
+    <tbody>{% for l in b.lignes_vue %}<tr>{% for v in l %}<td{% if v.n %} class="n"{% endif %}>{{ v.t }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+  </table>{% if b.tronque %}<p class="note">{{ b.lignes|length }} lignes affichées sur {{ b.total_lignes }}.</p>{% endif %}</div>
+  {% elif b.type == 'fiche' %}
+  <div class="bloc">{% for fs in b.sections %}
+    <div class="fiche-section"><h3>{{ fs.titre }}</h3>
+    {% if fs.elements %}<table><thead><tr><th scope="col">Donnée</th><th scope="col">Valeur</th><th scope="col">Source</th></tr></thead><tbody>
+    {% for e in fs.elements %}<tr><th scope="row">{{ e.libelle }}</th><td>{{ e.valeur }}{% if e.unite %} {{ e.unite }}{% endif %}</td><td>{{ e.source }}</td></tr>{% endfor %}
+    </tbody></table>{% else %}<p class="indisponible">Rien à afficher.</p>{% endif %}</div>
+  {% endfor %}</div>
+  {% endif %}
+  {% endfor %}
+</section>
+{% endfor %}
+<p class="note">Document produit par bilan-thermique le {{ date }}. Simulation thermique, pas un DPE.</p>
+</main>
+{% for lib in bibliotheques %}<script>{{ lib }}</script>
+{% endfor %}<script>{{ script }}</script>
+</body>
+</html>

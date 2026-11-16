@@ -94,64 +94,200 @@ def _block(eff, blocks):
 
 
 class IdentiteView(APIView):
+    """Fiche d'identité (lot 34), réponse inchangée. Chantier bt-potentiels (lot 38) : le bloc « fiche » des rendus
+    en est tiré (`fiche_bloc`), avec la section « potentiels par bouquet » (réponse I5 bâtiment)."""
+
     def get(self, request, pk):
         b = get_object_or_404(access.visible_buildings(request).select_related('weather_dataset', 'environment'), pk=pk)
-        eff = facts.effective(b)
-        values = {k: f.value for k, f in eff.items()}
-        latest = parc.latest_models(b, values)
-        resultats = {}
-        for lvl in ('N0', 'N1', 'N2'):
-            if lvl not in latest:
-                resultats[lvl] = None
-                continue
-            run, a_jour = latest[lvl]
-            resultats[lvl] = {**(run.indicators or {}), 'computed_at': run.created_at, 'a_jour': a_jour,
-                              'limites': list((run.inputs or {}).get('limites') or [])}
-        meteo = None
-        if b.weather_dataset_id:
-            meteo = {'id': b.weather_dataset_id, 'jeu': b.weather_dataset.label, 'type': b.weather_dataset.kind}
-        elif b.georef_lat is not None:
-            meteo = {'id': None, 'jeu': 'Année type du site (PVGIS)', 'type': 'tmy'}
-        env = None
-        if b.environment_id:
-            objs = b.environment.scene_objects or []
-            gen = b.environment.generation or {}
-            env = {'id': b.environment_id, 'objets': len(objs),
-                   'source': ENV_SOURCES.get(gen.get('source'), gen.get('source') or ''),
-                   'batiments': sum(1 for o in objs if o.get('kind') == 'building' and o.get('status') == 'active'),
-                   'arbres': sum(1 for o in objs if o.get('kind') == 'vegetation' and o.get('status', 'active') == 'active'),
-                   'rayon_m': gen.get('radius_m')}
-        # Lot 34 : d'où vient la géométrie (BD TOPO seule ou croisée), horizon par façade, sol vu par le plancher.
-        from . import geometry_service
-        summary = geometry_service.effective_summary(b) or {}
-        pipe0 = b.pipeline or {}
-        geo = {**(pipe0.get('geometrie') or {'source': 'bdtopo'}),
-               'horizon_deg': summary.get('horizon_deg'), 'horizon_source': summary.get('horizon_source') or 'voisins de la chaîne'}
-        plancher = None
-        for lvl in ('N1', 'N0'):
-            if lvl in latest and (latest[lvl][0].results or {}).get('sol'):
-                plancher = latest[lvl][0].results['sol']
-                break
-        ameliorations = []
-        for s in b.scenarios.all():
-            run = (b.calc_runs.filter(scenario=s, level='N1', status=Job.DONE).order_by('-created_at').first())
-            ameliorations.append({'id': s.pk, 'name': s.name, 'bouquets': (s.weather or {}).get('bundles', []),
-                                  'dernier': dict(run.indicators or {}) if run else None})
-        pipe = b.pipeline or {}
-        env_obj = b.environment if b.environment_id else None
-        sources = [{'etape': k, 'libelle': STEP_NAMES.get(k, k), 'ok': bool(v.get('ok')),
-                    'saute': bool(v.get('skipped')), 'source': _step_source(k, pipe, env_obj), 'date': pipe.get('date')}
-                   for k, v in sorted((pipe.get('steps') or {}).items(), key=lambda kv: (kv[0][0], int(kv[0][1:] or 0)
-                                                                                        if kv[0][1:].isdigit() else 99))]
-        return Response({
-            'batiment': {'id': b.pk, 'name': b.name, 'address': b.address, 'rnb_id': b.rnb_id, 'lat': b.georef_lat,
-                         'lon': b.georef_lon, 'portfolio': b.portfolio_id},
-            'identite': _block(eff, IDENTITY_BLOCKS),
-            'enveloppe': _block(eff, ENVELOPE_BLOCKS),
-            'systemes': _block(eff, SYSTEM_BLOCKS),
-            'meteo': meteo, 'environnement': env, 'resultats': resultats, 'ameliorations': ameliorations,
-            'geometrie': geo, 'plancher': plancher,
-            'confiance': b.confidence, 'completude': b.completeness,
-            'approfondissement': parc.approfondissement(b, eff),
-            'sources': sources,
-        })
+        return Response(identite(b))
+
+
+def identite(b):
+    """Agrégat de la fiche d'identité d'un bâtiment déjà autorisé (lecture seule)."""
+    eff = facts.effective(b)
+    values = {k: f.value for k, f in eff.items()}
+    latest = parc.latest_models(b, values)
+    resultats = {}
+    for lvl in ('N0', 'N1', 'N2'):
+        if lvl not in latest:
+            resultats[lvl] = None
+            continue
+        run, a_jour = latest[lvl]
+        resultats[lvl] = {**(run.indicators or {}), 'computed_at': run.created_at, 'a_jour': a_jour,
+                          'limites': list((run.inputs or {}).get('limites') or [])}
+    meteo = None
+    if b.weather_dataset_id:
+        meteo = {'id': b.weather_dataset_id, 'jeu': b.weather_dataset.label, 'type': b.weather_dataset.kind}
+    elif b.georef_lat is not None:
+        meteo = {'id': None, 'jeu': 'Année type du site (PVGIS)', 'type': 'tmy'}
+    env = None
+    if b.environment_id:
+        objs = b.environment.scene_objects or []
+        gen = b.environment.generation or {}
+        env = {'id': b.environment_id, 'objets': len(objs),
+               'source': ENV_SOURCES.get(gen.get('source'), gen.get('source') or ''),
+               'batiments': sum(1 for o in objs if o.get('kind') == 'building' and o.get('status') == 'active'),
+               'arbres': sum(1 for o in objs if o.get('kind') == 'vegetation' and o.get('status', 'active') == 'active'),
+               'rayon_m': gen.get('radius_m')}
+    # Lot 34 : d'où vient la géométrie (BD TOPO seule ou croisée), horizon par façade, sol vu par le plancher.
+    from . import geometry_service
+    summary = geometry_service.effective_summary(b) or {}
+    pipe0 = b.pipeline or {}
+    geo = {**(pipe0.get('geometrie') or {'source': 'bdtopo'}),
+           'horizon_deg': summary.get('horizon_deg'), 'horizon_source': summary.get('horizon_source') or 'voisins de la chaîne'}
+    plancher = None
+    for lvl in ('N1', 'N0'):
+        if lvl in latest and (latest[lvl][0].results or {}).get('sol'):
+            plancher = latest[lvl][0].results['sol']
+            break
+    ameliorations = []
+    for s in b.scenarios.all():
+        run = (b.calc_runs.filter(scenario=s, level='N1', status=Job.DONE).order_by('-created_at').first())
+        ameliorations.append({'id': s.pk, 'name': s.name, 'bouquets': (s.weather or {}).get('bundles', []),
+                              'dernier': dict(run.indicators or {}) if run else None})
+    pipe = b.pipeline or {}
+    env_obj = b.environment if b.environment_id else None
+    sources = [{'etape': k, 'libelle': STEP_NAMES.get(k, k), 'ok': bool(v.get('ok')),
+                'saute': bool(v.get('skipped')), 'source': _step_source(k, pipe, env_obj), 'date': pipe.get('date')}
+               for k, v in sorted((pipe.get('steps') or {}).items(), key=lambda kv: (kv[0][0], int(kv[0][1:] or 0)
+                                                                                    if kv[0][1:].isdigit() else 99))]
+    return {
+        'batiment': {'id': b.pk, 'name': b.name, 'address': b.address, 'rnb_id': b.rnb_id, 'lat': b.georef_lat,
+                     'lon': b.georef_lon, 'portfolio': b.portfolio_id},
+        'identite': _block(eff, IDENTITY_BLOCKS),
+        'enveloppe': _block(eff, ENVELOPE_BLOCKS),
+        'systemes': _block(eff, SYSTEM_BLOCKS),
+        'meteo': meteo, 'environnement': env, 'resultats': resultats, 'ameliorations': ameliorations,
+        'geometrie': geo, 'plancher': plancher,
+        'confiance': b.confidence, 'completude': b.completeness,
+        'approfondissement': parc.approfondissement(b, eff),
+        'sources': sources,
+    }
+
+
+# ── Chantier bt-potentiels (lot 38) : la fiche d'identité comme bloc de rendu (I6.g, bloc « fiche ») ──
+
+FICHE_TITRES = {'identite': 'Identité', 'geometrie': 'Géométrie', 'enveloppe': 'Enveloppe', 'systemes': 'Systèmes',
+                'meteo': 'Météo', 'environnement': 'Environnement', 'resultats': 'Résultats',
+                'potentiels': 'Potentiels par bouquet', 'ameliorations': 'Améliorations', 'sources': 'Sources'}
+_RESULTATS = [('heating_kwh_m2', 'Besoin de chauffage', 'kWh/m²·an'), ('dh_re2020', 'Degrés-heures d’inconfort (RE2020)', '°C·h'),
+              ('hours_over_28', 'Heures au-dessus de 28 °C', 'h'), ('final_kwh_m2', 'Énergie finale', 'kWh/m²·an'),
+              ('primary_kwh_m2', 'Énergie primaire', 'kWh/m²·an'), ('dpe_label_model', 'Étiquette du modèle', '')]
+LEVEL_NAMES = {'N0': 'N0 — mensuel', 'N1': 'N1 — horaire simplifié', 'N2': 'N2 — détaillé par paroi'}
+
+
+def _el(libelle, valeur, unite='', source=''):
+    return {'libelle': str(libelle), 'valeur': '—' if valeur in (None, '') else str(valeur), 'unite': unite or '',
+            'source': source or ''}
+
+
+def _num_txt(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None if v is None else str(v)
+    return facts._fr_number(round(float(v), 1) if abs(v) >= 10 else round(float(v), 2))
+
+
+def _date_txt(d):
+    if d is None:
+        return ''
+    if isinstance(d, str):
+        return d[:10]
+    return d.strftime('%d/%m/%Y')
+
+
+def fiche_bloc(request, b, sections):
+    """{sections: [{cle, titre, elements: [{libelle, valeur, unite, source}]}], potentiels: <I5 bâtiment>} —
+    `potentiels` présent si la section est demandée (None si la route I5 ne répond pas)."""
+    f = identite(b)
+    out = []
+    pot = None
+    if 'potentiels' in sections:
+        from .rendu import sources as rendu_sources
+        pot = rendu_sources.potentiels_batiment(request, b.pk)
+    for cle in sections:
+        els = []
+        if cle == 'identite':
+            bt = f['batiment']
+            els.append(_el('Nom', bt['name']))
+            if bt['address']:
+                els.append(_el('Adresse', bt['address']))
+            if bt['rnb_id']:
+                els.append(_el('Identifiant RNB', bt['rnb_id'], source='RNB'))
+            for _k, v in f['identite'].items():
+                els.append(_el(v['libelle'], v['texte'], source=v['source']))
+            els.append(_el('Approfondissement de la fiche', f['approfondissement']['libelle'],
+                           source=f['approfondissement']['detail']))
+        elif cle in ('enveloppe', 'systemes'):
+            for _k, v in f[cle].items():
+                els.append(_el(v['libelle'], v['texte'], source=v['source']))
+        elif cle == 'geometrie':
+            g = f['geometrie'] or {}
+            els.append(_el('Origine de la géométrie', g.get('libelle') or ('BD TOPO (IGN)' if g.get('source') == 'bdtopo'
+                                                                           else g.get('source'))))
+            if g.get('hauteur_egout_m') is not None:
+                els.append(_el('Hauteur à l’égout', _num_txt(g['hauteur_egout_m']), 'm'))
+            hz = g.get('horizon_deg')
+            if isinstance(hz, dict):
+                for o, v in hz.items():
+                    els.append(_el(f'Horizon — façade {o}', _num_txt(v), '°', g.get('horizon_source')))
+            elif hz is not None:
+                els.append(_el('Horizon', _num_txt(hz), '°', g.get('horizon_source')))
+            pl = f.get('plancher') or {}
+            if pl:
+                els.append(_el('Plancher bas', pl.get('libelle') or pl.get('type') or pl.get('mode') or '—'))
+        elif cle == 'meteo':
+            m = f['meteo']
+            els.append(_el('Jeu météo', m['jeu'] if m else 'Aucun', source=(m or {}).get('type', '')))
+        elif cle == 'environnement':
+            e = f['environnement']
+            if e is None:
+                els.append(_el('Environnement relevé', 'Aucun'))
+            else:
+                els += [_el('Source', e['source']), _el('Bâtiments voisins', e['batiments']), _el('Arbres', e['arbres']),
+                        _el('Rayon', _num_txt(e['rayon_m']), 'm')]
+        elif cle == 'resultats':
+            for lvl, r in f['resultats'].items():
+                if r is None:
+                    continue
+                src = f"{LEVEL_NAMES[lvl]}, calculé le {_date_txt(r.get('computed_at'))}" + (
+                    '' if r.get('a_jour') is not False else ' (plus à jour)')
+                for k, lib, u in _RESULTATS:
+                    if r.get(k) is not None:
+                        els.append(_el(f'{lib} ({lvl})', _num_txt(r[k]) if u else r[k], u, src))
+        elif cle == 'potentiels':
+            for e in (pot or {}).get('bouquets') or []:
+                if not isinstance(e, dict):
+                    continue
+                nom = (e.get('bouquet') or {}).get('nom') or 'Bouquet'
+                niv = e.get('niveau') or 'N1'
+                if e.get('statut') != 'fait' or not e.get('indicateurs'):
+                    els.append(_el(f'{nom} ({niv})', 'non calculé' if e.get('statut') is None else e.get('statut'),
+                                   source=e.get('message') or ''))
+                    continue
+                src = f"potentiel {niv} du {_date_txt(e.get('calcule_le'))}" + ('' if e.get('a_jour') else ' (plus à jour)')
+                ind, pct = e.get('indicateurs') or {}, e.get('ecarts_pct') or {}
+                for k, lib, u in _RESULTATS[:2]:
+                    if ind.get(k) is None:
+                        continue
+                    v = _num_txt(ind[k])
+                    if isinstance(pct.get(k), (int, float)):
+                        v += f" ({'+' if pct[k] > 0 else '−' if pct[k] < 0 else ''}{facts._fr_number(round(abs(pct[k]) * 100, 0))} %)"
+                    els.append(_el(f'{nom} — {lib}', v, u, src))
+                acts = e.get('actions') or []
+                n_ok = sum(1 for a in acts if isinstance(a, dict) and a.get('appliquee'))
+                els.append(_el(f'{nom} — actions appliquées', f'{n_ok} sur {len(acts)}', source=src))
+        elif cle == 'ameliorations':
+            for a in f['ameliorations']:
+                d = a.get('dernier') or {}
+                els.append(_el(a['name'], _num_txt(d.get('heating_kwh_m2')) if d else 'non calculée',
+                               'kWh/m²·an' if d.get('heating_kwh_m2') is not None else '',
+                               ', '.join(a['bouquets']) if a.get('bouquets') else ''))
+        elif cle == 'sources':
+            for s in f['sources']:
+                els.append(_el(s['libelle'], 'sautée' if s['saute'] else ('faite' if s['ok'] else 'en échec'),
+                               source=s['source']))
+        out.append({'cle': cle, 'titre': FICHE_TITRES[cle], 'elements': els})
+    res = {'sections': out}
+    if 'potentiels' in sections:
+        res['potentiels'] = pot
+    return res

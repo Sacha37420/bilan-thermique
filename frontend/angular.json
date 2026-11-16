@@ -59,6 +59,9 @@
             "styles": [
               "node_modules/leaflet/dist/leaflet.css",
               "src/styles.scss"
+            ],
+            "allowedCommonJsDependencies": [
+              "plotly.js-dist-min"
             ]
           },
           "configurations": {

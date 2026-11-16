@@ -211,9 +211,20 @@
       @if (protectionsErreur()) { <p class="rf-error">{{ protectionsErreur() }}</p> }
       @if (protections(); as ks) {
         <ul class="protections">
-          @for (k of ks; track k.kind) { <li><span class="rf-badge m-defaut">{{ FAMILLES[k.family] || k.family }}</span> {{ k.label }}</li> }
+          @for (k of ks; track k.cle) {
+            <li><span class="rf-badge m-defaut">{{ famillesProtection()[k.famille] || k.famille }}</span> {{ k.libelle }}
+              @if (k.description) { <small class="desc">{{ k.description }}</small> }</li>
+          }
         </ul>
       } @else if (!protectionsErreur()) { <p class="rf-hint">Chargement…</p> }
+    </section>
+  }
+
+  <!-- Bouquets d'améliorations (I7), tous modèles, parc réel seulement -->
+  @if (!sansParc() && ctx.parcId(); as pid) {
+    <section class="rf-card" aria-labelledby="bq-title">
+      <h2 id="bq-title">Bouquets d’améliorations</h2>
+      <app-bouquets-editeur [parcId]="pid" />
     </section>
   }
 

@@ -1,95 +1,93 @@
-"""Protections solaires (Lot 14, refonte). Routes nouvelles uniquement.
+"""Protections solaires (Lot 14, refonte ; catalogue v2 et paramètres complets : lot 36, chantier bt-potentiels I1).
 
-GET          /api/protections/catalogue/
+GET          /api/protections/catalogue/                → I1 (`engines.shading.catalogue`)
 GET, POST    /api/batiments/<id>/protections/          {kind, orientation, mode?, params?, control?, label?, scenario?}
-PATCH, DELETE /api/protections/<id>/
+PATCH, DELETE /api/protections/<id>/                    (rattacher à l'état actuel : scenario null ; à une amélioration : son id)
 POST         /api/batiments/<id>/protections/effet/    N1 sans / avec toutes / avec chacune : confort d'été et hiver
+
+`params` et `control` sont validés par le catalogue (clé inconnue, valeur hors bornes → 400, message fixe) et
+enregistrés complets (défauts du catalogue posés). Écriture : qui peut déclarer sur le bâtiment (comme les faits).
 """
 
 import copy
 
 from django.shortcuts import get_object_or_404
-from rest_framework import serializers, status
+from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import access, calc_service, shading_service
-from .engines import n1, shading
+from .engines import comfort, n1, shading
 from .models import Building, Scenario, ShadingDevice
 
-PARAM_RANGES = {'depth_m': (0, 5), 'gap_m': (0, 3), 'window_height_m': (0.3, 5), 'window_width_m': (0.3, 20),
-                'extension_m': (0, 5), 'fin_depth_m': (0, 3), 'g': (0.05, 0.9), 'fs_dir': (0, 1), 'fs_dif': (0, 1),
-                't_summer': (0, 1), 't_winter': (0, 1)}
+FIELDS = ('kind', 'orientation', 'mode', 'label', 'params', 'control', 'scenario')
 
 
-class DeviceSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ShadingDevice
-        fields = ['id', 'kind', 'orientation', 'mode', 'label', 'params', 'control', 'scenario', 'created_at']
-        read_only_fields = ['id', 'created_at']
+class Refused(Exception):
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = message
 
-    def validate_kind(self, v):
-        if v not in shading.KINDS:
-            raise serializers.ValidationError('Type de protection inconnu.')
-        return v
 
-    def validate_orientation(self, v):
-        if v not in shading_service.VALID_ORIENTATIONS:
-            raise serializers.ValidationError('Orientation : N, E, S, O ou all.')
-        return v
+def serialize(d):
+    m = shading.KINDS.get(d.kind)
+    return {'id': d.pk, 'kind': d.kind, 'orientation': d.orientation, 'mode': d.mode, 'label': d.label,
+            'params': d.params, 'control': d.control, 'scenario': d.scenario_id,
+            'famille': m['famille'] if m else None, 'libelle': m['libelle'] if m else d.kind,
+            'created_at': d.created_at.isoformat() if d.created_at else None}
 
-    def validate_mode(self, v):
-        if v not in ('parametrique', 'geometrique'):
-            raise serializers.ValidationError('Mode : parametrique ou geometrique.')
-        return v
 
-    def validate_params(self, v):
-        if not isinstance(v, dict):
-            raise serializers.ValidationError('Paramètres attendus.')
-        out = {}
-        for k, x in v.items():
-            if k not in PARAM_RANGES:
-                raise serializers.ValidationError('Paramètre inconnu.')
-            try:
-                x = float(x)
-            except (TypeError, ValueError):
-                raise serializers.ValidationError('Nombre attendu.') from None
-            lo, hi = PARAM_RANGES[k]
-            if not lo <= x <= hi:
-                raise serializers.ValidationError(f'{k} : entre {lo} et {hi}.')
-            out[k] = x
-        return out
-
-    def validate_control(self, v):
-        if not isinstance(v, dict):
-            raise serializers.ValidationError('Pilotage attendu.')
-        mode = v.get('mode', 'planning')
-        if mode not in ('planning', 'auto'):
-            raise serializers.ValidationError('Pilotage : planning ou auto.')
-        out = {'mode': mode, 'position': min(1.0, max(0.0, float(v.get('position', 1.0))))}
-        if mode == 'planning':
-            hours = v.get('hours') or []
-            months = v.get('months') or []
-            if not all(isinstance(h, int) and 0 <= h <= 23 for h in hours) or not all(isinstance(m, int) and 1 <= m <= 12 for m in months):
-                raise serializers.ValidationError('Heures 0-23 et mois 1-12.')
-            out.update(hours=sorted(set(hours)), months=sorted(set(months)))
+def _clean(data, building, instance=None):
+    """Champs validés d'une protection (création ou modification partielle). Lève Refused (message fixe)."""
+    if not isinstance(data, dict):
+        raise Refused('Protection attendue.')
+    if any(k not in FIELDS for k in data):
+        raise Refused('Champ inconnu.')
+    kind = data.get('kind', instance.kind if instance else None)
+    if kind not in shading.KINDS:
+        raise Refused('Type de protection inconnu.')
+    model = shading.KINDS[kind]
+    out = {'kind': kind}
+    orientation = data.get('orientation', instance.orientation if instance else None)
+    if orientation not in shading_service.VALID_ORIENTATIONS:
+        raise Refused('Orientation : N, E, S, O ou all.')
+    out['orientation'] = orientation
+    mode = data.get('mode', instance.mode if instance else 'parametrique')
+    if mode not in ('parametrique', 'geometrique'):
+        raise Refused('Mode : parametrique ou geometrique.')
+    if mode not in model['modes']:
+        raise Refused('Seules les protections fixes à débord ou à joues ont un mode géométrique.')
+    out['mode'] = mode
+    kind_changed = instance is not None and kind != instance.kind
+    try:
+        if 'params' in data or instance is None or kind_changed:
+            out['params'] = shading.validate_params(kind, data.get('params') if data.get('params') is not None else {})
+        if 'control' in data or instance is None or kind_changed:
+            out['control'] = shading.validate_control(kind, data.get('control') if data.get('control') is not None else {})
+    except shading.CatalogueError as exc:
+        raise Refused(str(exc)) from None
+    if 'label' in data:
+        out['label'] = str(data.get('label') or '')[:150]
+    if 'scenario' in data or instance is None:
+        sid = data.get('scenario')
+        if sid in (None, ''):
+            out['scenario'] = None
         else:
-            out.update(irradiance_w_m2=min(800.0, max(50.0, float(v.get('irradiance_w_m2', 200)))),
-                       t_ext_min_c=min(35.0, max(10.0, float(v.get('t_ext_min_c', 20)))),
-                       close_when_absent=bool(v.get('close_when_absent', False)))
-        return out
-
-    def validate(self, d):
-        kind = d.get('kind', getattr(self.instance, 'kind', None))
-        if d.get('mode') == 'geometrique' and kind not in shading.FIXED:
-            raise serializers.ValidationError('Seules les protections fixes ont un mode géométrique.')
-        return d
+            if isinstance(sid, bool) or not isinstance(sid, int):
+                raise Refused('Amélioration inconnue.')
+            sc = Scenario.objects.filter(pk=sid).first()
+            if sc is None or sc.building_id != building.pk:
+                raise Refused('Amélioration d’un autre bâtiment.')
+            if sc.genere:
+                raise Refused('Amélioration calculée depuis un bouquet : modifiez le bouquet.')
+            out['scenario'] = sc
+    return out
 
 
 def _building(request, pk, write=False):
     b = get_object_or_404(access.visible_buildings(request), pk=pk)
     if write and not access.can_declare(request, b):
-        from rest_framework.exceptions import PermissionDenied
         raise PermissionDenied('Lecture seule sur ce bâtiment.')
     return b
 
@@ -101,43 +99,48 @@ def _touch(building, device_mode):
 
 class CatalogueView(APIView):
     def get(self, request):
-        return Response({'kinds': shading.CATALOGUE, 'ranges': PARAM_RANGES, 'mobile_defaults': shading.MOBILE_DEFAULTS})
+        return Response(shading.catalogue())
 
 
 class DevicesView(APIView):
     def get(self, request, pk):
         b = _building(request, pk)
-        return Response({'results': DeviceSerializer(b.shading_devices.all(), many=True).data})
+        return Response({'results': [serialize(d) for d in b.shading_devices.all()]})
 
     def post(self, request, pk):
         b = _building(request, pk, write=True)
-        ser = DeviceSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        sc = ser.validated_data.get('scenario')
-        if sc is not None and sc.building_id != b.pk:
-            return Response({'detail': 'Variante d’un autre bâtiment.'}, status=status.HTTP_400_BAD_REQUEST)
-        d = ser.save(building=b, author_sub=access.sub_of(request))
+        try:
+            data = _clean(request.data, b)
+        except Refused as exc:
+            return Response({'detail': exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        d = ShadingDevice.objects.create(building=b, author_sub=access.sub_of(request), **data)
         _touch(b, d.mode)
-        return Response(DeviceSerializer(d).data, status=status.HTTP_201_CREATED)
+        return Response(serialize(d), status=status.HTTP_201_CREATED)
 
 
 class DeviceDetailView(APIView):
     def _get(self, request, pk):
         d = get_object_or_404(ShadingDevice.objects.filter(building__in=access.visible_buildings(request)), pk=pk)
         if not access.can_declare(request, d.building):
-            from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied('Lecture seule sur ce bâtiment.')
         return d
 
     def patch(self, request, pk):
         d = self._get(request, pk)
-        ser = DeviceSerializer(d, data=request.data, partial=True)
-        ser.is_valid(raise_exception=True)
+        if d.scenario_id and d.scenario.genere:
+            return Response({'detail': 'Amélioration calculée depuis un bouquet : modifiez le bouquet.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            data = _clean(request.data, d.building, d)
+        except Refused as exc:
+            return Response({'detail': exc.message}, status=status.HTTP_400_BAD_REQUEST)
         old_mode = d.mode
-        ser.save()
+        for k, v in data.items():
+            setattr(d, k, v)
+        d.save()
         _touch(d.building, old_mode)
         _touch(d.building, d.mode)
-        return Response(DeviceSerializer(d).data)
+        return Response(serialize(d))
 
     def delete(self, request, pk):
         d = self._get(request, pk)
@@ -147,11 +150,13 @@ class DeviceDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-def _summary(r):
+def _summary(r, t_ext, hidx, residential):
+    dh, hours, _over = comfort.dh_re2020(r['t_op'], t_ext, hidx, residential)
     return {'heating_kwh': round(r['heating_kwh'], 0), 'cooling_kwh': round(r['cooling_kwh'], 0),
             't_op_max': r['t_op_max'], 'hours_over_26': int(sum(1 for t in r['t_op'] if t > 26)),
             'hours_over_28': int(sum(1 for t in r['t_op'] if t > 28)),
             'degree_hours_26': round(sum(max(0.0, t - 26) for t in r['t_op']), 0),
+            'dh_re2020': round(dh, 0), 'heures_inconfort': hours,
             'solar_by_orientation_kwh': r.get('solar_windows_by_orientation_kwh') or {}}
 
 
@@ -167,6 +172,7 @@ class EffectView(APIView):
             weather, wdesc = calc_service.resolve_weather(b)
         except calc_service.CalcError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        weather = calc_service.scenario_weather(weather, sc)
         base, _vals = calc_service.params_for(b, sc)
         devs = list(base.devices)
         variants = [('sans', [])] + [('toutes', devs)] + [(f"{d['kind']} {d['orientation']}", [d]) for d in devs]
@@ -176,6 +182,8 @@ class EffectView(APIView):
             q.devices = ds
             params.append(q)
         res = n1.run(params, weather, keep_series=True)
+        t_ext = [p['t_ext'] for p in weather]
+        hidx = [p.get('hour_index') if p.get('hour_index') is not None else i for i, p in enumerate(weather)]
         rows = [{'label': lbl, 'device_id': (ds[0]['id'] if len(ds) == 1 and lbl not in ('sans', 'toutes') else None),
-                 **_summary(r)} for (lbl, ds), r in zip(variants, res)]
+                 **_summary(r, t_ext, hidx, base.residential)} for (lbl, ds), r in zip(variants, res)]
         return Response({'weather': wdesc, 'rows': rows})

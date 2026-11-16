@@ -731,11 +731,11 @@
         <div class="viewer-toolbar">
           <div class="mode-toggle" role="radiogroup" aria-label="Surface affichée">
             <label class="mode-option">
-              <input type="radio" name="colorMode" value="interior" [(ngModel)]="colorMode" />
+              <input type="radio" name="colorMode" value="interior" [ngModel]="colorMode()" (ngModelChange)="colorMode.set($event)" />
               <span>Surface intérieure</span>
             </label>
             <label class="mode-option">
-              <input type="radio" name="colorMode" value="exterior" [(ngModel)]="colorMode" />
+              <input type="radio" name="colorMode" value="exterior" [ngModel]="colorMode()" (ngModelChange)="colorMode.set($event)" />
               <span>Surface extérieure</span>
             </label>
           </div>
@@ -745,7 +745,7 @@
           <app-mesh-viewer
             [vertices]="b.envelope.vertices"
             [triangles]="b.envelope.triangles"
-            [colorForTriangle]="colorForResultTriangle"
+            [colorForTriangle]="colorForResultTriangle()"
             [pickable]="false"
           />
         </div>
