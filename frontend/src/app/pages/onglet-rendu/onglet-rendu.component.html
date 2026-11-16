@@ -344,7 +344,7 @@
               <section class="bloc">
                 <h3>Environnement</h3>
                 @if (f.environnement; as e) {
-                  <p>Environnement observé@if (e.source) {&#32;({{ e.source }})}@if (e.rayon_m) {&#32;sur {{ fmt(e.rayon_m) }} m}&#32;:
+                  <p>Environnement observé@if (e.rayon_m) {&#32;sur {{ fmt(e.rayon_m) }} m}@if (e.source) {&#32;— {{ e.source }}&#32;—}&#32;:
                     @if (e.batiments !== undefined) { {{ e.batiments }} bâtiment{{ e.batiments! > 1 ? 's' : '' }} voisin{{ e.batiments! > 1 ? 's' : '' }},
                       {{ e.arbres }} arbre{{ e.arbres! > 1 ? 's' : '' }} ou massif{{ e.arbres! > 1 ? 's' : '' }}, relief. }
                     @else { {{ e.objets }} objet{{ e.objets > 1 ? 's' : '' }}. }</p>

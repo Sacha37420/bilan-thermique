@@ -173,7 +173,8 @@ def floor_u_node(floor_type, area_m2, exposed_perimeter_m, u_equivalent, basemen
     h = sum(_node_conductances(floor_type, area, max(float(exposed_perimeter_m), 1.0), depth).values())
     inv = 1.0 / max(ue, 1e-6) - area / h
     if inv <= 1.0 / U_NODE_MAX:
-        return U_NODE_MAX, (f'U du plancher ({ue:.2f} W/m²·K) supérieur à ce qu’un plancher nu au-dessus de ce local '
+        ue_txt = f'{ue:.2f}'.replace('.', ',')
+        return U_NODE_MAX, (f'U du plancher ({ue_txt} W/m²·K) supérieur à ce qu’un plancher nu au-dessus de ce local '
                             f'peut donner : U propre plafonné à {U_NODE_MAX:.0f} W/m²·K.')
     return 1.0 / inv, None
 
