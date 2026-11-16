@@ -962,13 +962,13 @@ d'ouverture des fenêtres, réglage désactivé par défaut — décision du pro
 - [x] Voir `to_do_trois_niveaux.md`, lot 43
 **Vérifié le :** 2026-11-16 — voir `to_do_trois_niveaux.md`
 
-## Lot 44 — Écran et intégration   ·   statut : à faire
+## Lot 44 — Écran et intégration   ·   statut : livré
 **Objectif :** trois niveaux et état des calculs dans Parc, Bâtiment, Calculs, Rendu. Détail : `to_do_trois_niveaux.md`.
 **Tâches :**
-- [ ] Voir `to_do_trois_niveaux.md`, lot 44
+- [x] Voir `to_do_trois_niveaux.md`, lot 44
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_trois_niveaux.md`, lot 44
-**Vérifié le :**
+- [x] Voir `to_do_trois_niveaux.md`, lot 44
+**Vérifié le :** 2026-11-16 — voir `to_do_trois_niveaux.md`
 
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant

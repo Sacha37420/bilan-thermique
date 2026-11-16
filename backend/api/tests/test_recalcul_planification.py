@@ -239,6 +239,25 @@ class DeclencheursTest(_Base):
             Building.objects.get(pk=self.b.pk).delete()
         self.assertFalse(Recalcul.objects.exists())
 
+    def test_suppression_par_queryset(self):
+        # `QuerySet.delete()` (nettoyer_brouillons) : l'origine des signaux est le QuerySet, pas l'instance. Sans le
+        # traiter, un recalcul était planifié pour un bâtiment supprimé et la transaction échouait en service sur la clé
+        # étrangère (un TestCase ne valide jamais : seule l'absence de ligne `recalculs` le montre ici).
+        facts.record(self.b, 'mur.u', 0.4, 'declare', author_sub='u')
+        ShadingDevice.objects.create(building=self.b, kind='casquette', orientation='S')
+        Recalcul.objects.all().delete()
+        with self.commit():
+            Building.objects.filter(pk=self.b.pk).delete()
+        self.assertFalse(Recalcul.objects.exists())
+        self.send.assert_not_called()
+        p2 = Portfolio.objects.create(name='parc 2', owner_sub='g')
+        b2 = Building.objects.create(name='b2', portfolio=p2, pipeline_status='complet')
+        facts.record(b2, 'mur.u', 0.4, 'declare', author_sub='u')
+        Recalcul.objects.all().delete()
+        with self.commit():
+            Portfolio.objects.filter(pk=p2.pk).delete()
+        self.assertFalse(Recalcul.objects.exists())
+
     def test_bouquet_du_parc_tous_ses_batiments(self):
         b2 = Building.objects.create(name='b2', portfolio=self.p, pipeline_status='complet')
         autre = Building.objects.create(name='ailleurs', pipeline_status='complet')

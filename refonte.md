@@ -750,7 +750,8 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 37 | livré 2026-11-16 | `7da2e8c` | 24 actions en six familles (conditions, indicateurs, application par niveau), bouquets du lab « Économiser l'énergie » et « Minimiser les DH », bouquets de parc, potentiels N1 (bâtiment, parc en file) et N2 à la demande. |
 | 38 | livré 2026-11-16 | `7da2e8c` | Document de rendu construit par le serveur, 15 formes Plotly, gabarits et 18 questions, exports HTML autonome, PDF (service `bilan-thermique-rendu`) et Word (python-docx), transitoires 24 h. |
 | 39 | livré 2026-11-16 | `7da2e8c` | Onglet Rendu en deux pages (paramétrage guidé, aperçu, exports), composant `graphe` (Plotly à la demande, jetons), potentiels dans la fiche et le parc, Résultats en 3D du bâtiment, recoloration de Calcul 3D corrigée. 556 → 663 tests (lots 36 à 39 intégrés ensemble). |
-| 40 | en cours 2026-11-16 | — | Intégration : service de rendu au `docker-compose.yml`, by-pass d'été de la double flux (`n1-6`, `n2-5`), ouverture des fenêtres réglable par parc (désactivée par défaut), documentation complète ; déploiement et parcours réel à faire. |
+| 40 | livré 2026-11-16 | `#17` | Intégration : service de rendu au `docker-compose.yml`, by-pass d'été de la double flux (`n1-6`, `n2-5`), ouverture des fenêtres réglable par parc (désactivée par défaut), documentation complète ; déploiement et parcours réel à faire. |
+| 41–44 | livré 2026-11-16 | `#18`, `#19` | Trois niveaux calculés et tenus à jour sans geste (chantier `bt-trois-niveaux`) : `recalcul/` (signaux → planification regroupée, N0/N1 puis N2 et potentiels sous `joblock`), potentiels N0/N1/N2, parc et rendu par niveau, état des calculs sur quatre onglets. D49–D52 remplacent D37 et D44. 669 → 743 tests. |
 
 ## 17. Rapport de fin de session (2026-11-15)
 
