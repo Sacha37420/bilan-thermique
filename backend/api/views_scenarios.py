@@ -31,8 +31,26 @@ def _building(request, pk, write=False):
 
 
 class BundlesView(APIView):
+    """`?parc=<id>` (chantier bt-navigation) : libellés et épaisseurs effectifs du parc, bouquets
+    désactivés masqués. Sans `parc` : inchangé."""
+
     def get(self, request):
-        return Response({'bundles': [{'key': k, 'label': v['label'], 'vigilance': v['vigilance']} for k, v in sc_service.BUNDLES.items()]})
+        pid = request.query_params.get('parc')
+        if pid in (None, ''):
+            return Response({'bundles': [{'key': k, 'label': v['label'], 'vigilance': v['vigilance']}
+                                         for k, v in sc_service.BUNDLES.items()]})
+        from . import reglages
+        p = get_object_or_404(access.visible_portfolios(request), pk=int(pid) if str(pid).isdigit() else -1)
+        cfg = reglages.effective(p, 'parametrage')
+        out = []
+        for k, v in sc_service.BUNDLES.items():
+            if not reglages.bundle_active(cfg, k):
+                continue
+            row = {'key': k, 'label': reglages.bundle_label(k, v, cfg), 'vigilance': v['vigilance']}
+            if k in reglages.BUNDLE_THICKNESS:
+                row['epaisseur_cm'] = cfg.get(f'bouquets.{k}.epaisseur_cm')
+            out.append(row)
+        return Response({'bundles': out, 'parc': p.pk})
 
 
 class ScenariosView(APIView):

@@ -16,7 +16,7 @@ interface Saved {
   inconsistencies: { message: string }[];
 }
 
-/** Questionnaire guidé (refonte, Lot 12) : d'abord les questions qui réduisent le plus la fourchette. */
+/** « Ce qui rendrait le résultat plus sûr » — questionnaire guidé (refonte, Lot 12) : d'abord les questions qui réduisent le plus la fourchette. */
 @Component({
   selector: 'app-questionnaire',
   standalone: true,

@@ -1,90 +1,86 @@
 <section class="rf-card" aria-labelledby="res-title">
+  @let r = main();
   <div class="rf-card-head">
-    <h2 id="res-title">Résultat</h2>
-    @if (latest()?.N1; as r) {
-      @if (r.up_to_date) { <span class="rf-badge m-mesure">à jour</span> }
-      @else { <span class="rf-badge m-infere">périmé — la fiche a changé</span> }
+    <h2 id="res-title">
+      @if (niveau) { Résultat — {{ mots[niveau] }} ({{ niveau }}) } @else { Dernier résultat }
+    </h2>
+    @if (r) {
+      @if (r.up_to_date === true) { <span class="rf-badge m-mesure">à jour</span> }
+      @else if (r.up_to_date === false) { <span class="rf-badge m-infere" title="Une donnée du bâtiment a changé depuis ce calcul">à refaire — les données ont changé</span> }
+      @else { <span class="rf-badge m-defaut">lancé depuis l'outil Calcul 3D</span> }
     }
-    <button type="button" class="rf-btn" (click)="prepare.emit()">Préparer une simulation</button>
-    <button type="button" class="rf-btn primary" (click)="compute()" [disabled]="busy()">
-      {{ busy() ? 'Calcul…' : (latest()?.N1 ? 'Recalculer (N0, N1)' : 'Calculer (N0, N1)') }}</button>
+    @if (!niveau) {
+      <a class="rf-btn" routerLink="/calculs" [queryParams]="ctx.queryParams({ vue: 'simulation', type: r?.level ?? 'N1' })">Voir dans Calculs</a>
+    }
   </div>
-  @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
-  @if (latest()?.N1; as r) {
+  @if (n2Job(); as j) {
+    <div class="n2-progress" role="status">
+      <progress max="100" [value]="j.progress" [attr.aria-label]="'Avancement du calcul détaillé : ' + j.progress + ' %'"></progress>
+      <span>Calcul détaillé (N2) en cours : {{ j.message || 'en attente du calculateur…' }} ({{ j.progress }} %)</span>
+    </div>
+  }
+  @if (r) {
     <div class="rf-kpis">
-      <div class="rf-kpi"><small>Besoin de chauffage</small><strong>{{ num(r, 'heating_kwh_m2') | number: '1.0-0' }}</strong><em>kWh/m²·an (N1)@if (num(r, 'heating_kwh_m2_p10') !== null) { · {{ num(r, 'heating_kwh_m2_p10') | number: '1.0-0' }}–{{ num(r, 'heating_kwh_m2_p90') | number: '1.0-0' }} }</em></div>
+      <div class="rf-kpi"><small>Besoin de chauffage</small><strong>{{ num(r, 'heating_kwh_m2') | number: '1.0-0' }}</strong>
+        <em>kWh/m²·an@if (num(r, 'heating_kwh_m2_p10') !== null) { · fourchette {{ num(r, 'heating_kwh_m2_p10') | number: '1.0-0' }}–{{ num(r, 'heating_kwh_m2_p90') | number: '1.0-0' }} }</em></div>
       <div class="rf-kpi"><small>Besoin total</small><strong>{{ num(r, 'heating_kwh') | number: '1.0-0' }}</strong><em>kWh/an</em></div>
-      <div class="rf-kpi"><small>Puissance maximale</small><strong>{{ num(r, 'heating_kw_max') | number: '1.1-1' }}</strong><em>kW</em></div>
-      <div class="rf-kpi"><small>Heures &gt; 28 °C</small><strong>{{ num(r, 'hours_over_28') | number: '1.0-0' }}</strong><em>température opérative</em></div>
-      @if (num(r, 'primary_kwh_m2') !== null) {
-        <div class="rf-kpi"><small>Énergie primaire</small><strong>{{ num(r, 'primary_kwh_m2') | number: '1.0-0' }}</strong>
-          <em>kWh/m²·an · étiquette modèle {{ r.indicators['dpe_label_model'] }}@if (num(r, 'dpe_gap_pct') !== null) { · écart DPE {{ num(r, 'dpe_gap_pct')! > 0 ? '+' : '' }}{{ num(r, 'dpe_gap_pct') }} % }</em></div>
+      @if (num(r, 'heating_kw_max') !== null) {
+        <div class="rf-kpi"><small>Puissance maximale</small><strong>{{ num(r, 'heating_kw_max') | number: '1.1-1' }}</strong><em>kW</em></div>
       }
-      <div class="rf-kpi"><small>Confiance de la fiche</small><strong>{{ (num(r, 'confidence') ?? 0) * 100 | number: '1.0-0' }} %</strong><em>complétude {{ (num(r, 'completeness') ?? 0) * 100 | number: '1.0-0' }} %</em></div>
+      @if (num(r, 'hours_over_28') !== null) {
+        <div class="rf-kpi"><small title="Température ressentie (opérative) au-dessus de 28 °C">Heures trop chaudes</small><strong>{{ num(r, 'hours_over_28') | number: '1.0-0' }}</strong><em>h &gt; 28 °C</em></div>
+      }
+      @if (num(r, 'primary_kwh_m2') !== null) {
+        <div class="rf-kpi"><small title="Estimation du modèle, pas un diagnostic de performance énergétique">Énergie primaire (estimation)</small><strong>{{ num(r, 'primary_kwh_m2') | number: '1.0-0' }}</strong>
+          <em>kWh/m²·an@if (num(r, 'dpe_gap_pct') !== null) { · écart au DPE existant {{ num(r, 'dpe_gap_pct')! > 0 ? '+' : '' }}{{ num(r, 'dpe_gap_pct') }} % }</em></div>
+      }
     </div>
-    <div class="cols">
-      <figure class="months" aria-label="Besoin de chauffage par mois (kWh)">
-        <figcaption>Besoin par mois (kWh)</figcaption>
-        <div class="bars">
-          @for (b of bars(r); track $index) {
-            <div class="bar" [title]="b.m + ' : ' + (b.v | number: '1.0-0') + ' kWh'"><i [style.height.%]="b.h"></i><span>{{ b.m }}</span></div>
-          }
-        </div>
-      </figure>
-      <div class="bal">
-        <h3>Bilan annuel</h3>
-        <table class="rf-table">
-          @for (x of balance(r); track x.k) { <tr><td>{{ x.label }}</td><td class="num">{{ x.v | number: '1.0-0' }} kWh</td></tr> }
-        </table>
+    @if (bars(r).length || balance(r).length) {
+      <div class="cols">
+        @if (bars(r).length) {
+          <figure class="months" aria-label="Besoin de chauffage par mois (kWh)">
+            <figcaption>Besoin par mois (kWh)</figcaption>
+            <div class="bars">
+              @for (b of bars(r); track $index) {
+                <div class="bar" [title]="b.m + ' : ' + (b.v | number: '1.0-0') + ' kWh'"><i [style.height.%]="b.h"></i><span>{{ b.m }}</span></div>
+              }
+            </div>
+          </figure>
+        }
+        @if (balance(r).length) {
+          <div class="bal">
+            <h3>Bilan annuel</h3>
+            <table class="rf-table">
+              @for (x of balance(r); track x.k) { <tr><td>{{ x.label }}</td><td class="num">{{ x.v | number: '1.0-0' }} kWh</td></tr> }
+            </table>
+          </div>
+        }
       </div>
-    </div>
+    }
     <p class="rf-hint">
-      N1 (horaire 5R1C) · météo : {{ r.weather.source }} ({{ r.weather.n_hours }} h) · calculé le {{ r.created_at | date: 'dd/MM/yyyy HH:mm' }}
-      @if (latest()?.N0; as n0) { · contrôle N0 : {{ num(n0, 'heating_kwh') | number: '1.0-0' }} kWh @if (gap() !== null) { ({{ gap()! > 0 ? '+' : '' }}{{ gap() }} %) } }
+      {{ mots[r.level] }} ({{ r.level }}) · météo : {{ r.weather.source ?? '—' }}@if (r.weather.n_hours) { ({{ r.weather.n_hours }} h) }
+      · calculé le {{ r.created_at | date: 'dd/MM/yyyy HH:mm' }}@if (r.duration_s) { en {{ r.duration_s | number: '1.0-0' }} s }
+      @if (r.level === 'N2') {
+        · @if (r.settings?.mode === 'experte') { enveloppe experte (parois assignées à la main) }
+        @else if (r.from_fiche) { enveloppe et parois reconstituées depuis les données du bâtiment } @else { réglages de l'outil Calcul 3D }
+      }
       @if (r.weather.warning) { · {{ r.weather.warning }} }
     </p>
-  } @else if (!busy()) {
-    <p class="rf-hint">Aucun calcul pour l'instant. N0 et N1 prennent moins de deux secondes.</p>
+    @if (!niveau) {
+      <p class="rf-hint others">
+        @for (lv of niveaux; track lv) {
+          @let o = latest()?.[lv];
+          @if (o && o.id !== r.id) {
+            <span>{{ mots[lv] }} ({{ lv }}) : {{ num(o, 'heating_kwh_m2') | number: '1.0-0' }} kWh/m²·an
+              @if (gapTo(o) !== null) { ({{ gapTo(o)! > 0 ? '+' : '' }}{{ gapTo(o) }} %) }</span>
+          }
+        }
+      </p>
+    }
+  } @else if (!n2Job()) {
+    <p class="rf-hint">
+      @if (niveau) { Aucun calcul {{ mots[niveau].toLowerCase() }} pour l'instant. }
+      @else { Aucun calcul pour l'instant. <a routerLink="/calculs" [queryParams]="ctx.queryParams({ vue: 'simulation' })">Lancer une simulation dans Calculs</a>. }
+    </p>
   }
-
-  <div class="n2" aria-labelledby="n2-title">
-    <div class="rf-card-head">
-      <h3 id="n2-title">Calcul détaillé (N2)</h3>
-      @if (latest()?.N2; as r2) {
-        @if (r2.up_to_date === true) { <span class="rf-badge m-mesure">à jour</span> }
-        @else if (r2.up_to_date === false) { <span class="rf-badge m-infere">périmé — la fiche a changé</span> }
-        @else { <span class="rf-badge m-defaut">lancé depuis Calcul 3D</span> }
-      }
-      @if (latest()?.can_n2) {
-        <button type="button" class="rf-btn" (click)="computeN2()" [disabled]="!!n2Job()">
-          {{ n2Job() ? 'N2 en cours…' : (latest()?.N2 ? 'Relancer le N2' : 'Lancer le N2') }}</button>
-      }
-    </div>
-    @if (n2Error()) { <p class="rf-error" role="alert">{{ n2Error() }}</p> }
-    @if (n2Job(); as j) {
-      <div class="n2-progress" role="status">
-        <progress max="100" [value]="j.progress" [attr.aria-label]="'Avancement du N2 : ' + j.progress + ' %'"></progress>
-        <span>{{ j.message || 'En attente du calculateur…' }} ({{ j.progress }} %)</span>
-      </div>
-    }
-    @if (latest()?.N2; as r2) {
-      <div class="rf-kpis">
-        <div class="rf-kpi"><small>Besoin de chauffage</small><strong>{{ num(r2, 'heating_kwh_m2') | number: '1.0-0' }}</strong>
-          <em>kWh/m²·an (N2)@if (n2Gap() !== null) { · {{ n2Gap()! > 0 ? '+' : '' }}{{ n2Gap() }} % par rapport à N1 }</em></div>
-        <div class="rf-kpi"><small>Puissance maximale</small><strong>{{ num(r2, 'heating_kw_max') | number: '1.1-1' }}</strong><em>kW</em></div>
-        <div class="rf-kpi"><small>Heures &gt; 28 °C</small><strong>{{ num(r2, 'hours_over_28') | number: '1.0-0' }}</strong><em>température opérative</em></div>
-      </div>
-      <p class="rf-hint">
-        FEM par triangle · @if (r2.settings?.mode === 'experte') { enveloppe experte (parois assignées à la main) }
-        @else if (r2.from_fiche) { enveloppe et parois reconstituées depuis la fiche } @else { réglages de la page Calcul 3D }
-        · météo : {{ r2.weather.source }} · calculé le {{ r2.created_at | date: 'dd/MM/yyyy HH:mm' }}
-        @if (r2.duration_s) { en {{ r2.duration_s | number: '1.0-0' }} s }
-      </p>
-    } @else if (!n2Job()) {
-      <p class="rf-hint">
-        Le N2 simule chaque paroi en 3D, avec l'ombrage réel des voisins : quelques secondes à quelques minutes,
-        un calcul à la fois sur le lab. @if (!latest()?.can_n2) { Réservé aux gestionnaires du bâtiment. }
-      </p>
-    }
-  </div>
 </section>

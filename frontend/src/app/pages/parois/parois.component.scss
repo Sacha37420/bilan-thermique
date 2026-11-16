@@ -3,6 +3,7 @@
 .page-parois { padding: var(--space-6) var(--space-4) var(--space-8); max-width: 1040px; margin: 0 auto; }
 
 .parois-head { margin-bottom: var(--space-6); }
+.retour { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); text-decoration: none; font-size: var(--text-sm); margin-bottom: var(--space-2); }
 
 .eyebrow {
   display: flex;

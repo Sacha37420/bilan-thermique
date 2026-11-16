@@ -101,12 +101,12 @@ export class BatimentComponent implements OnInit {
     }
     // Lot AH : /batiment?id=… ouvre directement un bâtiment — lien donné par la
     // page Environnement après création du bâtiment étudié.
-    // Lot 27 (refonte) : un bâtiment existant s'ouvre dans sa fiche (onglet Maillage 3D) ; cette page sert
-    // à en créer un depuis un maillage, une recherche ou une boîte.
+    // Lot 27 (refonte) : un bâtiment existant s'ouvre dans l'onglet Bâtiment (vue Géométrie, chantier
+    // bt-navigation) ; cette page (/maillage) sert à en créer un depuis un maillage, une recherche ou une boîte.
     this.route.queryParamMap.subscribe(params => {
       const id = Number(params.get('id'));
       if (Number.isInteger(id) && id > 0) {
-        void this.router.navigate(['/fiche'], { queryParams: { b: id, onglet: 'maillage' }, replaceUrl: true });
+        void this.router.navigate(['/batiment'], { queryParams: { b: id, vue: 'geometrie' }, replaceUrl: true });
       }
     });
   }

@@ -13,6 +13,9 @@ import numpy as np
 from . import archetypes, facts, uncertainty
 
 LAMBDA_INSULATION = 0.035  # W/m·K, laine minérale / polystyrène courants
+LAMBDA_ROOF = 0.04         # W/m·K, isolant de combles / toiture
+ITI_MAJORATION_PCT = 10.0  # ponts thermiques de plancher et de refend d'une isolation intérieure
+ROOF_U0 = 2.5              # W/m²·K, toiture ou combles sans isolant
 
 QUESTIONS = [
     {'id': 'usage', 'label': 'Quel est l’usage du bâtiment ?', 'block': 'identite', 'kind': 'enum',
@@ -64,15 +67,28 @@ class QuestionError(ValueError):
     pass
 
 
-def _uninsulated_wall_u(values):
+def _uninsulated_wall_u(values, cfg=None):
     year = values.get('identite.annee_construction')
-    u = archetypes.period_for(year)[2]
+    u = archetypes.period_values(year, cfg)[1]
     return max(u, 1.2) if (year or 1970) < 1975 else max(u, 1.0)
 
 
-def answers_to_facts(answers, values):
-    """{id: valeur} → [(clé, valeur, source)]. `values` = fiche effective actuelle (pour déduire les U)."""
+def window_values(option, cfg=None):
+    vit, uw, g = WINDOWS[option]
+    if cfg:
+        uw = cfg.get(f'menuiseries.{option}.uw', uw)
+        g = cfg.get(f'menuiseries.{option}.g', g)
+    return vit, uw, g
+
+
+def answers_to_facts(answers, values, cfg=None):
+    """{id: valeur} → [(clé, valeur, source)]. `values` = fiche effective actuelle (pour déduire les U).
+    `cfg` : réglages « parametrage » effectifs du parc du bâtiment (`api.reglages`) ; None hors parc."""
     out = []
+    P = cfg or {}
+    lam_wall = P.get('isolants.lambda_mur', LAMBDA_INSULATION)
+    lam_roof = P.get('isolants.lambda_toiture', LAMBDA_ROOF)
+    iti_factor = 1.0 + P.get('isolants.majoration_iti_pct', ITI_MAJORATION_PCT) / 100.0
     a = dict(answers)
 
     def num(qid):
@@ -106,27 +122,27 @@ def answers_to_facts(answers, values):
     if 'murs' in a:
         out.append(('mur.isolation', a['murs'], src))
         if a['murs'] == 'aucune':
-            out.append(('mur.u', round(_uninsulated_wall_u(merged), 2), 'questionnaire : murs non isolés'))
+            out.append(('mur.u', round(_uninsulated_wall_u(merged, cfg), 2), 'questionnaire : murs non isolés'))
         if a['murs'] in ('iti', 'ite') and 'murs_epaisseur' in a:
             e = num('murs_epaisseur') / 100.0
-            u0 = _uninsulated_wall_u(merged)
-            u = 1.0 / (1.0 / u0 + e / LAMBDA_INSULATION)
-            # Pont thermique de plancher et de refend d'une isolation intérieure : +10 %.
+            u0 = _uninsulated_wall_u(merged, cfg)
+            u = 1.0 / (1.0 / u0 + e / lam_wall)
+            # Pont thermique de plancher et de refend d'une isolation intérieure : +10 % (réglable par parc).
             if a['murs'] == 'iti':
-                u *= 1.10
+                u *= iti_factor
             out += [('mur.isolation_epaisseur_m', round(e, 3), src),
                     ('mur.u', round(u, 3), f'questionnaire : {e * 100:.0f} cm d’isolant ({a["murs"].upper()})')]
     if 'toiture' in a:
         e = num('toiture') / 100.0
-        out.append(('toiture.u', round(1.0 / (1.0 / 2.5 + e / 0.04), 3), f'questionnaire : {e * 100:.0f} cm en toiture'))
+        out.append(('toiture.u', round(1.0 / (1.0 / ROOF_U0 + e / lam_roof), 3), f'questionnaire : {e * 100:.0f} cm en toiture'))
     if 'fenetres' in a:
-        vit, uw, g = WINDOWS[a['fenetres']]
+        vit, uw, g = window_values(a['fenetres'], cfg)
         out += [('baies.vitrage', vit, src), ('baies.uw', uw, f'questionnaire : {a["fenetres"]}'), ('baies.g', g, src)]
     if 'vitrage' in a:
         r = num('vitrage') / 100.0
         out += [(f'baies.ratio_{o}', round(r, 3), src) for o in 'NESO']
     if 'ventilation' in a:
-        debit, recup = archetypes.VENTILATION_DEFAULT[a['ventilation']]
+        debit, recup = archetypes.ventilation_values(a['ventilation'], cfg)
         out += [('ventilation.type', a['ventilation'], src), ('ventilation.debit_vol_h', debit, src),
                 ('ventilation.rendement_recup', recup, src)]
     if 'etancheite' in a:
@@ -139,7 +155,8 @@ def answers_to_facts(answers, values):
         out.append(('usage.consigne_chauffage_c', num('consigne'), src))
     if 'chauffage' in a:
         out += [('systeme.generateur', a['chauffage'], src),
-                ('systeme.rendement_generation', archetypes.GENERATOR_EFFICIENCY[a['chauffage']], 'questionnaire (valeur type)')]
+                ('systeme.rendement_generation', archetypes.generator_efficiency(a['chauffage'], cfg),
+                 'questionnaire (valeur type)')]
     return out
 
 
@@ -243,11 +260,11 @@ def ranked_questions(building, weather=None):
     return {'questions': out, 'nominal_kwh': nominal, 'inconsistencies': inconsistencies(values)}
 
 
-def refresh_archetype(building, values, record):
+def refresh_archetype(building, values, record, cfg=None):
     """Après une réponse sur l'année ou l'usage : valeurs par défaut de l'archétype recalculées
     (méthode `defaut`, automatiques) — elles ne priment sur rien d'autre que d'anciens défauts."""
     defaults, period = archetypes.defaults(values.get('identite.annee_construction'), values.get('identite.usage'),
-                                           values.get('mur.materiau'))
+                                           values.get('mur.materiau'), cfg)
     src = f'archétype {period} · {values.get("identite.usage") or "usage inconnu"}'
     for k, v in defaults.items():
         record(k, v, src)

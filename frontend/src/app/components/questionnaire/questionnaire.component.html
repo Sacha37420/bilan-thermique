@@ -1,5 +1,5 @@
 <section class="rf-card" aria-labelledby="q-title">
-  <div class="rf-card-head"><h2 id="q-title">Questions</h2></div>
+  <div class="rf-card-head"><h2 id="q-title">Ce qui rendrait le résultat plus sûr</h2></div>
   @if (ranked(); as r) {
     @for (i of r.inconsistencies; track $index) { <p class="warn" role="note">⚠ {{ i.message }}</p> }
     <p class="rf-hint">D'abord les réponses qui réduiraient le plus l'incertitude du résultat

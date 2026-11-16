@@ -37,6 +37,6 @@
       </table>
     </div>
   } @else {
-    <p class="rf-hint">Lancez un calcul (onglet Synthèse) pour voir les consommations.</p>
+    <p class="rf-hint">Les consommations apparaissent après une simulation : <a routerLink="/calculs" [queryParams]="ctx.queryParams({ vue: 'simulation' })">lancer une simulation dans Calculs</a>.</p>
   }
 </section>

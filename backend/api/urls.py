@@ -9,6 +9,7 @@ from . import views_mesures as vme
 from . import views_scenarios as vsc
 from .views_carte import AreaBuildingsView, AddPointsView
 from . import views_ia as via
+from . import views_reglages as vrg
 from . import mcp as mcp_views
 from .views_questionnaire import QuestionsView, QuestionnaireView
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
@@ -117,4 +118,9 @@ urlpatterns = [
     # ── Refonte (Lot 19) : carte ──
     path('carte/batiments/', AreaBuildingsView.as_view()),
     path('parcs/<int:pk>/ajouter/', AddPointsView.as_view()),
+    # ── Chantier bt-navigation : réglages de parc, moteurs, documents de parc, fiche d'identité ──
+    path('parcs/<int:pk>/reglages/<str:section>/', vrg.ReglagesView.as_view()),
+    path('parcs/<int:pk>/documents/', vrg.ParcDocumentsView.as_view()),
+    path('calculs/moteurs/', vrg.MoteursView.as_view()),
+    path('batiments/<int:pk>/identite/', vrg.IdentiteView.as_view()),
 ]

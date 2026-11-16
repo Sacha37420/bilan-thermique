@@ -42,22 +42,31 @@ class ScenarioError(ValueError):
 
 
 def apply_bundles(building, scenario, keys, author_sub='', author_name=''):
+    """Applique des bouquets à une variante. Pour un bâtiment de parc, les réglages « parametrage » du
+    parc s'appliquent : bouquet désactivé refusé, épaisseurs, λ, Uw/g, rendements (`api.reglages`)."""
+    from . import reglages
     from .models import ShadingDevice
+    cfg = reglages.for_building(building, 'parametrage') or None
     values = facts.effective_values(building, scenario)
     done = []
     for key in keys:
         bundle = BUNDLES.get(key)
         if bundle is None:
             raise ScenarioError('Bouquet de travaux inconnu.')
+        if not reglages.bundle_active(cfg, key):
+            raise ScenarioError('Amélioration désactivée dans les réglages du parc.')
+    for key in keys:
+        bundle = BUNDLES[key]
+        label = reglages.bundle_label(key, bundle, cfg)
         if 'answers' in bundle:
-            for k, v, src in questionnaire.answers_to_facts(bundle['answers'], values):
-                facts.record(building, k, v, 'declare', source=f'scénario : {bundle["label"]}', author_sub=author_sub,
+            for k, v, src in questionnaire.answers_to_facts(reglages.bundle_answers(key, bundle, cfg), values, cfg):
+                facts.record(building, k, v, 'declare', source=f'scénario : {label}', author_sub=author_sub,
                              author_name=author_name, scenario=scenario, refresh=False)
                 values[k] = v
         if 'device' in bundle:
             d = bundle['device']
             ShadingDevice.objects.create(building=building, scenario=scenario, kind=d['kind'], orientation=d['orientation'],
-                                         params=d.get('params', {}), control=d.get('control', {}), label=bundle['label'],
+                                         params=d.get('params', {}), control=d.get('control', {}), label=label,
                                          author_sub=author_sub)
         done.append(key)
     meta = dict(scenario.weather or {})

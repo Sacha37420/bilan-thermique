@@ -2,6 +2,7 @@ import { Component, Input, OnChanges, OnDestroy, computed, inject, output, signa
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { ContexteService } from '../../core/contexte.service';
 import { Catalogue, CatalogueKey } from '../../core/refonte.types';
 
 type Level = 'N0' | 'N1' | 'N2';
@@ -18,13 +19,14 @@ interface Prep {
 interface JobState { status: string; progress: number; message: string }
 
 const LEVELS: { id: Level; label: string; help: string }[] = [
-  { id: 'N0', label: 'N0 — mensuel', help: 'Bilan mois par mois, de type 3CL. Un contrôle rapide.' },
-  { id: 'N1', label: 'N1 — horaire réduit', help: 'Modèle 5R1C heure par heure, avec fourchette P10–P90. Le calcul de référence du parc.' },
-  { id: 'N2', label: 'N2 — 3D par paroi', help: 'Chaque paroi en éléments finis, ombrage réel des voisins. Le plus fin, le plus long.' },
+  { id: 'N0', label: 'Mensuel (N0)', help: 'Bilan mois par mois : un contrôle rapide, en moins d’une seconde.' },
+  { id: 'N1', label: 'Horaire simplifié (N1)', help: 'Le bâtiment heure par heure, avec une fourchette (du cas favorable au cas défavorable). Le calcul de référence du parc.' },
+  { id: 'N2', label: 'Détaillé par paroi (N2)', help: 'Chaque paroi simulée en 3D, avec l’ombre réelle des voisins. Le plus fin, le plus long ; réservé aux gestionnaires.' },
 ];
 const METHOD_LABEL: Record<string, string> = { mesure: 'mesuré', document: 'document', declare: 'déclaré', infere: 'inféré', defaut: 'par défaut' };
 
-/** Onglet « Simulation » (Lot 25) : préparer un calcul — quoi, avec quelles entrées, quelle fiabilité — puis le lancer. */
+/** Préparer une simulation — quoi, avec quelles entrées, quelle fiabilité — puis la lancer. C'est le SEUL
+ *  point de lancement de l'app (onglet Calculs → Simulation, chantier bt-navigation). */
 @Component({
   selector: 'app-simulation',
   standalone: true,
@@ -35,9 +37,12 @@ const METHOD_LABEL: Record<string, string> = { mesure: 'mesuré', document: 'doc
 export class SimulationComponent implements OnChanges, OnDestroy {
   @Input({ required: true }) buildingId!: number;
   @Input() refresh = 0;
-  /** Calcul terminé (ou déjà fait avec ces entrées) : la fiche ouvre l'onglet Calculs sur lui. */
+  /** Niveau imposé par la page (sélecteur de l'onglet Calculs) : le sélecteur interne est alors masqué. */
+  @Input() niveau: Level | null = null;
+  /** Calcul terminé (ou déjà fait avec ces entrées) : la page affiche son résultat. */
   launched = output<number>();
   private rf = inject(RefonteApiService);
+  protected ctx = inject(ContexteService);
   readonly levels = LEVELS;
   readonly methodLabel = METHOD_LABEL;
   catalogue = signal<Catalogue | null>(null);
@@ -51,6 +56,7 @@ export class SimulationComponent implements OnChanges, OnDestroy {
   private poll: ReturnType<typeof setTimeout> | null = null;
 
   ngOnChanges(): void {
+    if (this.niveau) this.level.set(this.niveau);
     if (!this.catalogue()) this.rf.catalogue().subscribe({ next: c => this.catalogue.set(c) });
     this.rf.get<{ results: { id: number; name: string }[] }>(`/batiments/${this.buildingId}/scenarios/`).subscribe({
       next: r => this.scenarios.set(r.results ?? []),

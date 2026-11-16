@@ -1,6 +1,6 @@
 """Initialisation automatique d'un bâtiment (Lot 9, refonte). Routes nouvelles uniquement.
 
-POST /api/batiments/initialiser/            {address | rnb_id | lat+lon, name?} → crée le bâtiment, lance A1→A6
+POST /api/batiments/initialiser/            {address | rnb_id | lat+lon, name?, portfolio?} → crée le bâtiment, lance A1→A6
 POST /api/batiments/<id>/initialiser/       rejoue la chaîne (n'écrase aucune surcharge)
 """
 
@@ -21,6 +21,7 @@ class InitSerializer(serializers.Serializer):
     lat = serializers.FloatField(min_value=41.0, max_value=51.5, required=False, allow_null=True, default=None)
     lon = serializers.FloatField(min_value=-5.5, max_value=10.0, required=False, allow_null=True, default=None)
     name = serializers.CharField(max_length=140, required=False, allow_blank=True, default='')
+    portfolio = serializers.IntegerField(required=False, allow_null=True, default=None)  # bt-navigation § 2.2
 
     def validate(self, d):
         if not (d['address'].strip() or d['rnb_id'] or (d['lat'] is not None and d['lon'] is not None)):
@@ -49,7 +50,14 @@ class InitNewBuildingView(APIView):
     def post(self, request):
         ser = InitSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        b = create_building(ser.validated_data)
+        portfolio = None
+        pid = ser.validated_data.get('portfolio')
+        if pid is not None:
+            portfolio = access.visible_portfolios(request).filter(pk=pid).first()
+            if portfolio is None or not access.is_portfolio_manager(request, portfolio):
+                return Response({'detail': 'Seul un gestionnaire du parc y crée un bâtiment.'},
+                                status=status.HTTP_403_FORBIDDEN)
+        b = create_building(ser.validated_data, portfolio=portfolio)
         job = launch_init(b, request)
         return Response({'building_id': b.pk, 'job': JobSerializer(job).data}, status=status.HTTP_202_ACCEPTED)
 

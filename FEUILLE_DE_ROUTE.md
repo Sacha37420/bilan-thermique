@@ -572,6 +572,42 @@ annonce la fiche ; navigation sans « Mode simplifié » ; outils liés depuis C
 complète des Lots 23 à 27 rejouée sur banc neuf : 105 contrôles, 0 échec. `migrer_fiches --check` sur la base de service :
 à jouer après déploiement (le seul bâtiment en service a déjà une fiche).
 
+## Lot 28 — Navigation en six onglets   ·   statut : livré
+**Objectif :** une application compréhensible à l'échelle du parc et naturelle pour l'approfondissement
+(demande du propriétaire du 2026-11-16 : « parfaitement inexploitable »). Le menu de 9 entrées et la fiche
+à 13 onglets laissent place à six onglets — **Parc, Bâtiment, Calculs, Paramétrage, IA et imports, Rendu** —
+avec un parc et un bâtiment courants partagés par tous les onglets (`ContexteService`, `?p=&b=`).
+Contrat du chantier : `chantiers/bt-navigation/CONTRAT.md` (lab, non versionné).
+**Tâches :**
+- [x] Contexte global parc/bâtiment, bandeau de contexte, menu à six entrées, anciennes adresses redirigées
+  (`/fiche?onglet=` → onglet correspondant, éditeur de maillage sous `/maillage`)
+- [x] Parc : parcs, bâtiments avec confiance, approfondissement et modèles de calcul utilisés ; ajout de
+  bâtiments dans le parc ; import et partage ; orchestrateur des sources par simulation (réglages de parc)
+- [x] Bâtiment : synthèse, données et provenance, géométrie, physique, météo, environnement, mesures
+- [x] Calculs : catalogue documenté des simulations, simulation par simulation, améliorations et comparaison, historique
+- [x] Paramétrage : valeurs par modèle de calcul (isolants, améliorations, menuiseries, archétypes,
+  ventilation, rendements), surchargées par parc et réellement prises en compte
+- [x] IA et imports : clés, import de fichiers pour le parc, import pour un bâtiment
+- [x] Rendu : rendu de parc paramétrable (carte, chiffres, classement), fiche d'identité imprimable
+- [x] API : `parcs/<id>/reglages/<section>/`, `calculs/moteurs/`, `parcs/<id>/documents/`,
+  `batiments/<id>/identite/`, tableau enrichi, `portfolio` à l'initialisation et dans `BuildingSerializer`
+**Tests à passer avant de clore le lot :**
+- [x] `api/tests/test_navigation.py` : formes, droits, validation, effet de chaque réglage pris en compte
+- [x] Suite backend complète verte ; `ng build` sans erreur
+- [x] Navigateur réel (banc), clair et sombre : les six onglets, contexte conservé d'un onglet à l'autre,
+  anciennes adresses redirigées, aucune erreur console
+**Vérifié le :** 2026-11-16 — backend : **498 tests OK** (28 nouveaux, `api/tests/test_navigation.py` ; base
+jetable, image de l'app). `ng build` (production) OK. Navigateur réel (banc jetable : API réelle, Keycloak simulé,
+réseau interne), clair et sombre : 46 contrôles de navigation — menu à six entrées, parc puis bâtiment conservés
+d'un onglet à l'autre et dans l'URL, chaque sous-vue des onglets Parc (4), Bâtiment (7) et Calculs (4) rendue,
+Paramétrage N0/N1/N2, fiche d'identité avec la mention « ne remplace pas un DPE », `/fiche?onglet=scenarios` →
+Calculs › Améliorations, bâtiments hors parc listés — et 6 contrôles d'écriture (λ des murs enregistré pour le
+parc, BDNB désactivée dans l'orchestrateur et conservée, création d'un parc), aucune erreur console.
+Réglages pris en compte (chacun prouvé par un test) : toute l'orchestration sauf l'environnement « avant N2 »
+(affiché « pas encore pris en compte ») ; tout le paramétrage. Un réglage modifié vaut pour les analyses suivantes
+(chaîne relancée, réponse au questionnaire, nouvelle amélioration), sans rien réécrire de ce qui est déjà posé.
+Corrigés au passage : SystemesComponent (NG0100 sans zone), visionneuse 3D d'un bâtiment sans maillage.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

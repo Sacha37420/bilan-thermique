@@ -1,0 +1,251 @@
+<section class="rf-page">
+  <app-contexte-bar [avecBatiment]="false" />
+
+  <p class="rf-eyebrow">Paramétrage</p>
+  <h1>Valeurs utilisées par les calculs</h1>
+  <p class="rf-sub">
+    Chaque modèle de calcul s’appuie sur des valeurs par défaut : isolants, fenêtres, compositions par
+    époque de construction, ventilation, rendements. Le lab fournit des défauts ; un parc peut retenir
+    ses propres valeurs. Tout reste réversible : une ligne se remet au défaut d’un clic.
+  </p>
+
+  <!-- Choix du modèle -->
+  <div class="rf-tabs" role="tablist" aria-label="Modèle de calcul">
+    @for (m of MODELES; track m.id) {
+      <button type="button" role="tab" [class.active]="modele() === m.id" [attr.aria-selected]="modele() === m.id"
+              (click)="choisirModele(m.id)">{{ m.libelle }} <span class="code">{{ m.id }}</span></button>
+    }
+  </div>
+  <p class="modele-phrase"><strong>{{ modeleInfo().libelle }}.</strong> {{ modeleInfo().phrase }}</p>
+
+  <!-- Bandeau d'état -->
+  @if (sansParc()) {
+    <div class="callout">
+      <strong>Réglages par parc : choisissez un parc.</strong>
+      @if (reglages()) {
+        Les valeurs montrées ci-dessous sont les défauts du lab, en lecture seule.
+      } @else if (!ctx.parcs().length) {
+        Aucun parc n’est encore ouvert : les défauts du lab s’afficheront dès qu’un parc existe.
+        <a class="rf-btn small" routerLink="/parc">Ouvrir ou créer un parc</a>
+      }
+    </div>
+  } @else if (reglages() && !reglages()!.peut_modifier) {
+    <div class="callout">Vous consultez les valeurs du parc « {{ ctx.parc()?.name }} ». Seul un gestionnaire du parc peut les modifier.</div>
+  }
+
+  @if (erreur()) { <p class="rf-error" role="alert">{{ erreur() }}</p> }
+  @if (chargement()) { <p class="rf-hint">Chargement des réglages…</p> }
+
+  @if (reglages(); as r) {
+    <!-- Barre d'actions (gestionnaire) -->
+    @if (modifiable()) {
+      <div class="actions rf-card">
+        <div class="actions-txt">
+          @if (nbSurcharges()) {
+            <strong>{{ nbSurcharges() }}</strong> valeur{{ nbSurcharges() > 1 ? 's' : '' }} propre{{ nbSurcharges() > 1 ? 's' : '' }} au parc
+          } @else { Le parc utilise tous les défauts du lab. }
+          @if (modifie()) { <span class="rf-badge m-infere">modifications non enregistrées</span> }
+          <small>Les nouvelles valeurs s’appliquent aux prochains calculs et relances —
+            <a [routerLink]="['/parc']" [queryParams]="ctx.queryParams({ vue: 'batiments' })">Parc › Relancer</a>.</small>
+        </div>
+        <div class="actions-btn">
+          <button type="button" class="rf-btn" (click)="annuler()" [disabled]="!modifie() || enregistrement()">Annuler</button>
+          <button type="button" class="rf-btn" (click)="toutRemettre()" [disabled]="!nbSurcharges() || enregistrement()">Tout remettre par défaut</button>
+          <button type="button" class="rf-btn primary" (click)="enregistrer()" [disabled]="!modifie() || invalide() || enregistrement()">
+            {{ enregistrement() ? 'Enregistrement…' : 'Enregistrer' }}</button>
+        </div>
+      </div>
+    }
+    @if (info()) { <p class="rf-ok" role="status">{{ info() }}</p> }
+    @if (invalide()) { <p class="rf-error">Une valeur sort de sa plage autorisée : corrigez-la avant d’enregistrer.</p> }
+
+    <!-- Groupes -->
+    @for (g of groupes(); track g.nom) {
+      <section class="rf-card">
+        <h2>{{ g.nom }}</h2>
+        <div class="rf-table-wrap">
+          <table class="rf-table reglages">
+            <thead><tr><th>Valeur</th><th class="num">Défaut du lab</th><th>Valeur du parc</th><th></th></tr></thead>
+            <tbody>
+              @for (e of g.entrees; track e.cle) {
+                <tr [class.modif]="estModifie(e)">
+                  <td>
+                    <span class="lib">{{ e.libelle }}</span>
+                    @if (e.aide) { <span class="aide" tabindex="0" [attr.title]="e.aide" [attr.aria-label]="'Aide : ' + e.aide">?</span> }
+                    @if (!e.applique) { <span class="rf-badge m-infere" title="Montré pour information : le serveur ne l’utilise pas encore">pas encore pris en compte</span> }
+                    @if (estModifie(e)) { <span class="rf-badge m-declare">modifié</span> }
+                  </td>
+                  <td class="num">{{ affiche(e, defaut(e)) }}@if (e.unite && e.type !== 'bool' && e.type !== 'enum') { <span class="u">{{ e.unite }}</span> }</td>
+                  <td class="val">
+                    @if (!modifiable()) {
+                      <span class="ro">{{ affiche(e, valeur(e)) }}@if (e.unite && (e.type === 'number' || e.type === 'int')) { <span class="u">{{ e.unite }}</span> }</span>
+                    } @else {
+                      @switch (e.type) {
+                        @case ('bool') {
+                          <label class="check"><input type="checkbox" [checked]="valeur(e) === true"
+                                 (change)="poser(e, $any($event.target).checked)" [attr.aria-label]="e.libelle" />
+                            {{ valeur(e) ? 'oui' : 'non' }}</label>
+                        }
+                        @case ('enum') {
+                          <select [attr.aria-label]="e.libelle" (change)="poser(e, $any($event.target).value)">
+                            @for (c of choixDe(e); track c[0]) { <option [value]="c[0]" [selected]="valeur(e) === c[0]">{{ c[1] }}</option> }
+                          </select>
+                        }
+                        @case ('list') {
+                          <div class="liste">
+                            @for (c of choixDe(e); track c[0]) {
+                              <label class="check"><input type="checkbox" [checked]="coche(e, c[0])"
+                                     (change)="basculerListe(e, c[0], $any($event.target).checked)" />{{ c[1] }}</label>
+                            }
+                          </div>
+                        }
+                        @case ('text') {
+                          <input type="text" maxlength="150" [value]="valeur(e) ?? ''" [attr.aria-label]="e.libelle"
+                                 (change)="poser(e, $any($event.target).value)" />
+                        }
+                        @default {
+                          <span class="nombre">
+                            <input type="number" [step]="pas(e)" [attr.min]="e.min" [attr.max]="e.max" [value]="valeur(e) ?? ''"
+                                   [class.bad]="horsBornes(e)" [attr.aria-label]="e.libelle" [title]="bornes(e)"
+                                   (change)="saisirNombre(e, $any($event.target).value)" />
+                            @if (e.unite) { <span class="u">{{ e.unite }}</span> }
+                          </span>
+                        }
+                      }
+                    }
+                  </td>
+                  <td class="reset">
+                    @if (modifiable() && estModifie(e)) {
+                      <button type="button" class="rf-btn small" (click)="remettre(e)" [title]="'Remettre au défaut : ' + affiche(e, defaut(e))">↺ Défaut</button>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    }
+
+    <!-- Archétypes par période -->
+    @if (archetypes().length) {
+      <section class="rf-card">
+        <h2>Compositions par époque de construction</h2>
+        <p class="rf-hint">
+          Quand on ne sait rien d’un bâtiment, ses parois reçoivent les valeurs typiques de son époque
+          (archétypes TABULA). U : déperdition à travers 1 m² de paroi pour 1 °C d’écart (W/m²·K) — plus
+          c’est bas, mieux c’est isolé. n50 : renouvellement d’air sous 50 Pa (vol/h) — plus c’est bas,
+          plus le bâtiment est étanche.
+          @if (archNonApplique()) { <span class="rf-badge m-infere">certaines valeurs pas encore prises en compte</span> }
+        </p>
+        <div class="rf-table-wrap">
+          <table class="rf-table archetypes">
+            <thead><tr><th>Époque</th>@for (c of ARCH_COLS; track c.champ) { <th class="num">{{ c.libelle }}</th> }</tr></thead>
+            <tbody>
+              @for (r of archetypes(); track r.slug) {
+                <tr>
+                  <th scope="row">{{ r.periode }}</th>
+                  @for (c of ARCH_COLS; track c.champ) {
+                    @if (r.cells[c.champ]; as e) {
+                      <td class="num" [class.modif]="estModifie(e)">
+                        @if (modifiable()) {
+                          <input type="number" step="any" [attr.min]="e.min" [attr.max]="e.max" [value]="valeur(e) ?? ''"
+                                 [class.bad]="horsBornes(e)" [attr.aria-label]="r.periode + ' — ' + e.libelle"
+                                 [title]="'Défaut : ' + affiche(e, defaut(e)) + ' ' + e.unite + (bornes(e) ? ' (' + bornes(e) + ')' : '')"
+                                 (change)="saisirNombre(e, $any($event.target).value)" />
+                          @if (estModifie(e)) {
+                            <button type="button" class="mini" (click)="remettre(e)" [attr.aria-label]="'Remettre au défaut ' + affiche(e, defaut(e))"
+                                    [title]="'Défaut : ' + affiche(e, defaut(e))">↺</button>
+                          }
+                        } @else {
+                          <span [title]="'Défaut : ' + affiche(e, defaut(e))">{{ affiche(e, valeur(e)) }}</span>
+                        }
+                      </td>
+                    } @else { <td class="num">—</td> }
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <p class="rf-hint legend"><span class="swatch"></span> case modifiée pour ce parc (le défaut s’affiche au survol).</p>
+      </section>
+    }
+  }
+
+  <!-- Détaillé par paroi : bibliothèques -->
+  @if (modele() === 'N2') {
+    <section class="rf-card">
+      <div class="rf-card-head">
+        <h2>Bibliothèque des modèles de paroi</h2>
+        <a class="rf-btn small" routerLink="/parois">Ouvrir l’éditeur des parois</a>
+      </div>
+      <p class="rf-hint">Le calcul détaillé décrit chaque paroi couche par couche. Ces modèles sont communs à tout le lab.</p>
+      @if (paroisErreur()) { <p class="rf-error">{{ paroisErreur() }}</p> }
+      @if (parois(); as ps) {
+        @if (!ps.length) { <p class="rf-hint">Aucun modèle de paroi pour l’instant.</p> }
+        @else {
+          <div class="rf-table-wrap">
+            <table class="rf-table">
+              <thead><tr><th>Modèle</th><th>Nature</th><th class="num">Couches</th><th class="num">Épaisseur</th><th class="num">U indicatif</th></tr></thead>
+              <tbody>
+                @for (p of ps; track p.id) {
+                  <tr>
+                    <td><span class="lib">{{ p.name }}</span>@if (p.description) { <small class="desc">{{ p.description }}</small> }</td>
+                    <td>{{ p.is_glazing ? 'Vitrage' : 'Paroi opaque' }}</td>
+                    <td class="num">{{ p.layers.length }}</td>
+                    <td class="num">{{ epaisseurCm(p) | number: '1.0-1' }} cm</td>
+                    <td class="num">@if (uParoi(p); as u) { {{ u | number: '1.2-2' }} <span class="u">W/m²·K</span> } @else { — }</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      } @else if (!paroisErreur()) { <p class="rf-hint">Chargement…</p> }
+    </section>
+
+    <section class="rf-card">
+      <h2>Catalogue des protections solaires</h2>
+      <p class="rf-hint">Dispositifs que l’on peut poser sur un bâtiment (onglet Bâtiment › Physique) et que le calcul détaillé prend en compte.</p>
+      @if (protectionsErreur()) { <p class="rf-error">{{ protectionsErreur() }}</p> }
+      @if (protections(); as ks) {
+        <ul class="protections">
+          @for (k of ks; track k.kind) { <li><span class="rf-badge m-defaut">{{ FAMILLES[k.family] || k.family }}</span> {{ k.label }}</li> }
+        </ul>
+      } @else if (!protectionsErreur()) { <p class="rf-hint">Chargement…</p> }
+    </section>
+  }
+
+  <!-- Outil expert : profils du calcul 3D -->
+  <details class="rf-card expert">
+    <summary>Profils du calcul 3D (outil expert, en lecture)</summary>
+    <p class="rf-hint">Ces profils servent dans l’outil <a routerLink="/calcul-3d">Calcul 3D</a> ; ils sont communs au lab.</p>
+
+    <h3>Profils d’usage (consignes de chauffage)</h3>
+    <ul class="profils">
+      @for (u of usages; track u.id) { <li><strong>{{ u.label }}</strong> — {{ u.description }}</li> }
+    </ul>
+
+    <h3>Profils de ventilation par époque</h3>
+    <div class="rf-table-wrap">
+      <table class="rf-table">
+        <thead><tr><th>Profil</th><th class="num">Renouvellement</th><th class="num">Récupération</th></tr></thead>
+        <tbody>
+          @for (v of ventilations; track v.id) {
+            <tr>
+              <td><span class="lib">{{ v.label }}</span><small class="desc">{{ v.description }}</small></td>
+              <td class="num">{{ v.tauxRenouvellementVolH | number: '1.1-2' }} <span class="u">vol/h</span></td>
+              <td class="num">{{ v.etaRecup * 100 | number: '1.0-0' }} %</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Occultations mobiles</h3>
+    <ul class="profils">
+      @for (s of ombrages; track s.id) { <li><strong>{{ s.label }}</strong> — {{ s.description }}</li> }
+    </ul>
+  </details>
+</section>

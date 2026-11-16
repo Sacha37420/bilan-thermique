@@ -179,18 +179,83 @@ def process_one(building, owner_sub=''):
     final_status = building.pipeline_status
     # « en cours » jusqu'à la fin des calculs : le tableau ne montre pas un bâtiment fini sans résultat.
     Building.objects.filter(pk=building.pk).update(pipeline_status='en_cours')
+    # Réglages du parc (orchestration) : météo par défaut (A7) et calculs automatiques (A8).
+    a7 = pipeline.apply_default_weather(building, owner_sub)
+    levels = pipeline.auto_levels(building)
     try:
-        for lvl in ('N0', 'N1'):
+        for lvl in levels:
             calc_service.run_level(building, lvl, owner_sub=owner_sub)
         ok = True
         err = None
     except calc_service.CalcError as exc:
         ok, err = False, str(exc)[:300]
     pipe = dict(building.pipeline or {})
-    pipe.setdefault('steps', {})['A8'] = {'ok': ok, **({'error': err} if err else {})}
+    if a7 is not None:
+        pipe.setdefault('steps', {})['A7'] = a7
+    pipe.setdefault('steps', {})['A8'] = {'ok': ok, **({'error': err} if err else {}),
+                                          **({} if levels else {'skipped': True, 'message': pipeline.SKIPPED})}
     building.pipeline = pipe
     building.pipeline_status = final_status if ok else 'incomplet'
     building.save(update_fields=['pipeline', 'pipeline_status'])
+
+
+LEVEL_LABELS = {'N0': 'Mensuel', 'N1': 'Horaire simplifié', 'N2': 'Détaillé par paroi'}
+DEPTH_LABELS = {'automatique': 'Automatique', 'complete': 'Complété', 'documente': 'Documenté', 'mesure': 'Mesuré',
+                'expert': 'Expert'}
+CALAGE_SOURCE = 'calage sur factures'
+
+
+def _plural(n, one, many):
+    return f'{n} {one if n == 1 else many}'
+
+
+def approfondissement(building, eff=None):
+    """Catégorie d'approfondissement de la fiche (D38 : une catégorie, pas un score) — la plus haute
+    atteinte : expert > mesure > documente > complete > automatique."""
+    from .engines import n2_inputs
+    eff = facts.effective(building) if eff is None else eff
+    methods = [f.method for f in eff.values()]
+    n_decl, n_doc, n_mes = methods.count('declare'), methods.count('document'), methods.count('mesure')
+    calage = any((f.source or '').startswith(CALAGE_SOURCE) for f in eff.values())
+    expert = n2_inputs._expert_envelope(building)
+    niveau = ('expert' if expert else 'mesure' if (n_mes or calage) else 'documente' if n_doc
+              else 'complete' if n_decl else 'automatique')
+    parts = []
+    if n_decl:
+        parts.append(_plural(n_decl, 'valeur déclarée', 'valeurs déclarées'))
+    if n_doc:
+        parts.append(_plural(n_doc, 'valeur tirée d’un document', 'valeurs tirées d’un document'))
+    if n_mes:
+        parts.append(_plural(n_mes, 'mesure', 'mesures'))
+    if calage:
+        parts.append('calage sur factures appliqué')
+    if expert:
+        parts.append('enveloppe experte assignée')
+    return {'niveau': niveau, 'libelle': DEPTH_LABELS[niveau],
+            'detail': ', '.join(parts) if parts else 'valeurs automatiques seulement'}
+
+
+def latest_models(building, values=None):
+    """{niveau: (calcul, à_jour)} — dernier calcul terminé de l'état actuel par niveau. « À jour » : même
+    empreinte d'entrées que la fiche actuelle (même logique que l'historique) ; None pour un N2 lancé
+    hors fiche (page Calcul 3D)."""
+    from . import calc_service
+    out = {}
+    for lvl in ('N0', 'N1', 'N2'):
+        run = calc_service.latest(building, lvl)
+        if run is None:
+            continue
+        a_jour = None
+        if calc_service.from_fiche(run):
+            a_jour = run.inputs_hash == calc_service.inputs_hash_for(building, lvl, None, (run.weather or {}).get('hash'),
+                                                                     values)
+        out[lvl] = (run, a_jour)
+    return out
+
+
+def modeles(building, values=None):
+    return [{'niveau': lvl, 'libelle': LEVEL_LABELS[lvl], 'computed_at': run.created_at, 'a_jour': a_jour}
+            for lvl, (run, a_jour) in latest_models(building, values).items()]
 
 
 def latest_n1(building):
@@ -203,7 +268,8 @@ def table(portfolio, buildings):
     for b in buildings:
         run = latest_n1(b)
         ind = run.indicators if run else {}
-        vals = facts.effective_values(b)
+        eff = facts.effective(b)
+        vals = {k: f.value for k, f in eff.items()}
         heat = ind.get('heating_kwh')
         rows.append({
             'id': b.pk, 'name': b.name, 'address': b.address, 'rnb_id': b.rnb_id, 'status': b.pipeline_status,
@@ -219,6 +285,8 @@ def table(portfolio, buildings):
             'level': 'N1' if run else None, 'computed_at': run.created_at if run else None,
             'priority': round(heat * (0.5 + 0.5 * b.confidence), 0) if heat else None,
             'errors': {k: v.get('error') for k, v in ((b.pipeline or {}).get('steps') or {}).items() if not v.get('ok')},
+            'approfondissement': approfondissement(b, eff),
+            'modeles': modeles(b, vals),
         })
     return rows
 

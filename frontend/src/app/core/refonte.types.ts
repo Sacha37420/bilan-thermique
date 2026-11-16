@@ -46,7 +46,18 @@ export interface ParcRow {
   final_kwh_m2: number | null; primary_kwh_m2: number | null; model_label: string | null;
   confidence: number; completeness: number; level: string | null; computed_at: string | null; priority: number | null;
   errors: Record<string, string>;
+  /** Chantier bt-navigation (contrat §2.1) — absents sur une ligne « hors parc ». */
+  approfondissement?: Approfondissement;
+  modeles?: ModeleUtilise[];
 }
+
+export type NiveauApprofondissement = 'automatique' | 'complete' | 'documente' | 'mesure' | 'expert';
+export interface Approfondissement { niveau: NiveauApprofondissement; libelle: string; detail: string; }
+export interface ModeleUtilise { niveau: 'N0' | 'N1' | 'N2'; libelle: string; computed_at: string; a_jour: boolean; }
+export const APPROFONDISSEMENT_LABELS: Record<NiveauApprofondissement, string> = {
+  automatique: 'Automatique (données ouvertes)', complete: 'Complété (valeurs déclarées)',
+  documente: 'Documenté (pièces lues)', mesure: 'Mesuré (relevés, calage)', expert: 'Expert (enveloppe détaillée)',
+};
 
 export const USAGE_LABELS: Record<string, string> = {
   maison: 'Maison', logement_collectif: 'Collectif', bureau: 'Bureaux', enseignement: 'Enseignement',

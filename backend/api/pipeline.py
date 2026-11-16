@@ -288,7 +288,10 @@ def geometry_from_footprints(target, neighbours, height_m):
     }
 
 
-def fetch_footprints(lat, lon, radius_m=60):
+DEFAULT_RADIUS_M = 60
+
+
+def fetch_footprints(lat, lon, radius_m=DEFAULT_RADIUS_M):
     """(polygone visé, voisins, hauteur, source) autour d'un point — BD TOPO, en cache."""
     bbox = geodata.bbox_from_radius(lat, lon, radius_m)
     items = sources.cached('bdtopo', f'{lat:.5f},{lon:.5f},{radius_m}', lambda: geodata.fetch_ign_buildings(bbox))
@@ -332,13 +335,29 @@ def _record_all(building, rows, refresh=False):
             continue  # valeur hors plage dans la source : ignorée (l'archétype reste)
 
 
+SKIPPED = 'Étape désactivée dans les réglages du parc.'
+
+
 def initialize(building, progress=None):
-    """Joue A1 → A6 sur un bâtiment (adresse, rnb_id ou position déjà posés). Rend le compte rendu."""
+    """Joue A1 → A6 sur un bâtiment (adresse, rnb_id ou position déjà posés). Rend le compte rendu.
+
+    Bâtiment de parc : les réglages « orchestration » (BDNB, BD TOPO, rayon des voisins, RNB) et
+    « parametrage » (archétypes, ventilation, rendements) du parc s'appliquent (`api.reglages`) ;
+    une étape désactivée est notée `{'ok': True, 'skipped': True}`. Hors parc : inchangé."""
+    from . import reglages
+    from django.utils import timezone
+
+    orch = reglages.for_building(building, 'orchestration')
+    param = reglages.for_building(building, 'parametrage') or None
+
     def step(name, msg, pct):
         if progress:
             progress(msg, pct)
 
-    report = {'steps': {}, 'sources': [], 'version': 1}
+    report = {'steps': {}, 'sources': [], 'version': 1, 'date': timezone.now().isoformat()}
+
+    def skipped(name):
+        report['steps'][name] = {'ok': True, 'skipped': True, 'message': SKIPPED}
 
     def ok(name, **extra):
         report['steps'][name] = {'ok': True, **extra}
@@ -360,7 +379,7 @@ def initialize(building, progress=None):
             lon, lat = ((sh or {}).get('point') or {}).get('coordinates', [None, None])[:2]
         if lat is None:
             raise sources.SourceError('Ni adresse, ni identifiant RNB, ni position.')
-        if not building.rnb_id:
+        if not building.rnb_id and orch.get('identification.rnb_auto', True):
             r = sources.rnb_closest(lat, lon)
             building.rnb_id = r['rnb_id']
             lat, lon = r['lat'], r['lon']
@@ -374,7 +393,9 @@ def initialize(building, progress=None):
     # A2 — BDNB
     step('A2', 'Fiche BDNB (année, usage, DPE)…', 25)
     bdnb_rows = []
-    if building.rnb_id:
+    if not orch.get('bdnb.actif', True):
+        skipped('A2')
+    elif building.rnb_id:
         try:
             data = sources.bdnb_for_rnb(building.rnb_id)
             bdnb_rows = bdnb_facts(data)
@@ -388,9 +409,11 @@ def initialize(building, progress=None):
     # A3 / A6 — géométrie, mitoyenneté, horizon
     step('A3', 'Géométrie (BD TOPO), mitoyenneté, masques…', 55)
     geo_rows = []
-    if lat is not None:
+    if not orch.get('bdtopo.actif', True):
+        skipped('A3')
+    elif lat is not None:
         try:
-            fp = fetch_footprints(lat, lon)
+            fp = fetch_footprints(lat, lon, orch.get('bdtopo.rayon_voisins_m', DEFAULT_RADIUS_M))
             if fp is None:
                 raise sources.SourceError('Emprise BD TOPO introuvable à cette position.')
             poly, neighbours, h_bdtopo, approx = fp
@@ -425,7 +448,7 @@ def initialize(building, progress=None):
     known = {k: v for k, v, *_ in bdnb_rows + geo_rows}
     year = known.get('identite.annee_construction')
     usage = known.get('identite.usage')
-    defaults, period = archetypes.defaults(year, usage, known.get('mur.materiau'))
+    defaults, period = archetypes.defaults(year, usage, known.get('mur.materiau'), param)
     arch_src = f'archétype {period} · {usage or "usage inconnu"}'
     rows = [(k, v, 'defaut', 0.15, arch_src) for k, v in defaults.items()]
     if not year:
@@ -471,3 +494,32 @@ def initialize(building, progress=None):
     facts.refresh_scores(building)
     step('fin', 'Fiche initiale prête.', 95)
     return report
+
+
+# ── Après la chaîne (A7, A8) : météo par défaut et calculs automatiques ──────
+
+def auto_levels(building):
+    """Niveaux calculés automatiquement après la chaîne : N0 et N1, sauf réglage contraire du parc."""
+    from . import reglages
+    orch = reglages.for_building(building, 'orchestration')
+    return [lvl for lvl, key in (('N0', 'calcul.n0'), ('N1', 'calcul.n1')) if orch.get(key, True)]
+
+
+def apply_default_weather(building, owner_sub=''):
+    """Réglage « meteo.type = reel » du parc : construit l'année réelle (Open-Meteo) et la relie au
+    bâtiment s'il n'a pas déjà un jeu météo choisi. Rend le compte rendu de l'étape A7, ou None si
+    rien n'est à faire (année type par défaut, comme hors parc). Ne lève jamais."""
+    from datetime import date
+    from . import reglages, weather_service
+    orch = reglages.for_building(building, 'orchestration')
+    if orch.get('meteo.type', 'tmy') != 'reel' or building.weather_dataset_id or building.georef_lat is None:
+        return None
+    year = orch.get('meteo.annee') or date.today().year - 1
+    try:
+        ds = weather_service.from_reanalysis(building.georef_lat, building.georef_lon, date(year, 1, 1),
+                                             date(year, 12, 31), owner_sub)
+    except Exception as exc:  # noqa: BLE001 — repli : année type du site
+        return {'ok': False, 'error': net.reason(exc) if not isinstance(exc, weather_service.WeatherError) else str(exc)[:300]}
+    building.weather_dataset = ds
+    building.__class__.objects.filter(pk=building.pk).update(weather_dataset=ds)
+    return {'ok': True, 'dataset_id': ds.pk, 'annee': year}

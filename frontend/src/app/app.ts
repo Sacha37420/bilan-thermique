@@ -3,6 +3,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { KeycloakService } from './core/keycloak.service';
 import { ThemeService } from './core/theme.service';
+import { ContexteService } from './core/contexte.service';
 
 interface NavItem {
   label: string;
@@ -31,19 +32,17 @@ export class AppComponent {
   protected noop = (): void => {};
   protected closeMobileFn = (): void => this.closeMobile();
 
-  // Lot 27 (refonte) : un bâtiment s'étudie dans sa fiche (maillage 3D, environnement, simulation,
-  // calculs) ; les entrées suivantes sont des outils experts.
+  // Six onglets (2026-11-16). Le parc et le bâtiment courants suivent l'utilisateur d'un onglet à
+  // l'autre (ContexteService, ?p=&b=) ; les outils experts sont joignables depuis les onglets.
   readonly navItems: NavItem[] = [
-    { path: '/parc',          label: 'Parcs',            abbr: 'Pc' },
-    { path: '/fiche',         label: 'Fiche bâtiment',   abbr: 'Fi' },
-    { path: '/ia',            label: 'Intelligence artificielle', abbr: 'IA' },
-    { path: '/calcul-1d',     label: 'Calcul 1D (paroi)', abbr: '1D' },
-    { path: '/parois',        label: 'Modèles de paroi', abbr: 'Mp' },
-    { path: '/batiment',      label: 'Importer un maillage', abbr: 'Im' },
-    { path: '/environnement', label: 'Environnement d’un quartier', abbr: 'En' },
-    { path: '/calcul-3d',     label: 'Calcul 3D avancé', abbr: '3D' },
-    { path: '/theorie',       label: 'Théorie',          abbr: 'Th' },
+    { path: '/parc',        label: 'Parc',          abbr: 'Pc' },
+    { path: '/batiment',    label: 'Bâtiment',      abbr: 'Bâ' },
+    { path: '/calculs',     label: 'Calculs',       abbr: 'Ca' },
+    { path: '/parametrage', label: 'Paramétrage',   abbr: 'Pa' },
+    { path: '/ia',          label: 'IA et imports', abbr: 'IA' },
+    { path: '/rendu',       label: 'Rendu',         abbr: 'Re' },
   ];
+  protected ctx = inject(ContexteService);
 
   @ViewChild('closeBtn') private closeBtnRef?: ElementRef<HTMLButtonElement>;
   @ViewChild('burgerBtn') private burgerBtnRef?: ElementRef<HTMLButtonElement>;

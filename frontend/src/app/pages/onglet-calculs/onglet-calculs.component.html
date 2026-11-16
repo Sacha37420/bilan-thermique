@@ -1,0 +1,97 @@
+<div class="rf-page">
+  <p class="rf-eyebrow">Calculs</p>
+  <app-contexte-bar />
+  <h1>Simulations @if (ctx.batiment(); as b) { — {{ b.name || ('Bâtiment ' + b.id) }} }</h1>
+
+  <nav class="rf-tabs" aria-label="Sections des calculs">
+    @for (t of vues; track t.id) {
+      <button type="button" [class.active]="vue() === t.id" [attr.aria-pressed]="vue() === t.id" (click)="setVue(t.id)">{{ t.label }}</button>
+    }
+  </nav>
+
+  @if (vue() === 'catalogue') {
+    <p class="rf-sub">Plusieurs façons de simuler un bâtiment, de la plus rapide à la plus fine. Aucune n'est un diagnostic
+      de performance énergétique (DPE) : ce sont des aides à la décision.</p>
+    @if (moteursServeur() === false) {
+      <p class="rf-hint" role="note">Documentation détaillée des moteurs pas encore disponible sur ce serveur : résumé minimal ci-dessous.</p>
+    }
+    <div class="moteurs">
+      @for (m of moteurs(); track m.id) {
+        <article class="rf-card moteur" [class.expert]="!!m.expert_route" [attr.aria-labelledby]="'mo-' + m.id">
+          <div class="rf-card-head">
+            <h2 [id]="'mo-' + m.id">{{ m.libelle }} <small class="sigle">{{ m.id }}</small></h2>
+            @if (m.expert_route) { <span class="rf-badge">outil expert</span> }
+          </div>
+          <p>{{ m.resume }}</p>
+          <dl class="kv">
+            <dt>Quand l'utiliser</dt><dd>{{ quand[m.id] }}</dd>
+            <dt>Durée</dt><dd>{{ m.duree || '—' }}</dd>
+            <dt>Qui peut lancer</dt><dd>{{ m.qui || '—' }}</dd>
+          </dl>
+          <details>
+            <summary>Documentation</summary>
+            @if (m.methode) { <h3>Méthode</h3><p>{{ m.methode }}</p> }
+            @if (m.hypotheses.length) { <h3>Hypothèses</h3><ul>@for (x of m.hypotheses; track $index) { <li>{{ x }}</li> }</ul> }
+            @if (m.entrees.length) { <h3>Ce qu'il utilise</h3><ul>@for (x of m.entrees; track $index) { <li>{{ x }}</li> }</ul> }
+            @if (m.sorties.length) { <h3>Ce qu'il donne</h3><ul>@for (x of m.sorties; track $index) { <li>{{ x }}</li> }</ul> }
+            @if (m.limites.length) { <h3>Limites</h3><ul>@for (x of m.limites; track $index) { <li>{{ x }}</li> }</ul> }
+            @if (m.version) { <p class="rf-hint">Version : {{ m.version }}</p> }
+          </details>
+          <div class="rf-row actions">
+            @if (m.id === '1D') {
+              <a class="rf-btn" routerLink="/theorie">Théorie</a>
+              <a class="rf-btn primary" routerLink="/calcul-1d">Ouvrir l'outil paroi</a>
+            } @else if (m.id === '3D') {
+              <a class="rf-btn primary" routerLink="/calcul-3d" [queryParams]="ctx.queryParams()">Ouvrir le calcul 3D avancé</a>
+            } @else {
+              <button type="button" class="rf-btn primary" (click)="choisir(m.id)">Choisir</button>
+            }
+          </div>
+        </article>
+      }
+    </div>
+  } @else if (ctx.batimentId() === null) {
+    <section class="rf-card">
+      <h2>Choisissez un bâtiment</h2>
+      <p class="rf-hint">Les simulations, les améliorations et l'historique portent sur un bâtiment : choisissez-le dans le
+        bandeau ci-dessus. En attendant, <button type="button" class="linkbtn" (click)="setVue('catalogue')">découvrez les simulations possibles</button>.</p>
+    </section>
+  } @else {
+    @let bid = ctx.batimentId()!;
+    @switch (vue()) {
+      @case ('simulation') {
+        <div class="sel" role="radiogroup" aria-label="Simulation">
+          @for (n of niveaux; track n) {
+            <button type="button" role="radio" class="rf-btn" [class.primary]="type() === n" [attr.aria-checked]="type() === n"
+                    (click)="choisir(n)" [title]="moteur(n)?.resume ?? ''">{{ nom(n) }}</button>
+          }
+        </div>
+        @if (niveau(); as n) {
+          <p class="rf-hint">{{ moteur(n)?.resume }} {{ quand[n] }}
+            <button type="button" class="linkbtn" (click)="setVue('catalogue')">Documentation</button></p>
+          <app-simulation [buildingId]="bid" [niveau]="n" [refresh]="version()" (launched)="onLance($event)" />
+          <app-resultat-carte [buildingId]="bid" [niveau]="n" [refresh]="version()" />
+          <p class="rf-hint">
+            <a routerLink="/calculs" [queryParams]="ctx.queryParams({ vue: 'historique', calcul: dernierCalcul() ?? undefined })">
+              Voir le détail complet (entrées, bilan, séries horaires) dans l'historique</a>
+            · <a routerLink="/calculs" [queryParams]="ctx.queryParams({ vue: 'ameliorations' })">Comparer avec une amélioration</a>
+          </p>
+        } @else {
+          <section class="rf-card">
+            <h2>{{ nom(type()) }}</h2>
+            <p>{{ moteur(type())?.resume }} {{ quand[type()] }}</p>
+            <p class="rf-hint">Outil expert, hors du parcours habituel :</p>
+            @if (type() === '1D') { <a class="rf-btn primary" routerLink="/calcul-1d">Ouvrir l'outil paroi</a> <a class="rf-btn" routerLink="/theorie">Théorie</a> }
+            @else { <a class="rf-btn primary" routerLink="/calcul-3d" [queryParams]="ctx.queryParams()">Ouvrir le calcul 3D avancé</a> }
+          </section>
+        }
+      }
+      @case ('ameliorations') {
+        <app-scenarios [buildingId]="bid" />
+      }
+      @case ('historique') {
+        <app-calculs [buildingId]="bid" [refresh]="version()" [openId]="calculOuvert()" />
+      }
+    }
+  }
+</div>
