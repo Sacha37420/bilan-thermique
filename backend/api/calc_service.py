@@ -16,7 +16,7 @@ from .engines import n0, n1, n2_inputs
 from .fingerprint import stable_hash
 from .models import CalcRun, Job
 
-ENGINE_VERSION = {'N0': 'n0-5', 'N1': 'n1-5', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16) ; -3 : horizon par profil (Lot 30) ; -4 : sol simulé (Lot 32) ; -5 : protections v2, améliorations I2, DH RE2020 (lot 36)
+ENGINE_VERSION = {'N0': 'n0-5', 'N1': 'n1-6', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16) ; -3 : horizon par profil (Lot 30) ; -4 : sol simulé (Lot 32) ; -5 : protections v2, améliorations I2, DH RE2020 (lot 36) ; N1 -6 : by-pass d'été de la double flux (lot 40)
 
 
 class CalcError(ValueError):
@@ -79,6 +79,7 @@ def _params_from(building, scenario, vals, geom):
     p = engine_inputs.from_fiche(vals, geom)
     shading_service.apply(p, building, scenario)
     surcharges.apply_to_params(p, surcharges.of(scenario), vals, geom, building.georef_north_offset_deg or 0.0)
+    p.window_opening = surcharges.window_opening(building)        # lot 40, I9 : réglage du parc (tous les états)
     return p
 
 
@@ -114,7 +115,10 @@ def inputs_hash_for(building, level, scenario, weather_hash, values=None):
     from .engines import surcharges
     return stable_hash(level, ENGINE_VERSION[level], stable_hash(sorted(vals.items())), weather_hash,
                        shading_service.signature(building, scenario), geometry_service.effective_summary(building, scenario),
-                       surcharges.of(scenario), *([extra] if extra else []))
+                       surcharges.of(scenario), *([extra] if extra else []),
+                       # Lot 40 (I9) : ouverture des fenêtres — seulement si activée (empreinte par défaut inchangée).
+                       *([['ouverture', surcharges.window_opening(building)]]
+                         if level != 'N0' and surcharges.window_opening(building) else []))
 
 
 def from_fiche(run):
@@ -154,7 +158,10 @@ def params_snapshot(p):
             'u_murs_effectifs': {o: round(p.u_wall_eff(o), 3) for o in p.walls},
             'toiture_vegetalisee': p.green_roof, 'murs_vegetalises': p.green_walls,
             'arbres_plantes': len(p.trees or []),
-            'surventilation_nocturne': {'vol_h': p.night_vent, 'seuil_c': p.night_vent_threshold} if p.night_vent else None}
+            'surventilation_nocturne': {'vol_h': p.night_vent, 'seuil_c': p.night_vent_threshold} if p.night_vent else None,
+            'ouverture_fenetres': p.window_opening,
+            'double_flux': ({'debit_recupere_vol_h': p.n_recup, 'rendement': p.eta_recup,
+                             'hypothese': engine_inputs.HYPOTHESE_BYPASS} if p.n_recup * p.eta_recup > 0 else None)}
 
 
 def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub='', force=False, job=None,
@@ -376,8 +383,12 @@ def run_n2(run, progress_cb=None):
     months = eng_shading.month_of(hidx)
     noct = built.get('nocturne')
     night = eng_surcharges.night_static_mask(hidx, [p['t_ext'] for p in weather], noct['seuil_c']) if noct else None
+    ouv = built.get('ouverture')
+    ouv_ok = eng_surcharges.opening_allowed(hidx, built['residential'], ouv['occupation']) if ouv else None
     for i, p in enumerate(w):
         p['mois'] = int(months[i])
+        if ouv_ok is not None and not ouv_ok[i]:
+            p['ouverture_ok'] = False
         if night is not None and night[i]:
             p['nocturne'] = True
     run.inputs = {**(run.inputs or {}), 'sol': ground_desc}
@@ -414,6 +425,9 @@ def run_n2(run, progress_cb=None):
         payload['baies_facteurs'] = facteurs
     if noct:
         payload['nocturne'] = {'debit_m3h': noct['debit_m3h']}
+    if ouv:
+        payload['ouverture'] = {'g_w_k': round(0.34 * ouv['vol_h'] * built['a_floor'] * engine_inputs.CEILING_H, 3),
+                                'seuil_c': ouv['seuil_c'], 'ecart_c': ouv['ecart_c']}
 
     def cb(done, total):
         say(base + (15 + int(done * 84 / total)) * span // 100, f'Résolution heure par heure… {done}/{total}')
@@ -428,6 +442,7 @@ def run_n2(run, progress_cb=None):
     if months[-1] != len(heat):
         months.append(len(heat))
     keep = ('hours', 'heating_kwh', 'cooling_kwh', 't_air_mean', 'balance', 'flux_positive_kwh', 'flux_negative_kwh',
+            'bypass_double_flux_h', 'ouverture_fenetres_h',
             'protrusions')
     out = {k: res[k] for k in keep if k in res}
     pr = res.get('protrusions') or {}

@@ -37,6 +37,7 @@ import scipy.sparse.linalg as spla
 
 from . import solver as wall_solver
 from . import shadow
+from .engines.inputs import BYPASS_T_EXT_MIN_C
 from .engines.surcharges import NIGHT_INDOOR_TRIGGER_C, NIGHT_MARGIN_C
 from .engines.vegetation import ALPHA_FOLIAGE, delta_over_delta_gamma
 
@@ -685,6 +686,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
       protections appliquées par triangle de baie, heure par heure : facteurs sur le direct et sur le diffus, et
       résistance ajoutée côté extérieur (ΔR des fermetures au prorata de la position, h = 1/(1/h_e + ΔR)) ;
       `engines.n2_inputs.mobile_factors` les construit avec les mêmes fonctions que N0/N1 ;
+    - `payload['bypass']` (facultatif, lot 40) : {'g_recup_w_k', 'seuil_c'} — double flux : le débit donné est celui
+      échangeur by-passé ; g_recup est retiré de g_vent aux heures où l'échangeur est actif, c.-à-d. sauf si l'air
+      extérieur, au-dessus de 12 °C, est plus frais que l'air intérieur de l'heure précédente et que celui-ci dépasse seuil_c
+      (`engines.inputs.recovery_active`, EN 16798-5-1 § 6.4) ;
+    - `payload['ouverture']` (facultatif, lot 40, I9) : {'g_w_k', 'seuil_c', 'ecart_c'} — ouverture des fenêtres :
+      g ajouté quand l'air intérieur de l'heure précédente dépasse seuil_c et l'extérieur de ecart_c, aux heures dont
+      le point météo ne porte pas `ouverture_ok: false` ; l'échangeur double flux est alors by-passé ;
     - `payload['nocturne']` (facultatif) : {'debit_m3h'} — débit ajouté aux heures dont le point météo porte
       `nocturne: true` (nuit d'été sous le seuil), si l'air intérieur de l'heure précédente dépasse 24 °C et l'extérieur
       de 1 °C (`engines.surcharges`) ; modes 'free'/'thermostat' ;
@@ -862,6 +870,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     evapo = [float(tri.get('evapo') or 0.0) for tri in triangles]
     evapo = evapo if any(evapo) else None
     g_night = 0.34 * float((payload.get('nocturne') or {}).get('debit_m3h') or 0.0)
+    g_recup = float((payload.get('bypass') or {}).get('g_recup_w_k') or 0.0)
+    bypass_seuil = float((payload.get('bypass') or {}).get('seuil_c') or 0.0)
+    hours_recup = 0
+    ouv = payload.get('ouverture') or {}
+    g_open = float(ouv.get('g_w_k') or 0.0)
+    open_seuil, open_ecart = float(ouv.get('seuil_c') or 0.0), float(ouv.get('ecart_c') or 0.0)
+    hours_open = 0
 
     systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max)
     K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(
@@ -1038,6 +1053,17 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         if g_night and point.get('nocturne') and mode in ('free', 'thermostat') and \
                 t_air_series[-1] > point['t_ext'] + NIGHT_MARGIN_C and t_air_series[-1] > NIGHT_INDOOR_TRIGGER_C:
             g_vent = g_vent + g_night
+        # Lot 40 (I9) : ouverture des fenêtres (réglage du parc) — débit ajouté, échangeur by-passé baies ouvertes.
+        opened = bool(g_open and mode in ('free', 'thermostat') and point.get('ouverture_ok', True) and
+                      t_air_series[-1] > open_seuil and t_air_series[-1] > point['t_ext'] + open_ecart)
+        if opened:
+            g_vent = g_vent + g_open
+            hours_open += 1
+        # Lot 40 : double flux — récupération retirée du débit quand l'échangeur est actif (by-pass d'été sinon).
+        if g_recup and mode in ('free', 'thermostat') and not opened and not (
+                BYPASS_T_EXT_MIN_C <= point['t_ext'] < t_air_series[-1] and t_air_series[-1] > bypass_seuil):
+            g_vent = g_vent - g_recup
+            hours_recup += 1
         r_key = tuple(round(float(g['r_add'][hour_idx]), 2) for g in baies)
         key = (g_vent, h_e, volet_closed, r_key)
         bundle = bundles.get(key)
@@ -1229,6 +1255,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     }
     return {
         'hours': len(weather),
+        'bypass_double_flux_h': (len(weather) - hours_recup) if g_recup else None,
+        'ouverture_fenetres_h': hours_open if g_open else None,
         'par_triangle': par_triangle,
         'protrusions': protrusion_report,
         'balance': balance,

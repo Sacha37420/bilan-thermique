@@ -58,6 +58,10 @@ def vivants(owner_sub):
 
 
 def creer(owner_sub, doc, spec, cible, fmt, modele=None, sous_titre=''):
+    # Lot 40 (parcours réel) : le document porte des dates (calcul d'un potentiel, I5) — json.dumps seul échouait, et
+    # l'export restait « en file d'attente » à jamais. Sérialisé AVANT toute écriture en base, avec l'encodeur de Django.
+    from django.core.serializers.json import DjangoJSONEncoder
+    payload = json.dumps({'doc': doc, 'sous_titre': sous_titre}, cls=DjangoJSONEncoder)
     now = timezone.now()
     job = Job.objects.create(kind='rendu_export', status=Job.PENDING, owner_sub=owner_sub,
                              params={'format': fmt}, message=MESSAGES['en_attente'])
@@ -66,7 +70,7 @@ def creer(owner_sub, doc, spec, cible, fmt, modele=None, sous_titre=''):
                                    expire_le=now + DUREE)
     d = _dir(e.pk)
     d.mkdir(parents=True, exist_ok=True)
-    (d / 'document.json').write_text(json.dumps({'doc': doc, 'sous_titre': sous_titre}), encoding='utf-8')
+    (d / 'document.json').write_text(payload, encoding='utf-8')
     return e
 
 

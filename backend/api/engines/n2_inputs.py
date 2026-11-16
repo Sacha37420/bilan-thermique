@@ -36,10 +36,10 @@ import numpy as np
 import shapely.geometry
 import shapely.ops
 
-from .inputs import CEILING_H, GROUND_T_DEFAULT, ORIENTATIONS, RESIDENTIAL, _v, effective_ventilation, u_from_layers
+from .inputs import HYPOTHESE_BYPASS, CEILING_H, GROUND_T_DEFAULT, ORIENTATIONS, RESIDENTIAL, _v, effective_ventilation, u_from_layers
 
-ENGINE_VERSION = 'n2-4'   # -2 : réflexion du sol relevée (albédo de l'environnement relié) ; -3 : sol simulé (Lot 32) ; -4 : protections v2, améliorations, sorties par triangle (lot 36)
-FICHE_ENGINES = ('n2-1', 'n2-2', 'n2-3', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
+ENGINE_VERSION = 'n2-5'   # -2 : réflexion du sol relevée (albédo de l'environnement relié) ; -3 : sol simulé (Lot 32) ; -4 : protections v2, améliorations, sorties par triangle (lot 36)
+FICHE_ENGINES = ('n2-1', 'n2-2', 'n2-3', 'n2-4', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
 H_I, H_E, R_GROUND = 7.7, 25.0, 0.5
 DX_MAX = 0.05
 FRAME_FRACTION = 0.2          # part de cadre d'une baie : même valeur que N1 (frame_factor 0,8)
@@ -387,7 +387,11 @@ def payload_from_fiche(values, a_floor):
     t_heat = float(_v(values, 'usage.consigne_chauffage_c', 19.0))
     t_cool = values.get('usage.consigne_froid_c')
     gains_w = float(_v(values, 'usage.apports_w_m2', 4.0)) * a_floor
-    debit = effective_ventilation(values) * vol
+    # Lot 40 : double flux — le débit du N2 est celui « échangeur by-passé » ; la récupération est retirée heure par
+    # heure par le solveur quand l'échangeur est actif (`payload['bypass']`, `inputs.recovery_active`).
+    from .inputs import BYPASS_MARGIN_C, recovery_split
+    n_rec, eta = recovery_split(values)
+    debit = (effective_ventilation(values) + n_rec * eta) * vol
     payload = {
         'dx_max': DX_MAX, 'h_e': H_E, 'h_e_dynamic': False, 't_init': t_heat, 'shadow_mode': 'precomputed',
         't_ground': GROUND_T_DEFAULT, 'r_ground': R_GROUND, 'heure_debut': 0,
@@ -395,6 +399,8 @@ def payload_from_fiche(values, a_floor):
                      't_min': t_heat, 't_max': float(t_cool) if t_cool is not None else T_MAX_FREE,
                      'debit_vent_m3h': round(debit, 2), 'eta_recup_vent': 0.0, 'apports_internes_w': round(gains_w, 1)},
     }
+    if n_rec * eta > 0:
+        payload['bypass'] = {'g_recup_w_k': round(0.34 * n_rec * eta * vol, 3), 'seuil_c': t_heat + BYPASS_MARGIN_C}
     residential = _v(values, 'identite.usage', 'autre') in RESIDENTIAL
     if not residential:
         # Mêmes horaires que N1 (engines.n1.schedules) : occupé 8 h–19 h du lundi au vendredi.
@@ -523,6 +529,7 @@ def build(building, scenario=None, values=None):
         nocturne = {'debit_m3h': round(float(vals['ventilation.nocturne_vol_h']) * a_floor * CEILING_H, 1),
                     'seuil_c': float(_v(vals, 'ventilation.nocturne_seuil_c', 22.0))}
     albedo = vals.get('abords.albedo')
+    ouverture = surcharges.window_opening(building)            # lot 40, I9 : réglage du parc (tous les états)
     snapshot = {
         'engine': ENGINE_VERSION, 'mode': mode, 'surface_m2': a_floor, 'volume_m3': round(a_floor * CEILING_H, 1),
         'geometry': geom, 'parois': described, 'obstacles': env_source,
@@ -533,6 +540,8 @@ def build(building, scenario=None, values=None):
                         'par_triangle': [d['id'] for d in per_triangle],
                         'triangles_de_baie': {o: len(v) for o, v in groups.items()}},
         'surventilation_nocturne': nocturne,
+        'ouverture_fenetres': ouverture,
+        'double_flux': ({**payload['bypass'], 'hypothese': HYPOTHESE_BYPASS} if payload.get('bypass') else None),
         'albedo_abords': float(albedo) if albedo is not None else None,
         'arbres_plantes': len(s.get('arbres') or []),
         'ameliorations': surcharges.describe(building, scenario, 'N2', mode),
@@ -541,7 +550,7 @@ def build(building, scenario=None, values=None):
     return {'envelope': envelope, 'layers': layers, 'frames': frames, 'payload': payload,
             'environment': env, 'residential': residential, 'a_floor': a_floor, 'values': vals,
             'snapshot': snapshot, 'ground_params': ground_params, 'devices_par_triangle': per_triangle,
-            'window_groups': groups, 'nocturne': nocturne, 'albedo_abords': float(albedo) if albedo is not None else None,
+            'window_groups': groups, 'nocturne': nocturne, 'ouverture': ouverture, 'albedo_abords': float(albedo) if albedo is not None else None,
             'arbres': s.get('arbres') or [], 'g_window': float(_v(vals, 'baies.g', 0.6)), 'north': north}
 
 

@@ -36,7 +36,13 @@
         <li><a href="#sec-batiment"><span class="n">12</span> Du modèle 1D au bâtiment complet</a></li>
         <li><a href="#sec-extensions"><span class="n">13</span> Extensions possibles</a></li>
         <li><a href="#sec-reduits"><span class="n">13b</span> Moteurs réduits N0 / N1</a></li>
-        <li><a href="#sec-notations"><span class="n">14</span> Table des notations</a></li>
+        <li><a href="#sec-geometrie"><span class="n">14</span> Géométrie relevée et masques</a></li>
+        <li><a href="#sec-sol"><span class="n">15</span> Sol simulé et plancher bas</a></li>
+        <li><a href="#sec-protections"><span class="n">16</span> Protections solaires</a></li>
+        <li><a href="#sec-ameliorations"><span class="n">17</span> Végétalisation, albédos, ventilation d'été</a></li>
+        <li><a href="#sec-confort"><span class="n">18</span> Confort d'été (DH RE2020)</a></li>
+        <li><a href="#sec-application"><span class="n">19</span> Améliorations par niveau</a></li>
+        <li><a href="#sec-notations"><span class="n">20</span> Table des notations</a></li>
       </ol>
     </nav>
 
@@ -59,7 +65,13 @@
             <li><a href="#sec-batiment"><span class="n">12</span> Du modèle 1D au bâtiment complet</a></li>
             <li><a href="#sec-extensions"><span class="n">13</span> Extensions possibles</a></li>
             <li><a href="#sec-reduits"><span class="n">13b</span> Moteurs réduits N0 / N1</a></li>
-            <li><a href="#sec-notations"><span class="n">14</span> Table des notations</a></li>
+            <li><a href="#sec-geometrie"><span class="n">14</span> Géométrie relevée et masques</a></li>
+            <li><a href="#sec-sol"><span class="n">15</span> Sol simulé et plancher bas</a></li>
+            <li><a href="#sec-protections"><span class="n">16</span> Protections solaires</a></li>
+            <li><a href="#sec-ameliorations"><span class="n">17</span> Végétalisation, albédos, ventilation d'été</a></li>
+            <li><a href="#sec-confort"><span class="n">18</span> Confort d'été (DH RE2020)</a></li>
+            <li><a href="#sec-application"><span class="n">19</span> Améliorations par niveau</a></li>
+            <li><a href="#sec-notations"><span class="n">20</span> Table des notations</a></li>
           </ol>
         </nav>
       </details>
@@ -116,7 +128,7 @@
           <ul>
             <li><strong>Ponts thermiques, effets 2D/3D</strong> — hors de portée d'un modèle 1D par nature.</li>
             <li><strong>Multi-zone</strong> — un seul nœud d'air pour tout le bâtiment : ni pièce plus froide qu'une autre, ni stratification, ni paroi de refend.</li>
-            <li><strong>Parois mitoyennes</strong> — un triangle est soit face à l'air extérieur, soit au contact du sol. Le mur partagé avec un bâtiment voisin chauffé déperd donc comme une façade extérieure : les besoins d'une maison de ville ou d'un appartement sont <strong>surestimés</strong>, d'autant plus que la part mitoyenne est grande. Contournement possible sans changer le modèle : affecter à ces triangles une paroi très isolante.</li>
+            <li><strong>Parois mitoyennes</strong> — le mur partagé avec un voisin chauffé est rendu <strong>adiabatique</strong> (aucun échange) dans les calculs lancés depuis la fiche, N0, N1 comme N2 : c'est une approximation (le voisin n'est pas toujours chauffé). Dans l'outil Calcul 3D, un triangle n'est adiabatique que si on l'a assigné comme tel ; sinon il déperd comme une façade extérieure et les besoins sont <strong>surestimés</strong>.</li>
             <li><strong>Humidité</strong> — aucune chaleur latente (ni ventilation, ni occupants), pas de condensation, pas de transfert de vapeur dans les parois.</li>
             <li><strong>Inertie intérieure sans résistance</strong> — <span class="sym">C_air,int</span> représente air, mobilier, cloisons et planchers intermédiaires, mais est branchée <em>directement</em> sur le nœud d'air : cette masse réagit instantanément, alors qu'une inertie réelle est séparée de l'air par <span class="sym">1/hᵢ</span> puis diffuse lentement. L'amortissement rapide est surestimé, le déphasage sous-estimé.</li>
           </ul>
@@ -130,15 +142,15 @@
             <li><strong>Diffus isotrope</strong> — ni renforcement circumsolaire, ni bande d'horizon (modèles de Hay/Perez) : 5 à 15 % d'écart usuel sur une façade verticale.</li>
             <li><strong>Obstacles parfaitement noirs</strong> — un bâtiment voisin retire sa part de ciel sans rien réémettre ni réfléchir. Les apports diffus sont donc <strong>sous-estimés en milieu dense</strong>. Seul le <em>sol</em> réfléchit : son albédo est relevé sur l'orthophoto IGN (environnement généré depuis le LiDAR), éclairé uniformément par l'éclairement global horizontal — ses ombres portées sont ignorées.</li>
             <li><strong>Ombrage précalculé discrétisé à 15°</strong> en azimut et en élévation : un obstacle fin fait basculer une heure entière de « ombré » à « ensoleillé », et tout soleil sous 7,5° d'élévation est évalué à 0°, donc presque toujours bloqué. Le mode « temps réel » relance un vrai lancer de rayons à l'angle exact de chaque heure — à utiliser dès que l'ombrage est déterminant.</li>
-            <li><strong>Sol : source à température constante</strong> — <span class="sym">t_ground</span> ne varie pas dans l'année et la terre n'a aucune inertie. Sa résistance <span class="sym">r_ground</span> est un paramètre saisi, pas un calcul de géométrie (ISO 13370).</li>
-            <li><strong>Végétation à transmittance constante</strong> — un arbre à feuilles caduques est modélisé en feuilles toute l'année, ce qui <strong>surestime l'ombrage hivernal</strong>. Sa hauteur et son houppier sont relevés par le LiDAR HD ; sa transparence aussi, mais un relevé fait feuilles tombées ne renseigne que l'hiver — c'est alors une valeur « en feuilles » par défaut qui s'applique.</li>
-            <li><strong>Environnement figé à la date du relevé LiDAR</strong> — un bâtiment construit ou démoli depuis n'y est pas (ou y reste) tant qu'on ne le retire ou ne le remplace pas à la main. Hors couverture LiDAR, le repli BD TOPO / OpenStreetMap revient aux toits plats et aux hauteurs forfaitaires.</li>
+            <li><strong>Sol</strong> — depuis la fiche (N0, N1, N2), la température vue par le plancher vient d'un <strong>sol simulé en 1D</strong> d'après la météo, couplé selon le type de plancher (section 15) ; mais un seul sol par défaut (pas de nature de sol par site), sans soleil, neige ni évaporation en surface. Dans l'outil Calcul 3D, le sol reste une source à température <span class="sym">t_ground</span> constante, sans inertie, à travers une résistance <span class="sym">r_ground</span> saisie.</li>
+            <li><strong>Végétation relevée à transmittance constante</strong> — un arbre de l'environnement relevé est modélisé en feuilles toute l'année, ce qui <strong>surestime l'ombrage hivernal</strong>. Sa hauteur et son houppier sont relevés par le LiDAR HD ; sa transparence aussi, mais un relevé fait feuilles tombées ne renseigne que l'hiver — c'est alors une valeur « en feuilles » par défaut qui s'applique. Les arbres <em>plantés</em> par une amélioration et les protections végétales (arbre caduc, pergola) ont, eux, une transmission d'été et d'hiver (section 17).</li>
+            <li><strong>Environnement figé à la date du relevé</strong> — un bâtiment construit ou démoli depuis n'y est pas (ou y reste) tant qu'on ne le retire ou ne le remplace pas à la main. Sans nuage LiDAR, le relevé passe par un modèle numérique de surface (MNS LiDAR HD raster, puis MNS Correl), moins précis (section 14) ; le repli BD TOPO / OpenStreetMap, avec ses toits plats et ses hauteurs forfaitaires, n'est plus que le dernier recours.</li>
           </ul>
 
           <p class="callout-heading">3. Extensions identifiées — chiffrables, pas encore faites</p>
           <ul>
             <li><strong>Infrarouge vers la voûte céleste</strong>, <strong>réflexion par les façades voisines</strong>, <strong>réflexions multiples entre couches vitrées</strong> — voir section 13, qui indique où chacune s'insérerait.</li>
-            <li><strong>Saisonnalité de la végétation</strong> — les transmittances « sans feuilles » sont déjà tabulées, il manque la bascule.</li>
+            <li><strong>Saisonnalité de la végétation relevée</strong> — faite pour les arbres plantés et les protections végétales ; il manque la bascule pour les arbres de l'environnement relevé.</li>
           </ul>
 
           <p class="callout-heading">Et ce que les résultats ne sont pas</p>
@@ -864,12 +876,12 @@
               <tr>
                 <td><strong>Contact au sol</strong></td>
                 <td>Le nœud extérieur échange avec <span class="sym">t_ground</span> à travers <span class="sym">1/r_ground</span> — ni film convectif, ni vent</td>
-                <td>Sol à température constante et sans inertie ; <span class="sym">r_ground</span> saisi, pas dérivé de la géométrie</td>
+                <td>Depuis la fiche : <span class="sym">t_ground</span> porté par chaque heure, sorti du sol simulé (section 15), couches du plancher au U propre. Outil Calcul 3D : sol à température constante, <span class="sym">r_ground</span> saisi</td>
               </tr>
               <tr>
                 <td><strong>Occultations mobiles</strong><br />volets, stores</td>
                 <td>Résistance ajoutée en série avec <span class="sym">hₑ</span>, et réduction de <span class="sym">E_dir</span>/<span class="sym">E_dif</span></td>
-                <td>Toujours entièrement ouvert ou fermé ; un seul planning pour tous les dispositifs</td>
+                <td>Depuis la fiche : chaque protection a son pilotage, position partielle au prorata, facteurs par triangle de baie (section 16). Outil Calcul 3D : entièrement ouvert ou fermé, un seul planning pour tous les dispositifs</td>
               </tr>
               <tr>
                 <td><strong><span class="sym">hₑ</span> dynamique</strong> (vent)</td>
@@ -889,12 +901,27 @@
               <tr>
                 <td><strong>Végétation</strong></td>
                 <td>Occulteur qui <em>atténue</em> : la fraction transmise multiplie <span class="sym">E_dir</span> et le poids de chaque direction du ciel</td>
-                <td>Transmittance constante dans l'année ; hauteur et bas du houppier relevés ; couronne approchée par un prisme</td>
+                <td>Végétation relevée : transmittance constante dans l'année, hauteur et bas du houppier relevés, couronne approchée par un prisme. Arbres plantés (amélioration) : houppier cylindrique, grille d'ombrage d'été et d'hiver</td>
               </tr>
               <tr>
                 <td><strong>Relief du terrain</strong></td>
                 <td>Maillage d'obstacles supplémentaire, traité exactement comme un bâtiment</td>
                 <td>Occultation seulement — n'apporte <strong>pas</strong> la réflexion solaire du sol ; percé sous l'emprise du bâtiment étudié ; relief au-delà du rayon généré ignoré</td>
+              </tr>
+              <tr>
+                <td><strong>Protubérances</strong></td>
+                <td>Triangle hors volume : ses deux faces échangent avec l'air extérieur ; retiré du couplage au nœud d'air, du flux d'enveloppe et de la température radiante</td>
+                <td>Détecté par lancer de rayons vers l'intérieur (section 14) ; la face arrière d'une ailette n'est pas ensoleillée</td>
+              </tr>
+              <tr>
+                <td><strong>Évapotranspiration</strong><br />toiture, murs végétalisés</td>
+                <td>Puits de chaleur retiré de la source du nœud 0 du triangle</td>
+                <td>Priestley-Taylor, eau disponible supposée (section 17)</td>
+              </tr>
+              <tr>
+                <td><strong>Ventilation d'été</strong><br />surventilation, by-pass, ouverture</td>
+                <td>Conductance <span class="sym">g_vent</span> modifiée heure par heure selon l'air intérieur de l'heure précédente</td>
+                <td>Règles et seuils écrits comme hypothèses (section 17) ; ouverture des fenêtres seulement si le parc l'active</td>
               </tr>
               <tr>
                 <td><strong>Chauffage / climatisation</strong></td>
@@ -919,7 +946,7 @@
             <li><strong>Albédo du sol</strong> — <em>fait</em> (Lot AI) : troisième composante de <span class="sym">E_glo</span>, <span class="sym">ρ_vu · (1 − cos β)/2 · E_gh</span>, où <span class="sym">ρ_vu</span> est l'albédo moyen du sol réellement vu par la paroi (lancer de rayons vers le bas, voisins masquants), relevé sur l'orthophoto IGN. Absent pour un environnement sans albédo relevé (import, générations antérieures).</li>
             <li><strong>Réflexions multiples entre couches vitrées</strong> — pour un vitrage multiple, la méthode couche-par-couche en section 05 ignore les réflexions internes répétées entre lames ; un traitement type ISO 15099 les prendrait en compte au prix d'un système optique résolu à part, dont la sortie reste la même grandeur <span class="sym">E_abs,j</span> par couche.</li>
             <li><strong>Ponts thermiques (2D/3D)</strong> — hors de portée d'un modèle 1D par nature ; nécessiterait un maillage surfacique ou volumique.</li>
-            <li><strong>Saisonnalité de la végétation</strong> — les transmittances « feuilles absentes » sont déjà tabulées par type ; il manque la bascule en fonction de la date, qui suppose de faire entrer une notion de calendrier là où le solveur ne connaît aujourd'hui que des heures.</li>
+            <li><strong>Saisonnalité de la végétation relevée</strong> — <em>faite</em> pour les arbres plantés par une amélioration (seconde grille d'ombrage hors saison de feuilles, le mois venant du point météo) ; reste à l'étendre aux arbres de l'environnement relevé.</li>
             <li><strong>Couplage multizone</strong> — la sommation des contributions <span class="sym">hᵢ·(Tₙ − T_air,int)</span> de toutes les parois sur une même ligne du système est <em>déjà faite</em> par le solveur bâtiment (section 12). Ce qui reste une limite, c'est le <strong>mono-zone</strong> : un unique nœud d'air pour tout le bâtiment, donc ni pièce plus froide qu'une autre, ni stratification, ni paroi de refend. Multiplier les nœuds d'air supposerait de découper le bâtiment en zones et d'introduire un type de paroi qui n'existe pas ici — un refend, sans face extérieure.</li>
           </ul>
         </div>
@@ -947,9 +974,11 @@
               <span class="sym">η = (1 − γᵃ)/(1 − γᵃ⁺¹)</span>, <span class="sym">a = 1 + τ/15</span>.</li>
           </ul>
           <p>
-            Mêmes hypothèses que N2 pour rester comparables : ciel isotrope, albédo du sol 0,20 par défaut, pas
-            d'échange infrarouge avec le ciel, plancher couplé à une température de sol constante, pas de ponts
-            thermiques. Les masques lointains sont un horizon par façade tiré des bâtiments voisins (BD TOPO).
+            Mêmes hypothèses que N2 pour rester comparables : ciel isotrope, albédo du sol 0,20 par défaut (ou celui
+            des abords), pas d'échange infrarouge avec le ciel, plancher couplé au sol simulé en 1D (section 15), pas de
+            ponts thermiques. Les masques lointains sont un <strong>profil d'horizon par façade</strong>, mesuré depuis
+            des points de la façade sur l'environnement relevé (LiDAR HD ou MNS) ou, à défaut, sur les voisins de la
+            chaîne (section 14).
             Les murs mitoyens sont adiabatiques. Propriété connue du 5R1C : <span class="sym">H_tr,is</span> compte une
             seconde fois une résistance superficielle déjà présente dans les U, ce qui abaisse un peu les pertes.
           </p>
@@ -959,16 +988,12 @@
             solaires sont importants. N1 est donc l'estimation du parc ; N0 un contrôle de cohérence.
           </p>
           <p>
-            <strong>Protections solaires.</strong> En N0/N1, une casquette ou des joues réduisent le direct reçu
-            par les baies de la fraction ombrée exacte d'une baie rectangulaire : sous un débord de profondeur
-            <span class="sym">D</span> placé à <span class="sym">e</span> au-dessus d'une baie de hauteur
-            <span class="sym">H</span>, la hauteur ombrée vaut <span class="sym">D·tan α_p − e</span>, avec l'angle
-            de profil <span class="sym">tan α_p = tan h / cos(γ_s − γ_f)</span> ; entre deux joues de profondeur
-            <span class="sym">P</span>, la largeur ombrée vaut <span class="sym">P·|tan(γ_s − γ_f)|</span>. Le diffus
-            est réduit de la part de ciel masquée. Une protection mobile fermée (planning, ou automatique au-delà
-            d'un éclairement sur la façade) ne laisse passer que sa transmission <span class="sym">F_s</span>. En N2,
-            les mêmes protections fixes peuvent être ajoutées comme obstacles au lancer de rayons : sur une
-            casquette sud, les deux méthodes donnent une fraction ensoleillée à 0,07 près, et une réduction des
+            <strong>Protections solaires.</strong> En N0/N1, débords (inclinés, débords latéraux par côté), joues
+            (hauteur, côté) et lames réduisent le direct et le diffus reçus par les baies d'après l'angle de profil, et
+            une fermeture mobile fermée ne laisse passer que ses transmissions tout en ajoutant sa résistance
+            <span class="sym">ΔR</span> au vitrage — formules en section 16. En N2, débords et joues sont des obstacles
+            du lancer de rayons, les autres protections des facteurs par triangle de baie. Mesure du Lot 14 (casquette
+            sud, avant le catalogue v2) : fraction ensoleillée à 0,07 près entre les deux méthodes, réduction des
             degrés-heures au-dessus de 26 °C de 70 % (N1) et 88 % (N2).
           </p>
           <p>
@@ -980,8 +1005,8 @@
             résultat reste une aide à la décision, comparée à l'étiquette affichée — pas un DPE.
           </p>
           <p>
-            <strong>Confort d'été.</strong> Les heures d'inconfort (au-delà de 26 et 28 °C) se comptent sur la
-            température <em>opérative</em> : en N1, <span class="sym">θ_op = 0,3·θ_air + 0,7·θ_s</span> (nœud de surface
+            <strong>Confort d'été.</strong> Les degrés-heures RE2020 (section 18) et les heures au-delà de 26 et
+            28 °C se comptent sur la température <em>opérative</em> : en N1, <span class="sym">θ_op = 0,3·θ_air + 0,7·θ_s</span> (nœud de surface
             du 5R1C) ; en N2, <span class="sym">θ_op = (θ_air + θ_rm)/2</span>, la température radiante moyenne
             <span class="sym">θ_rm</span> étant la moyenne des faces intérieures pondérée par leur aire (sans facteurs de
             forme). Le N2 reste mono-zone : le multizone n'est pas un objectif de cette refonte.
@@ -989,8 +1014,368 @@
         </div>
       </section>
 
+      <section class="chapter" id="sec-geometrie">
+        <p class="chapter-eyebrow">14 — Géométrie relevée et masques</p>
+        <h2>Ce que le LiDAR, les MNS et les façades apportent aux moteurs</h2>
+        <div class="prose">
+          <p>
+            <strong>Géométrie croisée BD TOPO × LiDAR HD.</strong> La BD TOPO seule se trompe souvent de plusieurs mètres
+            sur la hauteur (10 m pour 14,8 m mesurés à l'égout sur l'hôtel de ville de Tours). Quand un environnement
+            relevé est relié au bâtiment, l'emprise est recalée sur le nuage de points, la hauteur à l'égout est la
+            médiane pondérée du haut des murs, le faîtage et la toiture (terrasse, deux ou quatre pans, pente) sont
+            mesurés ; voisins et arbres relevés remplacent ceux de la BD TOPO. Ces valeurs entrent dans la fiche comme
+            des inférences « LiDAR HD × BD TOPO » : une correction de l'utilisateur prime.
+          </p>
+          <p>
+            <strong>Sans nuage LiDAR : un modèle numérique de surface (MNS).</strong> Le relevé passe d'abord par le
+            MNS LiDAR HD raster (50 cm) et son MNT, sinon par le MNS Correl (photogrammétrie, couverture nationale) et
+            le RGE ALTI. Le sursol (MNS − MNT) est classé <em>sans</em> la BD TOPO : bâti, arbre (NDVI de l'orthophoto
+            infrarouge, à défaut rugosité locale) ou sol, puis traité par la même chaîne que le nuage (recalage, toits,
+            arbres, terrain). La BD TOPO / OpenStreetMap ne sert plus qu'en dernier recours ; un toit non vu laisse la
+            note « hauteur de la BD TOPO gardée — à vérifier ».
+          </p>
+          <p>
+            <strong>Horizon par profil d'azimut (N0, N1).</strong> Pour chaque orientation, des points sont placés sur
+            les murs exposés (tous les 3 m, 8 au plus, 0,3 m devant le mur, à 1/6, 1/2 et 5/6 de la hauteur à
+            l'égout). Depuis chacun, par tranche de 10° d'azimut devant le mur (±85° autour de la normale), on retient
+            l'angle du plus haut obstacle traversé, à 80 m au plus ; le bâtiment lui-même en est un (aile d'un bâtiment
+            en L), un mitoyen n'en est pas un. Le direct d'une façade est multiplié par la part de ses points pour
+            lesquels le soleil, à son azimut, passe au-dessus du profil : une façade à moitié à l'ombre reçoit la moitié
+            du direct. Le diffus du ciel n'est pas réduit. En N2, ce rôle est tenu par le lancer de rayons sur
+            l'environnement (section 12).
+          </p>
+          <p>
+            <strong>Protubérances (N2, Calcul 3D).</strong> Un mur qui dépasse du bâtiment a ses deux faces dehors. Un
+            rayon est lancé de chaque triangle vers l'intérieur : le triangle est « hors volume » s'il ressort sans rien
+            rencontrer, s'il rencontre à moins de 80 cm une face opposée (deux faces d'une même plaque), ou si la
+            première face touchée est abordée par l'extérieur. Il reste alors une <em class="term">ailette</em> —
+            conduction, inertie, soleil et ombre portée — dont les deux faces échangent avec l'air extérieur : ni
+            couplage au nœud d'air, ni flux d'enveloppe, ni température radiante. Au-delà de 50 % de l'enveloppe
+            reclassée, le maillage est jugé hors convention et rien n'est reclassé (avertissement).
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-sol">
+        <p class="chapter-eyebrow">15 — Sol simulé et plancher bas</p>
+        <h2>Une colonne de sol 1D, couplée au plancher selon son type</h2>
+        <div class="prose">
+          <p>
+            Le sol n'est plus une source à température constante : c'est une colonne 1D de 15 m (40 mailles, de 2,5 cm
+            en surface à environ 1,2 m au fond), résolue en conduction transitoire implicite au pas horaire sur la météo
+            du calcul, avec le même schéma que la paroi des sections 07 à 09. La série est rejouée trois fois pour la
+            mise en régime.
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym accent">ρc · ∂T/∂t = ∂/∂z (λ · ∂T/∂z)</span><span class="op">— sol limoneux humide : λ = 1,5 W·m⁻¹·K⁻¹, ρc = 2,0 MJ·m⁻³·K⁻¹</span></div>
+          <div class="eq"><span class="sym">φ_surface = 15 · (T_ext − T_sol,0)</span><span class="op">— surface couplée à l'air (convection et rayonnement linéarisé) ; fond à flux nul</span></div>
+          <div class="eq-caption">profondeur d'amortissement de l'onde annuelle ≈ 2,7 m ; ni soleil, ni neige, ni évaporation en surface (hypothèse usuelle de Kusuda)</div>
+        </div>
+        <div class="prose">
+          <p>Le plancher bas voit, heure par heure, une température qui dépend de <span class="sym">plancher.type</span> :</p>
+          <ul>
+            <li><strong>terre-plein</strong> — le sol à la profondeur <span class="sym">z = B′/2</span>, bornée à 0,5–6 m,
+              avec <span class="sym">B′ = A / (½ P_exposé)</span> (dimension caractéristique de l'EN ISO 13370) : sous un
+              grand plancher, le sol utile est plus profond et plus stable ;</li>
+            <li><strong>vide sanitaire ventilé</strong> — un nœud d'air entre le plancher, le sol à 30 cm et l'air
+              extérieur (vide de 60 cm ventilé à 2 vol/h), d'inertie 6 h ;</li>
+            <li><strong>sous-sol non chauffé</strong> — un nœud couplé au plancher, aux murs enterrés, au radier, aux
+              murs hors sol et à l'air extérieur par sa ventilation (0,5 vol/h), d'inertie 48 h ; profondeur
+              <span class="sym">sous_sol.profondeur_m</span>, 2,5 m par défaut ;</li>
+            <li><strong>local chauffé dessous</strong> — aucun échange.</li>
+          </ul>
+          <p>
+            <strong>Ce que veut dire <span class="sym">plancher.u</span>.</strong> La fiche garde le
+            <em>U équivalent vers l'extérieur</em>, celui du « U final » du DPE (3CL). Pour un vide sanitaire ou un
+            sous-sol, le moteur en déduit le U propre du plancher <span class="sym">U_f</span> vers le local tampon, de
+            sorte qu'en moyenne annuelle le modèle redonne <span class="sym">U_e</span> sans compter deux fois le local
+            tampon :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym accent">1/U_e = 1/U_f + A/ΣH</span><span class="op">— ΣH : conductances du local tampon vers le sol et l'extérieur (EN ISO 13370)</span></div>
+          <div class="eq-caption">U incompatible (aucun U_f fini ne le redonne) : U_f plafonné à 5 W·m⁻²·K⁻¹, avec une note dans les entrées du calcul</div>
+        </div>
+        <div class="prose">
+          <p>
+            N0 et N1 lisent cette température (série horaire, par jeu de paramètres pour la fourchette du N1) ; le N2
+            la porte sur chaque heure de la météo et construit les couches du plancher au U propre. L'intérieur des
+            nœuds tampons est pris à la consigne de chauffage (couplage non itéré, écart de second ordre).
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-protections">
+        <p class="chapter-eyebrow">16 — Protections solaires</p>
+        <h2>Débords, joues, lames et fermetures : la géométrie derrière chaque paramètre</h2>
+        <div class="prose">
+          <p>
+            Le catalogue des protections (version 2) compte seize modèles en quatre familles — fixes (casquette,
+            balcon, débord de toiture, joues, loggia, brise-soleil à lames fixes), mobiles (volet roulant, volet
+            battant, persienne, stores extérieur et intérieur, brise-soleil orientable), vitrages (film, vitrage de
+            contrôle solaire) et végétal (arbre caduc, pergola). Chaque paramètre est borné et dit à quels niveaux il
+            joue. Les effets sont calculés heure par heure pour les baies d'une orientation.
+          </p>
+          <p>
+            <strong>Débord</strong> (casquette, balcon, débord de toiture, plafond de loggia) de profondeur
+            <span class="sym">D</span> (projection horizontale), sous-face à <span class="sym">e</span> au-dessus de la
+            baie, incliné de <span class="sym">β</span> (bord extérieur plus bas si β &gt; 0), débordant latéralement de
+            <span class="sym">e_g</span> et <span class="sym">e_d</span>. Même géométrie que l'annexe F de
+            l'EN ISO 52016-1 : avec <span class="sym">γ</span> l'écart d'azimut entre soleil et façade et
+            <span class="sym">φ</span> l'angle de profil, un point de la baie situé à <span class="sym">x</span> sous son
+            haut est à l'ombre si le rayon solaire coupe le débord, puis si le décalage latéral le laisse sous lui :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">tan φ = tan h_s / cos γ</span><span class="op">— angle de profil</span></div>
+          <div class="eq"><span class="sym accent">d* = (x + e) / (tan φ + tan β) ≤ D</span><span class="op">et</span><span class="sym">d* · tan γ</span><span class="op">dans le débord latéral du côté du soleil</span></div>
+          <div class="eq-caption">fraction ensoleillée intégrée sur 16 points de hauteur ; la bande de mur autour du débord est ombrée aussi</div>
+        </div>
+        <div class="prose">
+          <p>
+            <strong>Joues</strong> de profondeur <span class="sym">F</span> et de hauteur <span class="sym">H_j</span>
+            depuis l'appui, d'un côté ou des deux : un point à <span class="sym">z</span> de l'appui et
+            <span class="sym">u</span> de la joue est à l'ombre si <span class="sym">u ≤ F·|tan γ|</span> et si le rayon
+            passe sous le haut de la joue (<span class="sym">z + u·tan φ/|tan γ| ≤ H_j</span>). La loggia combine débord
+            et joues (hypothèse d'indépendance). Le diffus est réduit de la part de ciel masquée vue du milieu de la
+            baie.
+          </p>
+          <p>
+            <strong>Lames</strong> (brise-soleil orientable, brise-soleil fixe) : modèle géométrique des stores
+            vénitiens de l'ISO 15099 § 7, réflexions entre lames négligées (majorant de la protection pour des lames
+            claires). Lames de largeur <span class="sym">L</span>, d'entraxe <span class="sym">s</span>, d'épaisseur
+            <span class="sym">t</span>, inclinées de <span class="sym">ψ</span> :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym accent">f = 1 − (L·|sin(φ+ψ)| + t·|cos(φ+ψ)|) / (s·cos φ)</span><span class="op">— part du direct qui passe entre les lames, bornée à [0, 1]</span></div>
+          <div class="eq"><span class="sym">f_dif = ½ ∫ f(φ) cos φ dφ</span><span class="op">sur φ ∈ [−90°, 90°] — ciel et sol isotropes</span></div>
+          <div class="eq"><span class="sym">ψ_suivi = arcsin(s·cos φ / L) − φ</span><span class="op">— inclinaison minimale qui coupe le direct (lames suivant le soleil)</span></div>
+          <div class="eq-caption">la part arrêtée par une lame la traverse à sa transmission τ_l (lame perforée ou toile)</div>
+        </div>
+        <div class="prose">
+          <p>
+            <strong>Fermetures mobiles</strong> : position de 0 (ouverte) à 1 (fermée), pilotée en fixe, par planning
+            (heures, mois) ou automatiquement (éclairement de la façade au-delà d'un seuil et air extérieur au-dessus
+            d'une température), et fermée la nuit si on le demande. Fermée, elle laisse passer ses transmissions du
+            direct et du diffus, et ajoute au vitrage sa résistance <span class="sym">ΔR</span> au prorata de sa
+            position — de 0,08 m²·K/W (store très perméable) à 0,25 (volet roulant peu perméable), EN ISO 10077-1
+            annexe G. <strong>Vitrage</strong> de contrôle ou film : facteur g ramené à la valeur donnée.
+            <strong>Végétal</strong> : transmission du direct différente en saison de feuilles et hors saison.
+          </p>
+          <p>
+            <strong>Par niveau.</strong> N0 et N1 appliquent ces facteurs aux apports des baies (et à la bande de mur
+            ombrée), heure par heure, sommés par mois en N0. En N2, débords et joues sont construits en obstacles
+            géométriques réels quel que soit leur mode ; fermetures, lames, vitrages et végétal deviennent des facteurs
+            par triangle de baie, et la résistance <span class="sym">ΔR</span> s'ajoute en série avec
+            <span class="sym">hₑ</span> côté extérieur, heure par heure selon la position. Les lames ne sont pas
+            maillées.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-ameliorations">
+        <p class="chapter-eyebrow">17 — Végétalisation, albédos et ventilation d'été</p>
+        <h2>Les leviers d'amélioration qui ne sont pas des U</h2>
+        <div class="prose">
+          <p>
+            <strong>Toiture et murs végétalisés.</strong> Trois effets, chacun avec son hypothèse écrite dans les
+            entrées du calcul. Isolation d'appoint, au prorata de la part végétalisée (surfaces en parallèle) : substrat
+            d'épaisseur <span class="sym">e</span> à λ = 0,40 W·m⁻¹·K⁻¹ en toiture, lame d'air derrière le feuillage
+            (R = 0,09 m²·K/W, EN ISO 6946) en façade. Absorptance du feuillage 0,75. Et un
+            <em class="term">puits d'évapotranspiration</em> à la face extérieure, de Priestley et Taylor :
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym">U′ = part / (1/U + R_ajoutée) + (1 − part) · U</span></div>
+          <div class="eq"><span class="sym accent">LE = α_PT · Δ/(Δ+γ) · (R_n − G) · β · f_c</span><span class="op">— α_PT = 1,26 ; γ = 0,0665 kPa/K ; Δ : pente de la pression de vapeur saturante (FAO-56)</span></div>
+          <div class="eq"><span class="sym">G = 0,1·R_n ; f_c = 1 − exp(−0,5·LAI) ; β = 0,5</span><span class="op">— R_n pris égal au solaire absorbé par le feuillage ; β : eau disponible d'une toiture extensive non arrosée (hypothèse)</span></div>
+          <div class="eq-caption">ordre de grandeur : 600 W/m² absorbés à 25 °C, LAI 3 → LE ≈ 200 W/m², soit 1,5 à 2,5 mm/j l'été (mesures sur toitures extensives : 1 à 4 mm/j)</div>
+        </div>
+        <div class="prose">
+          <p>
+            N0 n'applique que le U et l'absorptance ; N1 et N2 ajoutent le puits en surface. La masse du substrat est
+            extérieure à l'isolant : sans effet en N0/N1, couche de substrat dans la paroi en N2.
+          </p>
+          <p>
+            <strong>Arbres plantés.</strong> Houppier cylindrique entre le haut du tronc et le sommet, translucide :
+            transmission du direct en saison de feuilles (0,2 par défaut) et hors saison (0,7 pour un caduc). En N0/N1,
+            le direct de chaque façade est multiplié, heure par heure, par la transmission moyenne vue des points de la
+            façade (ceux du profil d'horizon) ; en N2, les houppiers sont des obstacles translucides de l'environnement,
+            avec une grille d'ombrage d'été et une d'hiver. Le diffus n'est pas réduit. Les arbres <em>relevés</em> par
+            le LiDAR gardent, eux, une transmission constante dans l'année.
+          </p>
+          <p>
+            <strong>Albédos et absorptances.</strong> L'albédo des abords (<span class="sym">abords.albedo</span>, 0,20
+            par défaut) règle la part réfléchie par le sol, <span class="sym">ρ · E_gh · (1 − cos β)/2</span> : un
+            albédo fort renvoie plus de soleil vers les façades (gain d'hiver, surchauffe possible derrière les
+            vitrages). En N2, il remplace la grille relevée sur l'orthophoto. L'absorptance de la toiture
+            (<span class="sym">toiture.absorptance</span>) est distincte de celle des murs : une toiture claire ne rend
+            plus les murs clairs.
+          </p>
+          <p>
+            <strong>Rafraîchissement de l'air — une hypothèse.</strong> La température extérieure vue par le bâtiment
+            (air, ventilation, sol) est abaissée d'une valeur saisie aux mois et heures donnés (juin à août, 12 h–18 h
+            par défaut). Ce n'est pas un calcul : la valeur et son texte sont recopiés tels quels dans les entrées figées
+            et dans tout rendu qui l'utilise.
+          </p>
+          <p>
+            <strong>Surventilation nocturne (N1, N2).</strong> Débit ajouté de 22 h à 7 h, de mai à septembre, quand
+            l'air extérieur est sous le seuil (<span class="sym">ventilation.nocturne_seuil_c</span>), que l'air intérieur
+            de l'heure précédente dépasse 24 °C (il y a de la chaleur à évacuer — sans cette condition, une nuit fraîche
+            de mai refroidirait un logement chauffé) et qu'il est plus chaud que dehors d'au moins 1 °C.
+          </p>
+          <p>
+            <strong>By-pass d'été de la double flux (N1, N2).</strong> L'échangeur est coupé (rendement 0) quand l'air
+            extérieur, au-dessus de 12 °C, est plus frais que l'air intérieur et que celui-ci dépasse la consigne de
+            chauffage de 2 °C ; il est actif sinon (chauffage, mi-saison froide, air extérieur plus chaud que dedans).
+            Principe : EN 16798-5-1 § 6.4, NF EN 13141-7 ; les seuils sont des réglages usuels des caissons choisis par
+            l'app, à confirmer.
+          </p>
+          <p>
+            <strong>Ouverture des fenêtres en été (N1, N2) — réglage du parc, désactivé par défaut.</strong> Activée,
+            elle ajoute un renouvellement d'air (3 vol/h par défaut) quand l'air intérieur de l'heure précédente dépasse
+            un seuil (25 °C) et que l'extérieur est plus frais d'au moins 1 °C, aux heures d'occupation pour le
+            tertiaire ; l'échangeur double flux est by-passé baies ouvertes. Elle vaut pour tous les états (réel et
+            améliorations), est écrite comme hypothèse et entre dans l'empreinte des calculs. Le N0 (mensuel) ne
+            représente ni la surventilation, ni le by-pass, ni l'ouverture.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-confort">
+        <p class="chapter-eyebrow">18 — Confort d'été</p>
+        <h2>Degrés-heures d'inconfort à la RE2020</h2>
+        <div class="prose">
+          <p>
+            L'indicateur principal de confort d'été suit la méthode de la RE2020 (Th-BCE 2020) : la somme, sur les heures
+            comptées de l'année, du dépassement de la température opérative au-dessus d'une température de confort
+            <em class="term">adaptative</em>, bornée entre 26 et 28 °C.
+          </p>
+        </div>
+        <div class="eq-panel">
+          <div class="eq"><span class="sym accent">DH = Σ max(0, T_op − T_conf)</span><span class="op">en °C·h</span></div>
+          <div class="eq"><span class="sym">T_conf = min(28, max(26, 0,33·θ_rm + 21,8))</span><span class="op">— le jour : limite haute de la catégorie II du confort adaptatif (EN 16798-1:2019)</span></div>
+          <div class="eq"><span class="sym">T_conf = 26 °C</span><span class="op">— la nuit (22 h–7 h) dans les logements</span></div>
+          <div class="eq"><span class="sym">θ_rm,j = 0,2·θ_e,j−1 + 0,8·θ_rm,j−1</span><span class="op">— moyenne glissante de la température extérieure (EN 16798-1, éq. B.1), amorcée sur la première semaine</span></div>
+          <div class="eq-caption">heures comptées : toutes pour un logement ; 8 h–19 h du lundi au vendredi pour les autres usages (même convention que N1)</div>
+        </div>
+        <div class="prose">
+          <p>
+            Le calcul rend aussi les heures d'inconfort (<span class="sym">T_op &gt; T_conf</span>), le DH « base 26 °C »
+            de l'app sur toutes les heures, et les séries mensuelles. La température opérative est celle de chaque
+            moteur (section 13 bis). Le N0, mensuel, ne rend aucun indicateur de confort. C'est la méthode de la RE2020,
+            pas une attestation réglementaire.
+          </p>
+        </div>
+      </section>
+
+      <section class="chapter" id="sec-application">
+        <p class="chapter-eyebrow">19 — Application des améliorations par niveau</p>
+        <h2>Comment chaque famille d'actions entre dans N0, N1 et N2</h2>
+        <div class="prose">
+          <p>
+            Une amélioration ne modifie que des faits de la fiche, des surcharges (arbres, verdure, rafraîchissement de
+            l'air) et des protections ; elle n'écrit jamais l'enveloppe ni l'environnement. Le tableau reprend le
+            catalogue des actions (onglet Paramétrage, et Calculs › Améliorations) ; chaque calcul décrit dans ses
+            entrées figées ce qu'il a réellement appliqué. Avec une enveloppe experte (assignée à la main), les actions
+            d'enveloppe ne sont pas appliquées en N2, et le calcul le dit.
+          </p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Famille — actions</th><th>N0 (mensuel)</th><th>N1 (horaire)</th><th>N2 (par triangle)</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Isolation</strong> — ITE, ITI, plancher bas, double et triple vitrage</td>
+                <td>U des parois modifié dans le bilan mensuel</td>
+                <td>U des parois modifié dans la simulation horaire</td>
+                <td>Couches dimensionnées sur le nouveau U (fiche)</td>
+              </tr>
+              <tr>
+                <td><strong>Ventilation</strong> — VMC hygroréglable, double flux, étanchéité</td>
+                <td>Renouvellement d'air effectif modifié</td>
+                <td>Idem, heure par heure (by-pass d'été en double flux)</td>
+                <td>Débit du nœud d'air modifié (by-pass d'été en double flux)</td>
+              </tr>
+              <tr>
+                <td><strong>Ventilation</strong> — surventilation nocturne</td>
+                <td>Non appliquée : le bilan mensuel ne distingue pas la nuit</td>
+                <td>Débit ajouté la nuit quand l'air extérieur est sous le seuil</td>
+                <td>Idem, planning horaire</td>
+              </tr>
+              <tr>
+                <td><strong>Protections solaires</strong> — store sud, casquette sud, protection mobile ou fixe, film ou vitrage de contrôle</td>
+                <td>Facteurs d'ombrage du catalogue sur les baies visées</td>
+                <td>Facteurs d'ombrage et pilotage heure par heure</td>
+                <td>Géométrie pour les fixes, profils par triangle pour les mobiles, g pour le vitrage</td>
+              </tr>
+              <tr>
+                <td><strong>Végétalisation</strong> — arbres plantés</td>
+                <td>Profil d'horizon des façades avec la transmission saisonnière du feuillage</td>
+                <td>Idem</td>
+                <td>Obstacles translucides ajoutés à l'environnement</td>
+              </tr>
+              <tr>
+                <td><strong>Végétalisation</strong> — abords végétalisés</td>
+                <td>Albédo du sol modifié</td>
+                <td>Albédo du sol modifié</td>
+                <td>Grille d'albédo du sol remplacée</td>
+              </tr>
+              <tr>
+                <td><strong>Végétalisation</strong> — toiture et murs végétalisés</td>
+                <td>U et absorptance modifiés</td>
+                <td>U et absorptance modifiés, évapotranspiration en surface</td>
+                <td>Couches et puits de chaleur en surface (évapotranspiration)</td>
+              </tr>
+              <tr>
+                <td><strong>Végétalisation</strong> — rafraîchissement de l'air (hypothèse)</td>
+                <td>Température extérieure corrigée, présentée comme hypothèse</td>
+                <td>Température extérieure corrigée aux heures visées, hypothèse</td>
+                <td>Idem</td>
+              </tr>
+              <tr>
+                <td><strong>Toiture et albédos</strong> — isolation des combles</td>
+                <td>U de la toiture modifié</td>
+                <td>U de la toiture modifié</td>
+                <td>Couches dimensionnées sur le nouveau U (fiche)</td>
+              </tr>
+              <tr>
+                <td><strong>Toiture et albédos</strong> — toiture claire, murs clairs</td>
+                <td>Absorptances de la toiture et des murs séparées</td>
+                <td>Idem</td>
+                <td>Absorptance des couches extérieures modifiée</td>
+              </tr>
+              <tr>
+                <td><strong>Toiture et albédos</strong> — abords clairs</td>
+                <td>Albédo du sol modifié</td>
+                <td>Albédo du sol modifié</td>
+                <td>Grille d'albédo du sol remplacée</td>
+              </tr>
+              <tr>
+                <td><strong>Chauffage et systèmes</strong> — pompe à chaleur</td>
+                <td colspan="3">Rendement de génération modifié : agit sur les consommations, après le besoin (identique aux trois niveaux)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="prose">
+          <p>
+            Un <strong>bouquet</strong> applique toutes ses actions dont les conditions bloquantes sont remplies (une
+            action « une parmi » retient la première applicable) ; une condition non bloquante non remplie laisse l'action
+            appliquée avec un avertissement, et une donnée qui manque pour juger une condition la laisse appliquée
+            « à vérifier ». Le résultat est un
+            <strong>potentiel</strong> : calculé en N1 pour un bâtiment ou tout un parc, en N2 à la demande pour un
+            bâtiment.
+          </p>
+        </div>
+      </section>
+
       <section class="chapter" id="sec-notations">
-        <p class="chapter-eyebrow">14 — Table des notations</p>
+        <p class="chapter-eyebrow">20 — Table des notations</p>
         <h2>Récapitulatif des symboles</h2>
         <div class="table-wrap">
           <table>

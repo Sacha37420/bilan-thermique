@@ -223,8 +223,12 @@ export class ParcPotentielsComponent {
   readonly bouquets = computed(() => (this.donnees()?.bouquets ?? []).map(b => ({ cle: String(b.id), nom: b.nom })));
   readonly series = computed(() => [{ cle: 'reel', nom: 'Réel' }, ...this.bouquets()]);
   readonly cles = computed(() => {
-    const brutes = Object.keys(this.donnees()?.agregats?.['reel'] ?? {});
-    const ordre = new Map(this.canon().map((c, i) => [c.cle, i]));
+    // Lot 40 : seulement les indicateurs du catalogue (I3) — les clés techniques (p10/p90 en kWh, « hours ») et l'ancien
+    // alias du DH 26 °C n'ont rien à faire dans la liste.
+    const canon = this.canon();
+    let brutes = Object.keys(this.donnees()?.agregats?.['reel'] ?? {}).filter(k => k !== 'degree_hours_over_26');
+    if (canon.length) brutes = brutes.filter(k => canon.some(c => c.cle === k));
+    const ordre = new Map(canon.map((c, i) => [c.cle, i]));
     return brutes.sort((a, b) => (ordre.get(a) ?? 1e6) - (ordre.get(b) ?? 1e6) || a.localeCompare(b));
   });
   readonly canonCourant = computed(() => this.canon().find(c => c.cle === this.indicateur()) ?? null);

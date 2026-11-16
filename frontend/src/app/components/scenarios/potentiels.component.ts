@@ -57,6 +57,12 @@ export class PotentielsComponent implements OnChanges {
   private recu(r: PotentielsBatiment): void {
     this.data.set(r);
     this.arreter();
+    // Lot 40 (parcours réel) : rien n'était coché au départ — le bouton restait grisé sans qu'on comprenne pourquoi.
+    // Par défaut, les bouquets dont le potentiel N1 n'est pas à jour, dans la limite d'un calcul.
+    if (!this.coches().length) {
+      const ids = [...new Set(r.bouquets.filter(b => b.niveau === 'N1' && !b.a_jour).map(b => b.bouquet.id))];
+      this.coches.set(ids.slice(0, MAX_N1));
+    }
     if (r.bouquets.some(b => b.statut === 'en_attente' || b.statut === 'en_cours')) {
       this.minuteur = setTimeout(() => this.charger(), 5000);
     }

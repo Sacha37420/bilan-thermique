@@ -769,52 +769,161 @@ annonçait un repli BD TOPO direct hors LiDAR.
 - [x] Suite backend complète verte ; `ng build` sans erreur
 **Vérifié le :** 2026-11-16 — backend : **553 tests OK**. `ng build` OK. Parcours réel rejoué après déploiement.
 
-## Lot 35 — Fondation des potentiels et du rendu   ·   statut : à faire
-**Objectif :** modèles, migrations, clés de faits, routes, conteneur de rendu déclaré. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+## Lot 35 — Fondation des potentiels et du rendu   ·   statut : livré
+**Objectif :** poser ce dont les quatre secteurs du chantier « bt-potentiels » (propriétaire, 2026-11-16 : protections
+paramétrables, améliorations et bouquets, potentiels, rendu Plotly et exports) ont besoin avant de travailler en
+parallèle, sur un contrat écrit (`chantiers/bt-potentiels/CONTRAT.md`, lab, non versionné ; suivi :
+`to_do_potentiels.md`).
 **Tâches :**
-- [ ] Voir `to_do_potentiels.md`, lot 35
+- [x] Modèles `Bouquet`, `Potentiel`, `RapportModele`, `ExportRendu` ; champs `Scenario.bouquet`, `.surcharges`,
+  `.genere` ; migration `0028_potentiels_fondation`
+- [x] Anciens bouquets (`scenarios.BUNDLES`) repris comme actions du catalogue à l'identique : `weather['bundles']`
+  reste lisible, aucune migration de données
+- [x] Clés de faits `toiture.absorptance`, `abords.albedo`, `ventilation.nocturne_vol_h`, `ventilation.nocturne_seuil_c`,
+  `toiture.vegetalisee`, `murs.vegetalises` (poids 0 : la complétude ne change pas)
+- [x] Routes I1 à I7 déclarées (`urls.py`), rendant la forme du contrat le temps des secteurs
+- [x] Dépendances : `python-docx==1.1.2` (serveur), `plotly.js-dist-min` 2.35.2 figé (frontend, chargé à la demande)
+- [x] Service `rendu`, réseau interne, clé `RENDU_SERVICE_KEY` et volume `rendu-exports` dans `docker-compose.yml`
+  (posés au lot 40, d'après le bloc rapporté par le secteur R)
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_potentiels.md`, lot 35
-**Vérifié le :**
+- [x] `api/tests/test_fondation_potentiels.py` : migrations, modèles, routes présentes avec leurs droits
+- [x] Suite backend complète verte ; `ng build` sans erreur
+**Vérifié le :** 2026-11-16 — intégré, 663 tests backend OK ; vérification en navigateur au lot 40.
 
-## Lot 36 — Protections paramétrables et physique des améliorations   ·   statut : à faire
-**Objectif :** catalogue de protections paramétrable (lames, épaisseurs, débords), végétalisation, albédos, ventilation nocturne, DH RE2020, résultats N2 par triangle. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+## Lot 36 — Protections paramétrables et physique des améliorations   ·   statut : livré
+**Objectif :** que chaque protection solaire se règle (épaisseur, débord, inclinaison des lames…) et produise son
+effet dans chaque niveau où elle s'applique, et que toute amélioration (isolation, ventilation, végétalisation,
+albédos) soit prise en compte par N0, N1 et N2 ; DH à la RE2020 ; résultats N2 par triangle.
 **Tâches :**
-- [ ] Voir `to_do_potentiels.md`, lot 36
+- [x] Catalogue des protections v2 (`engines/shading.py`, `GET /api/protections/catalogue/`) : 16 modèles en quatre
+  familles (fixe, mobile, vitrage, végétal) ; paramètres typés et bornés (débord : profondeur, hauteur de la sous-face,
+  inclinaison, débords latéraux gauche et droite ; joues : profondeur, hauteur, côté ; lames : inclinaison, largeur,
+  entraxe, épaisseur, transmission ; fermé : transmissions et ΔR) ; pilotage fixe / planning / automatique, fermeture
+  nocturne, lames suivant le soleil (BSO) ; texte d'application par niveau ; protections d'avant le lot gardent leur
+  comportement
+- [x] Débords et joues par l'angle de profil (géométrie de l'EN ISO 52016-1 annexe F), bande de mur ombrée ; lames
+  selon l'ISO 15099 § 7 (direct selon l'angle de profil, diffus intégré) ; ΔR des fermetures (EN ISO 10077-1 annexe G)
+- [x] N2 : débords et joues construits en obstacles géométriques quel que soit le mode ; mobiles, lames, vitrages et
+  végétal appliqués par triangle de baie, position partielle comprise, depuis la fiche
+- [x] Interface `components/protections` : choisir un modèle, régler tous ses paramètres (groupes, aide, bornes du
+  catalogue), modifier une protection, l'attacher à l'état actuel ou à une amélioration
+- [x] Surcharges d'amélioration (`engines/surcharges.py`, `engines/vegetation.py`) : albédo des abords, absorptance de
+  toiture distincte de celle des murs, arbres plantés (houppiers translucides saisonniers : horizon N0/N1, obstacles
+  N2), toiture et murs végétalisés (U, absorptance du feuillage, évapotranspiration de Priestley-Taylor),
+  rafraîchissement de l'air (hypothèse affichée), surventilation nocturne (N1, N2) ; surcharge mal formée non appliquée
+  et dite ; `inputs['ameliorations']` décrit ce que chaque niveau a appliqué
+- [x] DH RE2020 (`engines/comfort.py` : `dh_re2020`, `heures_inconfort`, `t_conf_methode`, `dh_26`), séries
+  mensuelles `results['mensuel']`, liste canonique `GET /api/indicateurs/`
+- [x] N2 : cumuls par triangle (pertes d'hiver, gains d'été, solaire absorbé, températures de surface),
+  `GET /api/calculs/<id>/triangles/` ; moteurs `n0-5`, `n1-5`, `n2-4`
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_potentiels.md`, lot 36
-**Vérifié le :**
+- [x] `test_physique_confort.py` : DH RE2020 sur des séries construites à la main (seuil, moyenne glissante, heures
+  tertiaires), N0 sans indicateur de confort
+- [x] `test_physique_protections.py`, `test_protections_catalogue.py`, `test_protections.py` : chaque paramètre change
+  le résultat là où le catalogue le dit, ΔR, protections anciennes inchangées, géométrie N2, droits
+- [x] `test_physique_ameliorations.py` : chaque surcharge (signe et ordre de grandeur en N0, N1, N2), surcharges
+  mal formées refusées et dites
+- [x] `test_physique_triangles.py` : somme des cumuls par triangle = flux d'enveloppe du bilan ; forme I4, droits
+- [x] Suite backend complète verte ; `ng build` sans erreur
+**Vérifié le :** 2026-11-16 — intégré, 663 tests backend OK ; vérification en navigateur au lot 40.
 
-## Lot 37 — Actions, bouquets et potentiels   ·   statut : à faire
-**Objectif :** catalogue d'actions (conditions, indicateurs pertinents, application par niveau), bouquets « Économiser l'énergie » et « Minimiser les DH », potentiels par bâtiment et par parc. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+## Lot 37 — Actions, bouquets et potentiels   ·   statut : livré
+**Objectif :** un catalogue d'améliorations possibles, chacune avec les résultats où elle est pertinente (énergie ou
+DH), ses conditions et sa façon d'être appliquée par N0, N1 et N2 ; des bouquets définis par l'utilisateur, dont deux
+du lab ; pour chaque bâtiment, chaque bouquet appliqué en entier est un **potentiel atteignable**.
 **Tâches :**
-- [ ] Voir `to_do_potentiels.md`, lot 37
+- [x] Catalogue `ameliorations/catalogue.py` (`GET /api/ameliorations/actions/`) : 24 actions en six familles
+  (isolation, ventilation, protections solaires, végétalisation de la parcelle, toiture et albédos, chauffage et
+  systèmes) ; paramètres, conditions bloquantes ou non (« à vérifier »), indicateurs pertinents, cibles, application
+  par niveau, points de vigilance ; défauts et désactivation par les réglages du parc
+- [x] Les dix anciennes clés de bouquet sont des actions à l'identique ; améliorations existantes intactes
+- [x] Application d'un bouquet : toutes les actions applicables, « une parmi » (la première applicable), deux éléments
+  jamais sur la même cible, raison de chaque action écartée ; amélioration générée unique par bâtiment et bouquet
+- [x] Bouquets du lab « Économiser l'énergie » et « Minimiser les DH » (`ameliorations/bouquets.py`) ; bouquets de parc
+  (création, copie, modification, suppression par un gestionnaire)
+- [x] Potentiels (`ameliorations/potentiels.py`) : N1 d'un bâtiment (synchrone, 4 bouquets au plus par appel), d'un
+  parc (file `parc`, un à la fois) ; N2 d'un bâtiment à la demande, gestionnaire, jamais en lot ; « à jour » par
+  empreinte ; écarts au réel ; agrégats de parc (somme, moyenne, médiane, effectif)
+- [x] Interface : Paramétrage › bouquets du parc ; Calculs › Améliorations : potentiels du bâtiment, actions
+  appliquées et écartées
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_potentiels.md`, lot 37
-**Vérifié le :**
+- [x] `test_actions_catalogue.py` : familles et actions complètes, condition bloquante écartée avec sa raison, « une
+  parmi », avertissement non bloquant, anciens bouquets identiques
+- [x] `test_potentiels_calcul.py` : bouquet énergie idempotent et efficace, bouquet modifié ⇒ périmé, limites et N2,
+  droits, parc de trois bâtiments et deux bouquets (agrégats exacts), erreur qui n'arrête pas la file
+- [x] `test_bouquets_crud.py` : bouquets du lab idempotents, lisibles et copiables, droits, validation
+- [x] Suite backend complète verte ; `ng build` sans erreur
+**Vérifié le :** 2026-11-16 — intégré, 663 tests backend OK ; vérification en navigateur au lot 40.
 
-## Lot 38 — Rendu : document, figures et exports   ·   statut : à faire
-**Objectif :** document de rendu, figures Plotly construites par le serveur, exports HTML, Word, PDF par un conteneur de rendu. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+## Lot 38 — Rendu : document, figures et exports   ·   statut : livré
+**Objectif :** un document de rendu construit par le serveur — seul producteur des figures et des documents — et
+exportable en HTML, Word et PDF en reprenant au mieux le HTML.
 **Tâches :**
-- [ ] Voir `to_do_potentiels.md`, lot 38
+- [x] Spécification (`rendu/spec.py`, `GET /api/rendu/schema/`) ; dimensions et mesures du constructeur
+  (`/api/rendu/dimensions/`, `/mesures/`, par grain de données)
+- [x] Figures Plotly construites par le serveur (`rendu/figures.py`) pour les 15 formes, séries réel / bouquets,
+  facettes, filtres, agrégations ; aucune couleur (palette posée au rendu) ; textes venus des données échappés
+- [x] Document résolu (`rendu/document.py`) : blocs texte (markdown restreint assaini), indicateurs, tableau, graphe,
+  carte sans fond en ligne, vue 3D, fiche (avec les potentiels par bouquet), saut de page ; bloc non résolu ⇒
+  « indisponible », jamais une erreur du document
+- [x] Gabarits du lab « Fiche d'identité » et « Synthèse de parc », 18 questions du constructeur guidé
+  (`rendu/gabarits.py`) ; modèles enregistrés par parc
+- [x] Export HTML autonome (plotly.js et three.js embarqués, interactif hors ligne, sommaire, CSS d'impression,
+  `Content-Security-Policy: default-src 'none'`)
+- [x] Service de rendu `rendu-service/` (Node + Playwright/Chromium) : PDF (signets, en-têtes et numéros de page),
+  images des figures et des vues 3D ; toute requête autre que `data:`/`about:` abandonnée ; clé en en-tête
+- [x] Export PDF (HTML imprimé par le service) et Word (python-docx : styles de titre, sommaire actualisable, vrais
+  tableaux, figures et vues 3D en images, légendes numérotées, liens internes)
+- [x] Exports transitoires 24 h, réservés à leur auteur, purgés (volume `rendu-exports`)
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_potentiels.md`, lot 38
-**Vérifié le :**
+- [x] `test_rendu_figures.py` : toutes les formes sur un parc et un bâtiment, séries, cascade, facettes, refus fixes,
+  noms hostiles échappés, carte sans fond
+- [x] `test_rendu_document.py` : fiche d'identité avec potentiels, vue 3D avec et sans N2, synthèse de parc, texte
+  assaini, routes consommées par leur classe de vue
+- [x] `test_rendu_exports.py` : HTML autonome, Word, PDF par le service, service injoignable (message fixe), sans clé,
+  export d'autrui refusé, expiration et purge ; `rendu-service` : tests unitaires et d'intégration
+- [x] Suite backend complète verte
+**Vérifié le :** 2026-11-16 — intégré, 663 tests backend OK ; vérification en navigateur au lot 40.
 
-## Lot 39 — Rendu : interface   ·   statut : à faire
-**Objectif :** paramétrage et page de rendu, potentiels dans la fiche d'identité et le parc, vue 3D pertes d'hiver / gains d'été. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+## Lot 39 — Rendu : interface   ·   statut : livré
+**Objectif :** une page de paramétrage du rendu et une page de rendu ; les potentiels par bouquet dans la fiche
+d'identité et dans le parc ; les résultats N2 par triangle en 3D dans la fiche du bâtiment.
 **Tâches :**
-- [ ] Voir `to_do_potentiels.md`, lot 39
+- [x] Onglet Rendu en deux pages : **Paramétrage du rendu** (sections et blocs, constructeur de graphes guidé : une
+  question → un graphe proposé, puis réglages ; gabarits ; enregistrement par un gestionnaire) et **Rendu** (aperçu du
+  document serveur, exports HTML / Word / PDF), en portée parc ou bâtiment
+- [x] Composant `components/graphe` : Plotly chargé à la demande, palette tirée des jetons `--serie-*`, `--seq-*`,
+  `--div-*` (clair et sombre), titre et résumé textuel
+- [x] Potentiels par bouquet dans la fiche d'identité (écarts, actions appliquées et écartées) ; onglet Parc ›
+  « Potentiels par bouquet » (réel et bouquets comparés)
+- [x] Onglet Bâtiment › « Résultats en 3D » (`components/vue3d-resultats`) : pertes d'hiver, gains d'été, solaire
+  absorbé, températures de surface ; échelle et légende ; triangle touché ⇒ ses valeurs ; sans N2 : message et lien
+  pour le lancer (gestionnaire) ; même vue dans le bloc `vue3d` du rendu
+- [x] Calcul 3D : bascule intérieure / extérieure réellement recolorée (`mesh-viewer.repaint`)
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_potentiels.md`, lot 39
-**Vérifié le :**
+- [x] `ng build` sans erreur, budgets tenus (Plotly hors du bundle initial)
+- [ ] Navigateur réel (compte de test), clair et sombre : un graphe de chaque famille, enregistrement, exports
+  ouverts ; vue 3D sur un N2 réel et cas sans N2 ; aucune erreur console — **au lot 40**
+**Vérifié le :** 2026-11-16 — intégré, 663 tests backend OK ; vérification en navigateur au lot 40.
 
-## Lot 40 — Intégration et documentation   ·   statut : à faire
-**Objectif :** déploiement, parcours réel, actualisation complète de la documentation. Détail, tâches et tests : `to_do_potentiels.md` (cadrage du 2026-11-16).
+## Lot 40 — Intégration et documentation   ·   statut : en cours
+**Objectif :** intégrer les quatre secteurs, mettre en service, rejouer le parcours réel de bout en bout et actualiser
+toute la documentation interne de l'app.
 **Tâches :**
-- [ ] Voir `to_do_potentiels.md`, lot 40
+- [x] Rapports des secteurs vérifiés contre le contrat (v4), fichiers partagés appliqués en un seul edit (service de
+  rendu, clé et volume dans `docker-compose.yml`, `.env.example`)
+- [x] By-pass d'été de la double flux (N1, N2 : `n1-6`, `n2-5`) ; ouverture des fenêtres en été réglable par parc,
+  désactivée par défaut (`confort.ouverture_*`, contrat I9) — `test_physique_bypass.py`, `test_physique_ouverture.py`
+- [x] Documentation : `README.md`, `frontend/README.md`, `refonte.md` (§ 16, D40 à D48), cette feuille de route,
+  `to_do_potentiels.md`, fiches des moteurs (`backend/api/moteurs.py`), page Théorie
+- [ ] Déploiement séquencé (image Django, image du service de rendu, frontend), `app-test.sh`, cloisonnement 3/3
+- [ ] Parcours réel : parc d'essai → bouquets → potentiels → fiche d'identité → comparaison de parc → rendu
+  personnalisé → exports HTML, Word, PDF ouverts → vue 3D ; parc d'essai supprimé
+- [ ] `CLAUDE.md` du lab (service de rendu, pièges) et mémoire
 **Tests à passer avant de clore le lot :**
-- [ ] Voir `to_do_potentiels.md`, lot 40
+- [ ] Suite backend complète verte sur le code intégré
+- [ ] `ng build` sans erreur ; navigateur réel, clair et sombre, aucune erreur console
+- [ ] `validate-app.sh bilan-thermique --quality-only` accepte la composition (service de rendu compris)
 **Vérifié le :**
 
 ## Mise en service — chantier « failles » (2026-11-01)

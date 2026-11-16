@@ -39,6 +39,13 @@ class Params:
     c_m: float = 165_000.0
     a_m_factor: float = 2.5
     n_vent: float = 0.5                 # renouvellement effectif (vol/h, récupération déduite)
+    # Lot 40 : double flux — débit hygiénique passant par l'échangeur et son rendement, pour le by-pass d'été
+    # (`recovery_active`) ; 0 sans récupération. `n_vent` reste le renouvellement effectif « récupération active ».
+    n_recup: float = 0.0
+    eta_recup: float = 0.0
+    bypass: bool = True
+    # Lot 40 (I9) : ouverture des fenêtres en été, réglage du parc — None : désactivée (défaut).
+    window_opening: dict | None = None
     gains_w_m2: float = 4.0
     t_heat: float = 19.0
     t_cool: float | None = None
@@ -121,6 +128,31 @@ def _v(values, key, default):
     return default if v is None else v
 
 
+BYPASS_MARGIN_C = 2.0
+BYPASS_T_EXT_MIN_C = 12.0
+HYPOTHESE_BYPASS = ('Double flux : échangeur by-passé (rendement 0) quand l’air extérieur, au-dessus de 12 °C, est plus '
+                    'frais que l’air intérieur et que celui-ci dépasse la consigne de chauffage de 2 °C ; actif sinon '
+                    '(chauffage, mi-saison froide, air extérieur plus chaud que dedans). Principe : EN 16798-5-1:2017 '
+                    '§ 6.4 (by-pass de l’échangeur), NF EN 13141-7 ; seuils de 2 °C et 12 °C choisis par l’app (réglages '
+                    'usuels des caissons), à confirmer.')
+
+
+def recovery_split(values):
+    """(débit hygiénique traversant l'échangeur en vol/h, rendement de récupération) — (0, 0) hors double flux."""
+    if _v(values, 'ventilation.type', 'vmc_sf_auto') != 'vmc_df':
+        return 0.0, 0.0
+    eta = float(_v(values, 'ventilation.rendement_recup', 0.0))
+    return (float(_v(values, 'ventilation.debit_vol_h', 0.5)), eta) if eta > 0 else (0.0, 0.0)
+
+
+def recovery_active(t_ext, t_air_prev, t_heat):
+    """Échangeur actif, heure par heure (lot 40, by-pass d'été — `HYPOTHESE_BYPASS`). Tableaux ou scalaires."""
+    import numpy as np
+    t_ext, t_air_prev = np.asarray(t_ext, dtype=float), np.asarray(t_air_prev, dtype=float)
+    return ~((t_ext >= BYPASS_T_EXT_MIN_C) & (t_ext < t_air_prev)
+             & (t_air_prev > np.asarray(t_heat, dtype=float) + BYPASS_MARGIN_C))
+
+
 def effective_ventilation(values):
     vtype = _v(values, 'ventilation.type', 'vmc_sf_auto')
     n_hyg = float(_v(values, 'ventilation.debit_vol_h', 0.5))
@@ -171,6 +203,7 @@ def from_fiche(values, geometry=None):
         g_window=float(_v(values, 'baies.g', 0.6)),
         absorptance=float(_v(values, 'enveloppe.couleur_absorptance', 0.6)),
         c_m=c_m, a_m_factor=a_m, n_vent=effective_ventilation(values),
+        n_recup=recovery_split(values)[0], eta_recup=recovery_split(values)[1],
         gains_w_m2=float(_v(values, 'usage.apports_w_m2', 4.0)),
         t_heat=float(_v(values, 'usage.consigne_chauffage_c', 19.0)),
         t_cool=float(t_cool) if t_cool is not None else None,

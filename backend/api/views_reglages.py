@@ -234,7 +234,14 @@ def fiche_bloc(request, b, sections):
                 els.append(_el('Horizon', _num_txt(hz), '°', g.get('horizon_source')))
             pl = f.get('plancher') or {}
             if pl:
-                els.append(_el('Plancher bas', pl.get('libelle') or pl.get('type') or pl.get('mode') or '—'))
+                # Lot 40 : le sol simulé (lot 32) — modèle et température vue par le plancher, note éventuelle.
+                txt = pl.get('modele') or pl.get('libelle') or '—'
+                if pl.get('t_moyenne_c') is not None:
+                    txt += (f" — {_num_txt(pl['t_moyenne_c'])} °C en moyenne ({_num_txt(pl.get('t_min_c'))} à "
+                            f"{_num_txt(pl.get('t_max_c'))} °C)")
+                els.append(_el('Plancher bas et sol', txt, source='sol simulé sur la météo du calcul'))
+                if pl.get('note'):
+                    els.append(_el('Note sur le plancher', pl['note']))
         elif cle == 'meteo':
             m = f['meteo']
             els.append(_el('Jeu météo', m['jeu'] if m else 'Aucun', source=(m or {}).get('type', '')))

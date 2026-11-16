@@ -130,7 +130,8 @@ def run(params, weather, *, t_init=None, keep_series=True):
     de 1 °C),
     indicateurs de confort RE2020 et séries mensuelles (`engines.comfort`)."""
     from . import comfort
-    from .surcharges import NIGHT_INDOOR_TRIGGER_C, NIGHT_MARGIN_C, night_static_mask
+    from .inputs import recovery_active
+    from .surcharges import NIGHT_INDOOR_TRIGGER_C, NIGHT_MARGIN_C, night_static_mask, opening_allowed
     if not weather:
         raise N1Error('Série météo vide.')
     if len(weather) > 8784:
@@ -191,6 +192,26 @@ def run(params, weather, *, t_init=None, keep_series=True):
         if p.night_vent > 0:
             night_ok[i] = night_static_mask(hidx, t_e, p.night_vent_threshold)
     any_night = bool(night_ok.any())
+    # Lot 40 : by-pass d'été de la double flux (`inputs.recovery_active`) — conductance de récupération retirée
+    # (h_ve sans échangeur = h_ve + h_rec) quand l'échangeur est by-passé.
+    h_rec = vec(lambda p: 0.34 * p.n_recup * p.eta_recup * p.volume if p.bypass else 0.0)
+    any_bypass = bool((h_rec > 0).any())
+    t_heat_now = t_heat
+    any_night = any_night or any_bypass
+    bypass_hours = np.zeros(S, dtype=int)
+    # Lot 40 (I9) : ouverture des fenêtres (réglage du parc) — débit ajouté, échangeur by-passé baies ouvertes.
+    h_open = vec(lambda p: 0.34 * p.window_opening['vol_h'] * p.volume if p.window_opening else 0.0)
+    open_ok = np.zeros((S, T), dtype=bool)
+    open_seuil = np.full(S, np.inf)
+    open_ecart = np.zeros(S)
+    for i, p in enumerate(ps):
+        if p.window_opening:
+            open_ok[i] = opening_allowed(hidx, p.residential, p.window_opening['occupation'])
+            open_seuil[i], open_ecart[i] = p.window_opening['seuil_c'], p.window_opening['ecart_c']
+    any_open = bool((h_open > 0).any())
+    any_night = any_night or any_open
+    open_hours = np.zeros(S, dtype=int)
+    night_hours = np.zeros(S, dtype=int)
 
     phi_ia = 0.5 * phi_int
     share_m = a_m / a_t
@@ -220,8 +241,18 @@ def run(params, weather, *, t_init=None, keep_series=True):
         hw = h_w_all[:, k]
         hve = h_ve
         if any_night:
-            hve = h_ve + np.where(night_ok[:, k] & (t_prev > te + NIGHT_MARGIN_C) & (t_prev > NIGHT_INDOOR_TRIGGER_C),
-                                  h_night, 0.0)
+            on = night_ok[:, k] & (t_prev > te + NIGHT_MARGIN_C) & (t_prev > NIGHT_INDOOR_TRIGGER_C)
+            night_hours += on
+            hve = h_ve + np.where(on, h_night, 0.0)
+            opened = np.zeros(S, dtype=bool)
+            if any_open:
+                opened = open_ok[:, k] & (h_open > 0) & (t_prev > open_seuil) & (t_prev > te + open_ecart)
+                open_hours += opened
+                hve = hve + np.where(opened, h_open, 0.0)
+            if any_bypass:
+                off = (~recovery_active(te, t_prev, t_heat_now[:, k]) | opened) & (h_rec > 0)
+                bypass_hours += off
+                hve = hve + np.where(off, h_rec, 0.0)
             h_ve_used[:, k] = hve
         h1 = 1.0 / (1.0 / hve + 1.0 / h_is)
         h2 = h1 + hw
@@ -278,8 +309,11 @@ def run(params, weather, *, t_init=None, keep_series=True):
             r['confort'] = ind
             r['mensuel'] = mens
             if any_night and ps[i].night_vent > 0:
-                extra = (h_ve_used[i] - h_ve[i]) > 0
-                r['surventilation_nocturne_h'] = int(extra.sum())
+                r['surventilation_nocturne_h'] = int(night_hours[i])
+            if h_rec[i] > 0:
+                r['bypass_double_flux_h'] = int(bypass_hours[i])
+            if ps[i].window_opening:
+                r['ouverture_fenetres_h'] = int(open_hours[i])
             r['t_air'] = [round(float(x), 2) for x in t_air[i]]
             r['t_op'] = [round(float(x), 2) for x in t_op[i]]
             r['phi_hc_w'] = [round(float(x), 1) for x in phi_hc[i]]
