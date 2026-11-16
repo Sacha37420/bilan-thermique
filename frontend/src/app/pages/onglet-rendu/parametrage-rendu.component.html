@@ -73,6 +73,13 @@
     </div>
     <label class="check"><input type="checkbox" [checked]="s.mise_en_page.sommaire" (change)="mep('sommaire', $any($event.target).checked)" />Sommaire</label>
     <label class="check"><input type="checkbox" [checked]="s.mise_en_page.numeros" (change)="mep('numeros', $any($event.target).checked)" />Numéros de page</label>
+    <div class="sims-doc">
+      <app-choix-simulations [niveaux]="simulationsDoc()" nom="pr-sims" (niveauxChange)="simulationsDoc.set($event); simulationsInfo.set('')"
+        comparaison="chaque bloc montre les valeurs de chacune (colonnes, couleurs ou petits graphes)" />
+      <button type="button" class="rf-btn" (click)="appliquerSimulations()">Appliquer à tous les blocs du document</button>
+      <p class="rf-hint">Chaque bloc garde ensuite son propre réglage, modifiable un par un. Une carte prend la plus fine des simulations cochées.</p>
+      @if (simulationsInfo()) { <p class="rf-ok" role="status">{{ simulationsInfo() }}</p> }
+    </div>
   </section>
 
   @for (sec of s.sections; track $index; let i = $index) {

@@ -1,8 +1,9 @@
 import { Component, computed, inject, input, output } from '@angular/core';
 import { GRANDEURS, CAMERAS } from '../../components/vue3d-resultats/vue3d.types';
 import { ChoixSeriesComponent } from './choix-series.component';
+import { ChoixSimulationsComponent } from './choix-simulations.component';
 import { ConstructeurGrapheComponent } from './constructeur-graphe.component';
-import { Bloc, Graphe, SECTIONS_FICHE, SOURCES, Series } from './contrat.types';
+import { Bloc, Graphe, NiveauSim, SECTIONS_FICHE, SOURCES, Series } from './contrat.types';
 import { RenduEtatService } from './rendu-etat.service';
 
 const NOMS_CAMERA: Record<string, string> = { iso: 'En biais', sud: 'Depuis le sud', nord: 'Depuis le nord', est: 'Depuis l’est', ouest: 'Depuis l’ouest', dessus: 'Du dessus' };
@@ -11,7 +12,7 @@ const NOMS_CAMERA: Record<string, string> = { iso: 'En biais', sud: 'Depuis le s
 @Component({
   selector: 'app-editeur-bloc',
   standalone: true,
-  imports: [ChoixSeriesComponent, ConstructeurGrapheComponent],
+  imports: [ChoixSeriesComponent, ChoixSimulationsComponent, ConstructeurGrapheComponent],
   templateUrl: './editeur-bloc.component.html',
   styleUrl: './editeur-bloc.component.scss',
 })
@@ -48,12 +49,19 @@ export class EditeurBlocComponent {
   }
   graphe(g: Graphe): void { this.poser('graphe', g); }
   series(s: Series): void { this.poser('series', s); }
+  /** Simulations du bloc : vide ⇒ champ retiré (la plus fine à jour, comme un document d'avant). */
+  niveaux(n: NiveauSim[]): void {
+    const { niveaux: _ancien, ...reste } = this.bloc() as Bloc & { niveaux?: NiveauSim[] };
+    this.blocChange.emit((n.length ? { ...reste, niveaux: n } : reste) as Bloc);
+  }
+  /** Le serveur attend « reel » ou l'identifiant (nombre) du bouquet ; un `<select>` rend du texte. */
+  serieCarte(v: string): void { this.poser('series', v === 'reel' ? 'reel' : Number(v)); }
   entier(v: string, min: number, max: number, repli: number): number {
     const n = Math.round(Number(v));
     return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : repli;
   }
   calcul(v: string): void {
     const t = v.trim();
-    this.poser('calcul', t === '' || t === 'dernier_N2' || !/^\d+$/.test(t) ? 'dernier_N2' : t);
+    this.poser('calcul', t === '' || t === 'dernier_N2' || !/^\d+$/.test(t) ? 'dernier_N2' : Number(t));
   }
 }

@@ -43,6 +43,15 @@ const ECART_PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFrac
     tfoot td { font-weight: 600; border-top: 2px solid var(--border); }
     .rf-field select { min-height: 44px; }
     a.link { display: inline-flex; align-items: center; text-decoration: none; }
+    .choix { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-3);
+             display: flex; flex-wrap: wrap; column-gap: var(--space-4); margin: 0 0 var(--space-3); }
+    .choix legend { color: var(--text-mute); font-size: var(--text-xs); padding: 0 var(--space-1); }
+    .check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; cursor: pointer; font-size: var(--text-sm); }
+    .check input { width: 20px; height: 20px; accent-color: var(--accent); }
+    .check small { color: var(--text-mute); }
+    th.grp { text-align: center; border-left: 1px solid var(--border); }
+    th.sous { font-size: var(--text-xs); }
+    td.debut { border-left: 1px solid var(--border); }
     @media (max-width: 899px) { .rf-row > .rf-field { flex: 1 1 100%; } }
   `],
   template: `
@@ -119,49 +128,69 @@ const ECART_PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFrac
 
         <section class="rf-card" aria-labelledby="pp-tab">
           <div class="rf-card-head"><h2 id="pp-tab">Bâtiment par bâtiment</h2></div>
+          <fieldset class="choix"><legend>Simulations comparées</legend>
+            @for (n of niveaux; track n) {
+              <label class="check"><input type="checkbox" [checked]="niveauxTableau().includes(n)" [disabled]="n === niveauAffiche()"
+                (change)="basculerComparaison(n, $any($event.target).checked)" />{{ mots[n] }} ({{ n }})@if (n === niveauAffiche()) { <small>&#32;— choisie plus haut</small> }</label>
+            }
+          </fieldset>
+          @if (erreurAutres()) { <p class="rf-hint" role="status">{{ erreurAutres() }}</p> }
           <div class="rf-table-wrap">
             <table class="rf-table">
-              <thead><tr>
-                <th>Bâtiment</th>
-                @for (s of series(); track s.cle) { <th class="num">{{ s.nom }}</th> }
-              </tr></thead>
+              <thead>
+                <tr>
+                  <th [attr.rowspan]="multi() ? 2 : 1">Bâtiment</th>
+                  @for (s of series(); track s.cle) {
+                    <th class="num" [class.grp]="multi()" [attr.colspan]="niveauxTableau().length">{{ s.nom }}</th>
+                  }
+                </tr>
+                @if (multi()) {
+                  <tr>@for (s of series(); track s.cle) { @for (n of niveauxTableau(); track n) { <th class="num sous" [title]="mots[n]">{{ n }}</th> } }</tr>
+                }
+              </thead>
               <tbody>
                 @for (b of d.batiments; track b.id) {
                   <tr>
                     <td><a class="link" routerLink="/batiment" [queryParams]="ctx.queryParams({ b: b.id, vue: 'synthese' })">{{ b.nom || ('Bâtiment ' + b.id) }}</a></td>
-                    <td class="num"><div class="cel">
-                      @if (valeur(b.reel.indicateurs); as v) { <strong>{{ v }}</strong> } @else { <span class="etat-c">jamais calculé</span> }
-                      @if (b.reel.indicateurs && !b.reel.a_jour) { <span><span class="rf-badge m-infere">à refaire</span></span> }
-                    </div></td>
-                    @for (s of bouquets(); track s.cle) {
-                      <td class="num"><div class="cel">
-                        @if (cellule(b.potentiels, s.cle); as c) {
-                          @if (c.statut === 'fait') {
-                            <strong>{{ valeur(c.indicateurs) || '—' }}</strong>
-                            @if (ecart(c); as e) { <span class="ec" [class.mieux]="e.mieux">{{ e.texte }}</span> }
-                            @if (!c.a_jour) { <span><span class="rf-badge m-infere">à refaire</span></span> }
-                            <span class="act">{{ c.actions_appliquees }} action{{ c.actions_appliquees > 1 ? 's' : '' }} appliquée{{ c.actions_appliquees > 1 ? 's' : '' }}
-                              · {{ c.actions_ecartees }} écartée{{ c.actions_ecartees > 1 ? 's' : '' }}</span>
-                          } @else {
-                            <span class="etat-c" [class.ko]="c.statut === 'erreur'">{{ etat(c) }}</span>
-                          }
-                        } @else { <span class="etat-c">jamais calculé</span> }
-                      </div></td>
+                    @for (s of series(); track s.cle) {
+                      @for (n of niveauxTableau(); track n) {
+                        @let lb = ligne(n, b.id);
+                        <td class="num" [class.debut]="multi() && $first"><div class="cel">
+                          @if (!lb) { <span class="etat-c">{{ autresChargement() ? '…' : '—' }}</span> }
+                          @else if (s.cle === 'reel') {
+                            @if (valeur(lb!.reel.indicateurs); as v) { <strong>{{ v }}</strong> } @else { <span class="etat-c">jamais calculé</span> }
+                            @if (lb!.reel.indicateurs && !lb!.reel.a_jour) { <span><span class="rf-badge m-infere">à refaire</span></span> }
+                          } @else if (cellule(lb!.potentiels, s.cle); as c) {
+                            @if (c.statut === 'fait') {
+                              <strong>{{ valeur(c.indicateurs) || '—' }}</strong>
+                              @if (ecart(c); as e) { <span class="ec" [class.mieux]="e.mieux">{{ e.texte }}</span> }
+                              @if (!c.a_jour) { <span><span class="rf-badge m-infere">à refaire</span></span> }
+                              @if (!multi()) {
+                                <span class="act">{{ c.actions_appliquees }} action{{ c.actions_appliquees > 1 ? 's' : '' }} appliquée{{ c.actions_appliquees > 1 ? 's' : '' }}
+                                  · {{ c.actions_ecartees }} écartée{{ c.actions_ecartees > 1 ? 's' : '' }}</span>
+                              }
+                            } @else {
+                              <span class="etat-c" [class.ko]="c.statut === 'erreur'">{{ etat(c) }}</span>
+                            }
+                          } @else { <span class="etat-c">jamais calculé</span> }
+                        </div></td>
+                      }
                     }
                   </tr>
                 } @empty {
-                  <tr><td [attr.colspan]="series().length + 1" class="rf-hint">Aucun bâtiment dans ce parc.</td></tr>
+                  <tr><td [attr.colspan]="series().length * niveauxTableau().length + 1" class="rf-hint">Aucun bâtiment dans ce parc.</td></tr>
                 }
               </tbody>
               @if (d.batiments.length && cles().length) {
                 <tfoot><tr>
                   <td>Médiane</td>
-                  @for (s of series(); track s.cle) { <td class="num">{{ nombre(agregat(s.cle)?.mediane) }}</td> }
+                  @for (s of series(); track s.cle) { @for (n of niveauxTableau(); track n) {
+                    <td class="num" [class.debut]="multi() && $first">{{ nombre(agregat(s.cle, n)?.mediane) }}</td> } }
                 </tr></tfoot>
               }
             </table>
           </div>
-          @if (cles().length) { <p class="rf-hint">Valeurs : {{ libelle(indicateur()) }}, {{ mots[niveauAffiche()].toLowerCase() }} ({{ niveauAffiche() }}). Sous chaque potentiel, l’écart au réel du bâtiment au même niveau.</p> }
+          @if (cles().length) { <p class="rf-hint">Valeurs : {{ libelle(indicateur()) }}, {{ phraseNiveaux() }}. Sous chaque potentiel, l’écart au réel du bâtiment à la même simulation.</p> }
         </section>
       }
 
@@ -199,7 +228,7 @@ const ECART_PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFrac
             <p [class]="e.discret ? 'rf-hint' : 'rf-error'" [attr.role]="e.discret ? 'status' : 'alert'">{{ e.texte }}</p>
           } @else {
             <app-graphe [figure]="figureCarte()" [titre]="libelle(indicateur())" [chargement]="chargementCarte()" [hauteur]="420" />
-            <p class="rf-hint">La carte montre pour chaque bâtiment le calcul le plus fin disponible et à jour.</p>
+            <p class="rf-hint">La carte montre la simulation {{ mots[niveauAffiche()].toLowerCase() }} ({{ niveauAffiche() }}), choisie plus haut.</p>
           }
         </section>
       }
@@ -231,6 +260,15 @@ export class ParcPotentielsComponent {
   readonly parcId = computed(() => { const p = this.ctx.parcId(); return p !== null && p !== HORS_PARC ? p : null; });
 
   readonly donnees = signal<PotentielsParc | null>(null);
+  /** Simulations ajoutées au tableau pour comparer (en plus de celle choisie plus haut) et leurs données. */
+  readonly comparer = signal<Niveau[]>([]);
+  readonly autres = signal<Partial<Record<Niveau, PotentielsParc>>>({});
+  readonly autresChargement = signal(false);
+  readonly erreurAutres = signal('');
+  readonly niveauxTableau = computed(() => NIVEAUX.filter(n => n === this.niveauAffiche() || this.comparer().includes(n)));
+  readonly multi = computed(() => this.niveauxTableau().length > 1);
+  readonly phraseNiveaux = computed(() => this.niveauxTableau().map(n => `${NIVEAU_MOTS[n].toLowerCase()} (${n})`).join(', '));
+  private numAutres = 0;
   readonly erreurP = signal<Erreur | null>(null);
   readonly erreurCalcul = signal<Erreur | null>(null);
   readonly envoi = signal(false);
@@ -297,7 +335,7 @@ export class ParcPotentielsComponent {
 
   private ouvrirParc(id: number | null): void {
     this.arreterRelecture();
-    this.donnees.set(null); this.erreurP.set(null); this.erreurCalcul.set(null);
+    this.donnees.set(null); this.erreurP.set(null); this.erreurCalcul.set(null); this.autres.set({}); this.erreurAutres.set('');
     this.figure.set(null); this.erreurFig.set(null); this.figureCarte.set(null); this.erreurCarte.set(null);
     if (id === null) return;
     void this.lire(id, true);
@@ -312,6 +350,7 @@ export class ParcPotentielsComponent {
       if (this.parcId() !== id || this.niveau() !== niveau) return;
       this.recevoir(d, premiere || auto);
       if (auto) this.chargerFigure();
+      if (premiere || auto) void this.lireAutres(id);
     } catch (e) {
       if (this.parcId() !== id) return;
       this.erreurP.set(erreurDe(e, 'Potentiels du parc'));
@@ -365,7 +404,38 @@ export class ParcPotentielsComponent {
 
   choisirIndicateur(c: string): void { this.indicateur.set(c); this.chargerCarte(); }
 
-  agregat(serie: string): Agregat | null { return this.donnees()?.agregats?.[serie]?.[this.indicateur()] ?? null; }
+  basculerComparaison(n: Niveau, oui: boolean): void {
+    this.comparer.update(l => NIVEAUX.filter(x => (x === n ? oui : l.includes(x))));
+    const id = this.parcId();
+    if (id !== null) void this.lireAutres(id);
+  }
+
+  /** Lit les potentiels des simulations comparées autres que celle choisie (une lecture par simulation). */
+  private async lireAutres(id: number): Promise<void> {
+    const voulus = this.comparer().filter(n => n !== this.niveau());
+    const k = ++this.numAutres;
+    if (!voulus.length) { this.autres.set({}); return; }
+    this.autresChargement.set(true); this.erreurAutres.set('');
+    const lus = await Promise.allSettled(voulus.map(n => this.api.potentielsParc(id, n)));
+    if (k !== this.numAutres || this.parcId() !== id) return;
+    const out: Partial<Record<Niveau, PotentielsParc>> = {};
+    lus.forEach((r, i) => { if (r.status === 'fulfilled' && ((r.value.niveau as Niveau | undefined) ?? 'N1') === voulus[i]) out[voulus[i]] = r.value; });
+    this.autres.set(out);
+    if (Object.keys(out).length < voulus.length) this.erreurAutres.set('Certaines simulations n’ont pas pu être lues sur ce serveur.');
+    this.autresChargement.set(false);
+  }
+
+  private donneesDe(n: Niveau): PotentielsParc | null {
+    return n === this.niveauAffiche() ? this.donnees() : this.autres()[n] ?? null;
+  }
+  ligne(n: Niveau, id: number): PotentielsParc['batiments'][number] | null {
+    return this.donneesDe(n)?.batiments.find(b => b.id === id) ?? null;
+  }
+
+  agregat(serie: string, n?: Niveau): Agregat | null {
+    const d = n ? this.donneesDe(n) : this.donnees();
+    return d?.agregats?.[serie]?.[this.indicateur()] ?? null;
+  }
 
   libelle(c: string): string {
     const i = this.canon().find(x => x.cle === c);
@@ -456,7 +526,8 @@ export class ParcPotentielsComponent {
     if (id === null || !indicateur) { this.figureCarte.set(null); return; }
     const spec: Spec = {
       ...specVide('parc'), titre: '',
-      sections: [{ titre: '', blocs: [{ type: 'carte', indicateur, series: this.serieCarte() }] }],
+      sections: [{ titre: '', blocs: [{ type: 'carte', indicateur, niveaux: [this.niveauAffiche()],
+                                        series: this.serieCarte() === 'reel' ? 'reel' : Number(this.serieCarte()) }] }],
     };
     this.chargementCarte.set(true); this.figureCarte.set(null);
     this.api.document({ spec }, { parc: id }).then(

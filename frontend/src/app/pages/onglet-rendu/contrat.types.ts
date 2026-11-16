@@ -68,12 +68,15 @@ export interface Graphe {
   agregation: 'somme' | 'moyenne' | 'mediane' | 'aucune'; titre: string; axe_y_log: boolean;
 }
 
+/** Simulations affichées par un bloc (lot 45) : absent ou vide = la plus fine à jour. */
+export type NiveauSim = 'N0' | 'N1' | 'N2';
+
 export type Bloc =
   | { type: 'texte'; contenu: string }
-  | { type: 'indicateurs'; cles: string[]; series: Series }
-  | { type: 'tableau'; source: SourceTableau; colonnes: string[]; tri: string; ordre: 'asc' | 'desc'; limite: number }
+  | { type: 'indicateurs'; cles: string[]; series: Series; niveaux?: NiveauSim[] }
+  | { type: 'tableau'; source: SourceTableau; colonnes: string[]; tri: string; ordre: 'asc' | 'desc'; limite: number; niveaux?: NiveauSim[] }
   | { type: 'graphe'; graphe: Graphe }
-  | { type: 'carte'; indicateur: string; series: string }
+  | { type: 'carte'; indicateur: string; series: string | number; niveaux?: NiveauSim[] }
   | { type: 'vue3d'; calcul: string; grandeur: string; camera: string }
   | { type: 'fiche'; sections: string[] }
   | { type: 'saut_de_page' };

@@ -970,6 +970,23 @@ d'ouverture des fenêtres, réglage désactivé par défaut — décision du pro
 - [x] Voir `to_do_trois_niveaux.md`, lot 44
 **Vérifié le :** 2026-11-16 — voir `to_do_trois_niveaux.md`
 
+## Lot 45 — Comparer les simulations   ·   statut : livré
+**Objectif :** sur la page Parc, voir pour chaque grandeur la valeur de chaque simulation (N0, N1, N2) pour les
+comparer ; dans le paramétrage des rendus, choisir la ou les simulations dont on affiche les valeurs (D53).
+**Tâches :**
+- [x] Tableau « Bâtiments » du parc : cases « Simulations affichées » et « Grandeurs », une colonne par simulation sous
+  chaque grandeur, tri par colonne, « non calculé » là où la simulation ne produit pas la grandeur
+- [x] « Potentiels par bouquet » : simulations comparées dans le tableau bâtiment par bâtiment (médianes comprises) ;
+  carte à la simulation choisie
+- [x] Rendu : champ `niveaux` des blocs chiffres clés, tableau (bâtiments éclatés par simulation ; potentiels et calculs
+  filtrés) et carte (une seule) ; graphe à cases à cocher ; réglage « Simulations affichées » du document
+- [x] Corrigé au passage : bouquet de la carte et numéro de calcul de la vue 3D envoyés en texte, refusés par le serveur
+**Tests à passer avant de clore le lot :**
+- [x] `api.tests.test_rendu_simulations` (validation, chiffres clés par simulation et écart au réel de la même
+  simulation, tableau éclaté et trié sur la plus fine, simulation imposée, potentiels et calculs filtrés, carte)
+- [x] Suite complète verte, cloisonnement 3/3, parcours réel en navigateur
+**Vérifié le :** 2026-11-16
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

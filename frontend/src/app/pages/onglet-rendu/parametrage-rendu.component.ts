@@ -1,7 +1,9 @@
 import { Component, inject, output, signal } from '@angular/core';
 import { ContexteService } from '../../core/contexte.service';
 import { EditeurBlocComponent } from './editeur-bloc.component';
-import { Bloc, Modele, Spec, TYPES_BLOC, TypeBloc, blocNeuf } from './contrat.types';
+import { ChoixSimulationsComponent } from './choix-simulations.component';
+import { grapheAvecNiveaux } from './choix-niveau.component';
+import { Bloc, Modele, NiveauSim, Spec, TYPES_BLOC, TypeBloc, blocNeuf } from './contrat.types';
 import { RenduEtatService } from './rendu-etat.service';
 
 /**
@@ -12,7 +14,7 @@ import { RenduEtatService } from './rendu-etat.service';
 @Component({
   selector: 'app-parametrage-rendu',
   standalone: true,
-  imports: [EditeurBlocComponent],
+  imports: [EditeurBlocComponent, ChoixSimulationsComponent],
   templateUrl: './parametrage-rendu.component.html',
   styleUrl: './parametrage-rendu.component.scss',
 })
@@ -25,15 +27,40 @@ export class ParametrageRenduComponent {
   readonly ouvert = signal<string | null>(null);
   readonly nouveauNom = signal('');
   readonly confirmerSuppression = signal(false);
+  /** Simulations à poser sur tous les blocs qui en affichent (réglage du document, lot 45). */
+  readonly simulationsDoc = signal<NiveauSim[]>([]);
+  readonly simulationsInfo = signal('');
+
+  private sims(n?: NiveauSim[]): string { return n?.length ? ` · ${n.join(', ')}` : ''; }
+
+  /** Pose les simulations choisies sur chaque chiffre clé, tableau, carte et graphe du document. */
+  appliquerSimulations(): void {
+    const n = this.simulationsDoc();
+    let compte = 0;
+    this.etat.modifier(s => {
+      for (const sec of s.sections) {
+        sec.blocs = sec.blocs.map(b => {
+          if (b.type === 'graphe') { compte++; return { ...b, graphe: grapheAvecNiveaux(b.graphe, n) }; }
+          if (b.type !== 'indicateurs' && b.type !== 'tableau' && b.type !== 'carte') return b;
+          compte++;
+          const { niveaux: _a, ...reste } = b;
+          // Une carte ne montre qu'une simulation : la plus fine des choisies.
+          const v = b.type === 'carte' ? n.slice(-1) : n;
+          return (v.length ? { ...reste, niveaux: v } : reste) as Bloc;
+        });
+      }
+    });
+    this.simulationsInfo.set(compte ? `Appliqué à ${compte} bloc${compte > 1 ? 's' : ''}.` : 'Aucun bloc ne montre de résultat de simulation.');
+  }
 
   libelleType(t: TypeBloc): string { return TYPES_BLOC.find(x => x.cle === t)?.libelle ?? t; }
   resumeBloc(b: Bloc): string {
     switch (b.type) {
       case 'texte': return b.contenu.slice(0, 80) || 'vide';
       case 'graphe': return b.graphe.titre || (b.graphe.y.length ? `${b.graphe.y.length} grandeur(s)` : 'à régler');
-      case 'indicateurs': return `${b.cles.length} chiffre(s)`;
-      case 'tableau': return `${b.colonnes.length} colonne(s), ${b.limite} lignes au plus`;
-      case 'carte': return b.indicateur || 'à régler';
+      case 'indicateurs': return `${b.cles.length} chiffre(s)${this.sims(b.niveaux)}`;
+      case 'tableau': return `${b.colonnes.length} colonne(s), ${b.limite} lignes au plus${this.sims(b.niveaux)}`;
+      case 'carte': return (b.indicateur || 'à régler') + this.sims(b.niveaux);
       case 'vue3d': return b.calcul === 'dernier_N2' ? 'dernier calcul détaillé' : `calcul n° ${b.calcul}`;
       case 'fiche': return `${b.sections.length} partie(s)`;
       default: return '';

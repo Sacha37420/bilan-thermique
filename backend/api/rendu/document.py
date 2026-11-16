@@ -56,7 +56,7 @@ def bloc(ctx, b):
         g = spec_mod.valider_graphe(b['graphe'], ctx.mesures())
         return {'type': t, 'figure': figures.construire(ctx, g)}
     if t == 'carte':
-        return {'type': t, 'figure': figures.carte(ctx, b['indicateur'], b['series'])}
+        return {'type': t, 'figure': figures.carte(ctx, b['indicateur'], b['series'], b.get('niveaux'))}
     if t == 'tableau':
         return {'type': t, **tableaux.resoudre(ctx, b)}
     if t == 'indicateurs':
@@ -70,28 +70,43 @@ def bloc(ctx, b):
 
 
 def indicateurs(ctx, b):
+    """Chiffres clés : une colonne par série ; avec `niveaux` choisis, une colonne par série et par simulation,
+    pour comparer ce que chaque simulation donne d'une même grandeur. L'écart d'un bouquet se lit au réel de la
+    même simulation."""
     mes = ctx.mesures()
     series = ctx.series(b['series'])
     if not series:
         return {'type': 'indicateurs', 'indisponible': 'Aucun des bouquets demandés n’est visible ici.'}
-    rows = ctx.lignes('batiment', b['series'], [AUTO], any(mes[k]['source'] == 'fait' for k in b['cles']))
+    choisis = list(b.get('niveaux') or [])
+    rows = ctx.lignes('batiment', b['series'], choisis or [AUTO], any(mes[k]['source'] == 'fait' for k in b['cles']))
     if not rows:
         return {'type': 'indicateurs', 'indisponible': 'Aucun calcul terminé pour ces séries.'}
     parc = ctx.portee == 'parc'
+    cols = [(s, n) for s in series for n in (choisis or [None])]
+
+    def garde(r, s, n):
+        return r['_serie'] == s and (n is None or r['_niveau'] == n)
+
     lignes = []
     for k in b['cles']:
         d = mes[k]
         agg = 'somme' if (parc and d['additif']) else 'moyenne'
-        vals = [figures.agreger([r.get(k) for r in rows if r['_serie'] == s], agg) for s in series]
-        ref = vals[0] if series[0] == 'reel' else None
-        ecarts = [None if (ref is None or v is None or i == 0) else round(v - ref, 3) for i, v in enumerate(vals)]
+        vals = [figures.agreger([r.get(k) for r in rows if garde(r, s, n)], agg) for s, n in cols]
+        ecarts = []
+        for i, (s, n) in enumerate(cols):
+            j = cols.index(('reel', n)) if ('reel', n) in cols else None
+            ref = vals[j] if j is not None else None
+            ecarts.append(None if (s == 'reel' or ref is None or vals[i] is None) else round(vals[i] - ref, 3))
         libelle = d['libelle'] + (' (somme)' if agg == 'somme' and parc else ' (moyenne)' if parc else '')
         lignes.append({'cle': k, 'libelle': libelle, 'unite': d['unite'],
                        'valeurs': [None if v is None else round(v, 3) for v in vals], 'ecarts': ecarts})
     colonnes = []
-    for s in series:
-        nivs = [n for n in ('N2', 'N1', 'N0') if any(r['_serie'] == s and r['_niveau'] == n for r in rows)]
-        niv = ', '.join(nivs) or None
+    for s, n in cols:
+        if n is None:
+            nivs = [x for x in ('N2', 'N1', 'N0') if any(r['_serie'] == s and r['_niveau'] == x for r in rows)]
+            niv = ', '.join(nivs) or None
+        else:
+            niv = n
         colonnes.append({'serie': s, 'libelle': ctx.libelle_serie(s) + (f' ({niv})' if niv else ''), 'niveau': niv})
     return {'type': 'indicateurs', 'colonnes': colonnes, 'lignes': lignes}
 

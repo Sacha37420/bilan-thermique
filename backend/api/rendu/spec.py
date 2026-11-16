@@ -48,6 +48,28 @@ def _series(v):
     raise SpecError('Séries attendues : « reel », « bouquets », « reel_et_bouquets » ou une liste de bouquets.')
 
 
+NIVEAUX = ('N0', 'N1', 'N2')
+
+
+def _niveaux(v, au_plus=3):
+    """Simulations choisies pour un bloc : liste de niveaux (ordre N0, N1, N2), vide = le plus fin à jour."""
+    if v is None:
+        return []
+    if not isinstance(v, list) or any(n not in NIVEAUX for n in v):
+        raise SpecError('Simulations : une liste parmi « N0 », « N1 », « N2 ».')
+    lv = [n for n in NIVEAUX if n in set(v)]
+    if len(lv) > au_plus:
+        raise SpecError('Une carte ne montre qu’une simulation à la fois.')
+    return lv
+
+
+def _avec_niveaux(d, b, au_plus=3):
+    lv = _niveaux(b.get('niveaux'), au_plus)
+    if lv:
+        d['niveaux'] = lv
+    return d
+
+
 def _bool(v, defaut):
     if v is None:
         return defaut
@@ -165,7 +187,7 @@ def _bloc(b, portee, mesures):
         if (not isinstance(cles, list) or not cles or len(cles) > 20
                 or any(c not in mesures or mesures[c]['grain'] != 'batiment' for c in cles)):
             raise SpecError('Indicateurs inconnus (vingt au plus).')
-        return {'type': t, 'cles': list(dict.fromkeys(cles)), 'series': _series(b.get('series'))}
+        return _avec_niveaux({'type': t, 'cles': list(dict.fromkeys(cles)), 'series': _series(b.get('series'))}, b)
     if t == 'tableau':
         from . import tableaux
         src = b.get('source')
@@ -186,8 +208,8 @@ def _bloc(b, portee, mesures):
         lim = b.get('limite', 50)
         if isinstance(lim, bool) or not isinstance(lim, int) or not 1 <= lim <= 500:
             raise SpecError('Limite de tableau : entre 1 et 500 lignes.')
-        return {'type': t, 'source': src, 'colonnes': list(dict.fromkeys(cols)), 'tri': tri, 'ordre': ordre,
-                'limite': lim}
+        return _avec_niveaux({'type': t, 'source': src, 'colonnes': list(dict.fromkeys(cols)), 'tri': tri,
+                              'ordre': ordre, 'limite': lim}, b)
     if t == 'graphe':
         return {'type': t, 'graphe': public_graphe(valider_graphe(b.get('graphe'), mesures))}
     if t == 'carte':
@@ -197,7 +219,7 @@ def _bloc(b, portee, mesures):
         s = b.get('series', 'reel')
         if not (s == 'reel' or (isinstance(s, int) and not isinstance(s, bool))):
             raise SpecError('Série de carte : « reel » ou un bouquet.')
-        return {'type': t, 'indicateur': ind, 'series': s}
+        return _avec_niveaux({'type': t, 'indicateur': ind, 'series': s}, b, au_plus=1)
     if t == 'vue3d':
         calc = b.get('calcul', 'dernier_N2')
         if not (calc == 'dernier_N2' or (isinstance(calc, int) and not isinstance(calc, bool) and calc > 0)):
@@ -275,13 +297,15 @@ def schema_json():
         {'properties': {'type': {'const': 'texte'}, 'contenu': {'type': 'string', 'maxLength': MAX_TEXTE,
                         'description': 'Markdown restreint : paragraphes, **gras**, *italique*, listes « - », titres « ### ».'}}},
         {'properties': {'type': {'const': 'indicateurs'}, 'cles': {'type': 'array', 'items': {'type': 'string'}},
-                        'series': serie}},
+                        'series': serie, 'niveaux': {'type': 'array', 'items': {'enum': list(NIVEAUX)}, 'uniqueItems': True, 'description': 'Simulations affichées ; absent ou vide : la plus fine à jour.'}}},
         {'properties': {'type': {'const': 'tableau'}, 'source': {'enum': SOURCES},
                         'colonnes': {'type': 'array', 'items': {'type': 'string'}}, 'tri': {'type': ['string', 'null']},
-                        'ordre': {'enum': ['asc', 'desc']}, 'limite': {'type': 'integer', 'minimum': 1, 'maximum': 500}}},
+                        'ordre': {'enum': ['asc', 'desc']}, 'limite': {'type': 'integer', 'minimum': 1, 'maximum': 500},
+                        'niveaux': {'type': 'array', 'items': {'enum': list(NIVEAUX)}, 'uniqueItems': True, 'description': 'Simulations affichées ; absent ou vide : la plus fine à jour.'}}},
         {'properties': {'type': {'const': 'graphe'}, 'graphe': graphe}},
         {'properties': {'type': {'const': 'carte'}, 'indicateur': {'type': 'string'},
-                        'series': {'oneOf': [{'const': 'reel'}, {'type': 'integer'}]}}},
+                        'series': {'oneOf': [{'const': 'reel'}, {'type': 'integer'}]},
+                        'niveaux': {'type': 'array', 'items': {'enum': list(NIVEAUX)}, 'maxItems': 1}}},
         {'properties': {'type': {'const': 'vue3d'}, 'calcul': {'oneOf': [{'const': 'dernier_N2'}, {'type': 'integer'}]},
                         'grandeur': {'enum': GRANDEURS_3D}, 'camera': {'enum': CAMERAS}}},
         {'properties': {'type': {'const': 'fiche'}, 'sections': {'type': 'array', 'items': {'enum': FICHE_SECTIONS}}}},
