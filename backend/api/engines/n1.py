@@ -14,6 +14,7 @@ import time
 import numpy as np
 
 from . import solar
+from .inputs import ground_series
 from .inputs import ORIENTATIONS
 
 R_SE = 0.04
@@ -99,15 +100,27 @@ def run(params, weather, *, t_init=None, keep_series=True):
     def vec(f):
         return np.array([f(p) for p in ps], dtype=float)
 
+    t_heat = np.empty((S, T))
+    for i, p in enumerate(ps):
+        t_heat[i] = schedules(hidx, p.residential, p.t_heat)[1]
+    # Lot 32 : température vue par le plancher bas heure par heure (sol simulé, vide sanitaire, sous-sol) et U
+    # propre du plancher vers elle.
+    t_g_all = np.empty((S, T))
+    u_fl = np.empty(S)
+    ground_desc = []
+    for i, p in enumerate(ps):
+        g, u, d = ground_series(p, t_e, t_heat[i])
+        t_g_all[i], u_fl[i] = g, u
+        ground_desc.append(d)
+
     a_f = vec(lambda p: p.a_floor)
     a_m = vec(lambda p: p.a_m_factor) * a_f
     a_t = A_T_FACTOR * a_f
     c_m = vec(lambda p: p.c_m) * a_f
     h_w = vec(lambda p: p.h_tr_w)
     h_op = vec(lambda p: p.h_tr_op_air)
-    h_fl = vec(lambda p: p.h_floor)
+    h_fl = vec(lambda p: p.floor_area) * u_fl
     h_ve = np.maximum(vec(lambda p: p.h_ve), 1e-6)
-    t_g = vec(lambda p: p.t_ground)
     h_is = H_IS * a_t
     h_ms = H_MS * a_m
     h_op_tot = h_op + h_fl
@@ -129,9 +142,6 @@ def run(params, weather, *, t_init=None, keep_series=True):
         if irr0 is None:
             irr0 = irr
     phi_sol = sol_w + sol_o
-    t_heat = np.empty((S, T))
-    for i, p in enumerate(ps):
-        t_heat[i] = schedules(hidx, p.residential, p.t_heat)[1]
     t_cool = np.array([p.t_cool if p.t_cool is not None else np.inf for p in ps])
 
     phi_ia = 0.5 * phi_int
@@ -146,9 +156,9 @@ def run(params, weather, *, t_init=None, keep_series=True):
     t_s = np.empty((S, T))
     phi_hc = np.empty((S, T))
 
-    def step(tm_prev, te, phi_ia_t, phi_st_t, phi_m_t, phi):
+    def step(tm_prev, te, tg, phi_ia_t, phi_st_t, phi_m_t, phi):
         # Plancher : sa part de H_tr_em échange avec le sol (θ_g) et non avec l'air extérieur.
-        te_m = te + floor_share * (t_g - te)
+        te_m = te + floor_share * (tg - te)
         phi_mtot = phi_m_t + h_em * te_m + h3 * (phi_st_t + h_w * te + h1 * ((phi_ia_t + phi) / h_ve + te)) / h2
         tm = (tm_prev * (cap - 0.5 * (h3 + h_em)) + phi_mtot) / (cap + 0.5 * (h3 + h_em))
         tm_avg = 0.5 * (tm + tm_prev)
@@ -160,7 +170,7 @@ def run(params, weather, *, t_init=None, keep_series=True):
     test = PHI_TEST_W_M2 * a_f
     for k in range(T):
         te = t_e[k]
-        args = (phi_ia[:, k], phi_st_all[:, k], phi_m_all[:, k])
+        args = (t_g_all[:, k], phi_ia[:, k], phi_st_all[:, k], phi_m_all[:, k])
         tm0, ts0, ta0 = step(theta_m, te, *args, zero)
         need_h = ta0 < t_heat[:, k]
         need_c = ta0 > t_cool
@@ -178,7 +188,7 @@ def run(params, weather, *, t_init=None, keep_series=True):
     heat = np.clip(phi_hc, 0, None)
     cool = np.clip(-phi_hc, 0, None)
     t_op = 0.3 * t_air + 0.7 * t_s
-    loss_tr = (h_w + h_op)[:, None] * (t_air - t_e[None, :]) + h_fl[:, None] * (t_air - t_g[:, None])
+    loss_tr = (h_w + h_op)[:, None] * (t_air - t_e[None, :]) + h_fl[:, None] * (t_air - t_g_all)
     loss_ve = h_ve[:, None] * (t_air - t_e[None, :])
     dur = time.monotonic() - t0
     results = []
@@ -201,6 +211,7 @@ def run(params, weather, *, t_init=None, keep_series=True):
             'monthly_heating_kwh': [round(float(heat[i][a:b].sum() / 1000.0), 1)
                                     for a, b in zip(month_edges[:-1], month_edges[1:])],
             'duration_s': round(dur / S, 4),
+            'sol': ground_desc[i],
         }
         if keep_series:
             r['t_air'] = [round(float(x), 2) for x in t_air[i]]

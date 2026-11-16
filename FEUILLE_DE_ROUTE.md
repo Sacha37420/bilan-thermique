@@ -694,9 +694,33 @@ HD, recaler l'emprise et mesurer la hauteur sur un modèle numérique de surface
 ne voit pas la maison** (sursol médian 1,2 m pour 6 m : donnée photogrammétrique antérieure ou trop lisse) — la
 note le dit, la hauteur BD TOPO reste à vérifier.
 
-## Lot 32 — Sol simulé en 1D, couplé au sous-sol et au plancher bas   ·   statut : à faire
-**Objectif :** température du sol par profondeur et dans le temps, d'après la météo, à la place d'une température
-de sol constante.
+## Lot 32 — Sol simulé en 1D, couplé au sous-sol et au plancher bas   ·   statut : livré
+**Objectif :** couplage sous-sol / sol fondé sur une simulation de la température du sol en profondeur et dans le
+temps, d'après la météo (propriétaire, 2026-11-16), au lieu d'un sol à 12 °C constants pour tout plancher bas.
+**Tâches :**
+- [x] `api/engines/sol.py` : colonne de sol 1D de 15 m (40 mailles), conduction transitoire implicite au pas
+  horaire sur la météo du calcul, surface couplée à l'air (h = 15 W/m²·K), fond adiabatique, trois années de mise
+  en régime ; sol limoneux humide (λ 1,5 W/m·K, ρc 2,0 MJ/m³·K)
+- [x] Couplage selon `plancher.type` : terre-plein (sol à B′/2, borné 0,5–6 m), vide sanitaire ventilé (nœud :
+  plancher, sol à 30 cm, air extérieur), sous-sol non chauffé (nœud : plancher, murs enterrés, radier, murs hors
+  sol, ventilation ; `sous_sol.profondeur_m`, 2,5 m par défaut), local chauffé dessous (aucun échange)
+- [x] `plancher.u` reste le **U équivalent vers l'extérieur** (« U final » du DPE 3CL) : U propre du plancher déduit
+  pour un vide sanitaire ou un sous-sol (1/Ue = 1/Uf + A/ΣH, EN ISO 13370) — le modèle redonne Ue en moyenne
+  annuelle, sans compter deux fois le local tampon ; U incompatible ⇒ U propre plafonné à 5 W/m²·K, avec une note
+- [x] Branché dans N0, N1 (série horaire par jeu de paramètres, fourchette comprise) et N2 (température de sol
+  portée par chaque heure de la météo ; couches du plancher au U propre) ; description figée avec chaque calcul
+  (`sol`) ; moteurs `n0-4`, `n1-4`, `n2-3` (calculs précédents périmés)
+**Tests à passer avant de clore le lot :**
+- [x] `api/tests/test_sol.py` : onde annuelle analytique (amplitude e^(−z/d), retard z/d, d ≈ 2,74 m), sol profond
+  stable, couplages par type, U équivalent retrouvé en moyenne, plafond, N0/N1/N2 branchés, fait de profondeur
+- [x] Suite backend complète verte ; `ng build` sans erreur
+**Vérifié le :** 2026-11-16 — essai réel (maison de Chambray-lès-Tours, année type PVGIS, emprise 103 m²) : sol à
+0,5 m entre 2,4 et 21,9 °C, à 4 m entre 10,1 et 14,0 °C, à 8 m quasi constant (moyenne 12,1 °C = air). Besoin N1
+par rapport au sol constant, U équivalent 0,8 : terre-plein +1,2 %, vide sanitaire +19,6 %, sous-sol +11,6 % (le
+local tampon suit l'air extérieur en hiver : l'ancien sol à 12 °C était optimiste en saison de chauffe) ; U 2,0 :
+incompatible avec un vide ventilé, U propre plafonné (−6 % et −8 %).
+**Limites :** l'intérieur des nœuds tampons est pris à la consigne (couplage non itéré) ; ni soleil, ni neige, ni
+évaporation en surface du sol ; un sol par défaut (pas de nature de sol par site).
 
 ## Lot 33 — Protubérances   ·   statut : à faire
 **Objectif :** un mur qui dépasse du volume chauffé n'échange pas avec le nœud intérieur.

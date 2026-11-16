@@ -5,7 +5,8 @@ chaîne (facultative) → paramètres. `from_envelope(...)` : bâtiment maillé 
 modèles de paroi) → mêmes paramètres, pour comparer N1 et N2 sur un même bâtiment.
 
 Hypothèses communes avec le N2 (pour rester comparables, § 6.3) : pas d'échange infrarouge avec le
-ciel, ciel isotrope, albédo du sol 0,20, plancher bas couplé à une température de sol constante.
+ciel, ciel isotrope, albédo du sol 0,20, plancher bas couplé au sol simulé en 1D d'après la météo
+(Lot 32, `engines.sol` ; température constante pour `from_envelope`, comparaison N1/N2 historique).
 Ponts thermiques : non comptés (hors périmètre, comme le N2 — `refonte.md` D9).
 """
 
@@ -43,6 +44,11 @@ class Params:
     t_ground: float = GROUND_T_DEFAULT
     horizon: dict = field(default_factory=lambda: {o: 0.0 for o in ORIENTATIONS})
     horizon_profile: dict | None = None   # Lot 30 : profil par tranche d'azimut (`api.horizon`)
+    # Lot 32 : plancher bas couplé au sol simulé (`engines.sol`) ; False ⇒ t_ground constant (comme avant).
+    ground_model: bool = False
+    floor_type: str = 'terre_plein'
+    floor_perimeter: float = 0.0          # périmètre exposé du plancher (m), pour B′
+    basement_depth: float | None = None
     # Protections solaires (Lot 14) : [{kind, orientation, mode, params, control}] — engines.shading.
     devices: list = field(default_factory=list)
     sources: dict = field(default_factory=dict)
@@ -128,6 +134,8 @@ def from_fiche(values, geometry=None):
         residential=usage in RESIDENTIAL,
         horizon=(geometry or {}).get('horizon_deg') or {o: 0.0 for o in ORIENTATIONS},
         horizon_profile=(geometry or {}).get('horizon_profil') or None,
+        ground_model=True, floor_type=floor_type, floor_perimeter=perim * (1.0 - mit),
+        basement_depth=values.get('sous_sol.profondeur_m'),
     )
 
 
@@ -189,3 +197,17 @@ def from_envelope(envelope, paroi_layers, *, h_i=7.7, h_e=25.0, r_ground=0.5, n_
         g_window=g_a / win_total if win_total else 0.0, frame_factor=1.0, absorptance=alpha_a / opaque_a if opaque_a else 0.6,
         c_m=c_m_per_m2, n_vent=n_vent, gains_w_m2=gains_w / af, t_heat=t_heat, t_ground=t_ground,
     )
+
+
+def ground_series(p, t_e, t_inside):
+    """(température vue par le plancher bas heure par heure, U propre du plancher vers elle, description) —
+    Lot 32 ; température constante et U de la fiche si le modèle de sol n'est pas demandé (`Params.ground_model`)."""
+    import numpy as np
+    if not p.ground_model:
+        return (np.full(len(t_e), float(p.t_ground)), float(p.u_floor),
+                {'modele': 'température de sol constante', 't_c': p.t_ground})
+    from . import sol
+    area = p.floor_area or (p.a_floor or 0.0)
+    t, u_node, desc = sol.floor_boundary(p.floor_type, area, p.floor_perimeter, p.u_floor, t_e, t_inside,
+                                         p.basement_depth)
+    return t, u_node, sol.summary(t, desc)

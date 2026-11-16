@@ -99,6 +99,8 @@ CATALOGUE = [
     _k('toiture.pente_deg', 'Pente de toiture', 'enveloppe', 'number', '°', 0, 70, weight=0.3),
     _k('plancher.type', 'Plancher bas', 'enveloppe', 'enum', choices=FLOOR, weight=0.5),
     _k('plancher.u', 'U du plancher bas', 'enveloppe', 'number', 'W/m²·K', 0.08, 4.0, weight=2),
+    # Lot 32 : profondeur du sous-sol non chauffé (murs enterrés, radier) — couplage au sol simulé.
+    _k('sous_sol.profondeur_m', 'Profondeur du sous-sol', 'enveloppe', 'number', 'm', 0.5, 8.0, weight=0),
     _k('enveloppe.inertie', 'Inertie', 'enveloppe', 'enum', choices=INERTIA, weight=1),
     _k('enveloppe.couleur_absorptance', 'Absorptance solaire des murs', 'enveloppe', 'number', '', 0.1, 0.98, weight=0.3),
     # Menuiseries

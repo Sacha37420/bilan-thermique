@@ -16,7 +16,7 @@ from .engines import n0, n1, n2_inputs
 from .fingerprint import stable_hash
 from .models import CalcRun, Job
 
-ENGINE_VERSION = {'N0': 'n0-3', 'N1': 'n1-3', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16) ; -3 : horizon par profil (Lot 30)
+ENGINE_VERSION = {'N0': 'n0-4', 'N1': 'n1-4', 'N2': n2_inputs.ENGINE_VERSION}  # -2 : consommations (Lot 16) ; -3 : horizon par profil (Lot 30) ; -4 : sol simulé (Lot 32)
 
 
 class CalcError(ValueError):
@@ -127,7 +127,9 @@ def params_snapshot(p):
             'inertie': {'c_m_j_k_m2': p.c_m, 'a_m': p.a_m_factor}, 'renouvellement_vol_h': round(p.n_vent, 3),
             'apports_w_m2': p.gains_w_m2, 'consigne_chauffage_c': p.t_heat, 'consigne_froid_c': p.t_cool,
             'occupation': 'logement (constante)' if p.residential else 'tertiaire : 8 h–19 h, lundi–vendredi',
-            'horizon_deg': p.horizon, 'protections': [{k: d[k] for k in ('kind', 'orientation', 'mode')} for d in p.devices]}
+            'horizon_deg': p.horizon, 'protections': [{k: d[k] for k in ('kind', 'orientation', 'mode')} for d in p.devices],
+            'plancher_bas': {'type': p.floor_type, 'perimetre_expose_m': round(p.floor_perimeter, 1),
+                             'profondeur_sous_sol_m': p.basement_depth, 'modele_sol': p.ground_model}}
 
 
 def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub='', force=False, job=None,
@@ -329,7 +331,9 @@ def run_n2(run, progress_cb=None):
                 f"Environnement observé non généré ({run.settings['environnement'].get('error') or 'cause inconnue'}) : "
                 'obstacles réduits aux voisins BD TOPO.']
         run.save(update_fields=['inputs_hash', 'inputs', 'settings'])
-    w = n2_inputs.weather_for_n2(weather, building.georef_north_offset_deg or 0.0, built['residential'])
+    t_g, ground_desc = n2_inputs.ground_for(built, weather)                 # Lot 32 : sol simulé
+    w = n2_inputs.weather_for_n2(weather, building.georef_north_offset_deg or 0.0, built['residential'], t_g)
+    run.inputs = {**(run.inputs or {}), 'sol': ground_desc}
     envelope, env = built['envelope'], built['environment']
     # Réflexion par le sol (Lot AI) : seulement avec un environnement relevé relié, qui porte l'albédo.
     albedo, ground_ids = _environment_ground(building.environment) if building.environment_id else (None, set())
@@ -379,5 +383,5 @@ def run_n2(run, progress_cb=None):
     ind['completeness'] = run.settings.get('completeness')
     run.status, run.results, run.indicators = Job.DONE, out, ind
     run.duration_s = round(time.monotonic() - t0, 2)
-    run.save(update_fields=['status', 'results', 'indicators', 'duration_s'])
+    run.save(update_fields=['status', 'results', 'indicators', 'duration_s', 'inputs'])
     return run

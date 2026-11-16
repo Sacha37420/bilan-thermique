@@ -11,6 +11,7 @@ import time
 import numpy as np
 
 from . import solar
+from .inputs import ground_series
 from .n1 import MONTH_HOURS, schedules, solar_terms
 
 
@@ -29,9 +30,11 @@ def run(p, weather):
     T = len(t_e)
     sol_w, sol_o, _ = solar_terms(p, az, el, dni, dhi, t_e, hidx)
     gain_f, t_set = schedules(hidx, p.residential, p.t_heat)
+    t_g, u_fl, ground_desc = ground_series(p, t_e, t_set)    # Lot 32 : sol simulé, vide sanitaire, sous-sol
+    h_floor = p.floor_area * u_fl
     phi_int = p.gains_w_m2 * p.a_floor * gain_f
     h_air = p.h_tr_w + p.h_tr_op_air + p.h_ve
-    h_tot = h_air + p.h_floor
+    h_tot = h_air + h_floor
     tau_h = p.c_m * p.a_floor / 3600.0 / max(h_tot, 1e-9)
     edges = [e for e in MONTH_HOURS.tolist() if e <= T]
     if edges[-1] != T:
@@ -41,7 +44,7 @@ def run(p, weather):
     for a, b in zip(edges[:-1], edges[1:]):
         hours = b - a
         q_ht = (h_air * np.clip(t_set[a:b] - t_e[a:b], 0, None).sum()
-                + p.h_floor * np.clip(t_set[a:b] - p.t_ground, 0, None).sum()) / 1000.0
+                + h_floor * np.clip(t_set[a:b] - t_g[a:b], 0, None).sum()) / 1000.0
         q_gn = (phi_int[a:b].sum() + sol_w[a:b].sum() + sol_o[a:b].sum()) / 1000.0
         gamma = q_gn / q_ht if q_ht > 1e-9 else 1e9
         eta = utilisation_factor(gamma, tau_h) if q_ht > 1e-9 else 0.0
@@ -52,5 +55,5 @@ def run(p, weather):
     return {
         'level': 'N0', 'hours': T, 'heating_kwh': round(total, 1), 'cooling_kwh': 0.0,
         'monthly_heating_kwh': monthly, 'tau_h': round(tau_h, 1),
-        'h_tot_w_k': round(h_tot, 1), 'duration_s': round(time.monotonic() - t0, 4),
+        'h_tot_w_k': round(h_tot, 1), 'duration_s': round(time.monotonic() - t0, 4), 'sol': ground_desc,
     }
