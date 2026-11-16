@@ -74,6 +74,8 @@ def indicateurs(ctx, b):
     pour comparer ce que chaque simulation donne d'une même grandeur. L'écart d'un bouquet se lit au réel de la
     même simulation."""
     mes = ctx.mesures()
+    if not b['cles']:
+        return {'type': 'indicateurs', 'indisponible': 'Aucun chiffre choisi : bloc à régler.'}
     series = ctx.series(b['series'])
     if not series:
         return {'type': 'indicateurs', 'indisponible': 'Aucun des bouquets demandés n’est visible ici.'}

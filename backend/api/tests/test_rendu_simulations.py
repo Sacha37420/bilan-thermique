@@ -35,6 +35,10 @@ class ValidationTest(TestCase):
                 spec_mod.valider(doc({'type': 'tableau', 'source': 'batiments', 'niveaux': mauvais}))
         v = spec_mod.valider(doc({'type': 'tableau', 'source': 'batiments', 'colonnes': []}))
         self.assertTrue(v['sections'][0]['blocs'][0]['colonnes'])          # tableau neuf : colonnes par défaut
+        v = spec_mod.valider(doc({'type': 'tableau', 'source': 'batiments', 'colonnes': [], 'tri': ''},
+                                 {'type': 'indicateurs', 'cles': [], 'series': 'reel'}))
+        self.assertIsNone(v['sections'][0]['blocs'][0]['tri'])
+        self.assertEqual(v['sections'][0]['blocs'][1]['cles'], [])
         with self.assertRaises(spec_mod.SpecError):
             spec_mod.valider(doc({'type': 'carte', 'indicateur': 'heating_kwh_m2', 'niveaux': ['N0', 'N1']}))
 
@@ -60,6 +64,13 @@ class SimulationsRenduTest(RenduMixin, TestCase):
         self.assertAlmostEqual(v[i], 50.0)
         self.assertAlmostEqual(ind['lignes'][0]['ecarts'][i], -50.0)
         self.assertIsNone(ind['lignes'][0]['ecarts'][0])
+
+    def test_bloc_neuf_ne_bloque_pas_le_document(self):
+        d = self.client_doc(doc({'type': 'indicateurs', 'cles': [], 'series': 'reel'},
+                                {'type': 'tableau', 'source': 'batiments', 'colonnes': [], 'tri': ''}))
+        ind, tab = d['sections'][0]['blocs']
+        self.assertEqual(ind['indisponible'], 'Aucun chiffre choisi : bloc à régler.')
+        self.assertTrue(tab['colonnes'])
 
     def test_chiffres_cles_une_seule_simulation_imposee(self):
         self.n2_a_jour(self.b1, k=0.3)
