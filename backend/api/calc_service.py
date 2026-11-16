@@ -359,8 +359,16 @@ def run_n2(run, progress_cb=None):
     months = n1.MONTH_HOURS[n1.MONTH_HOURS <= len(heat)].tolist()
     if months[-1] != len(heat):
         months.append(len(heat))
-    keep = ('hours', 'heating_kwh', 'cooling_kwh', 't_air_mean', 'balance', 'flux_positive_kwh', 'flux_negative_kwh')
-    out = {k: res[k] for k in keep}
+    keep = ('hours', 'heating_kwh', 'cooling_kwh', 't_air_mean', 'balance', 'flux_positive_kwh', 'flux_negative_kwh',
+            'protrusions')
+    out = {k: res[k] for k in keep if k in res}
+    pr = res.get('protrusions') or {}
+    if pr.get('n'):
+        run.inputs = {**(run.inputs or {}), 'limites': (run.inputs or {}).get('limites', []) + [
+            f"{pr['n']} triangle(s) ({pr['aire_m2']:.0f} m²) dépassent du volume chauffé : traités comme des ailettes "
+            "dehors sur leurs deux faces, sans échange avec l’intérieur (Lot 33)."]}
+    elif pr.get('avertissement'):
+        run.inputs = {**(run.inputs or {}), 'limites': (run.inputs or {}).get('limites', []) + [pr['avertissement']]}
     out.update({
         'level': 'N2',
         't_air': [round(x, 2) for x in res['t_air'][1:]], 't_op': [round(x, 2) for x in res['t_op'][1:]],

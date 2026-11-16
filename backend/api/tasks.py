@@ -134,6 +134,7 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
             # Bilan par poste au nœud d'air (Lot AB2) — None en mode 'imposed',
             # où la ligne du nœud d'air est écrasée par Dirichlet.
             'balance': result['balance'],
+            'protrusions': result.get('protrusions'),
             't_air': result['t_air'],
             't_op': result.get('t_op'),
             't_mrt': result.get('t_mrt'),

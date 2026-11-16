@@ -722,8 +722,30 @@ incompatible avec un vide ventilé, U propre plafonné (−6 % et −8 %).
 **Limites :** l'intérieur des nœuds tampons est pris à la consigne (couplage non itéré) ; ni soleil, ni neige, ni
 évaporation en surface du sol ; un sol par défaut (pas de nature de sol par site).
 
-## Lot 33 — Protubérances   ·   statut : à faire
-**Objectif :** un mur qui dépasse du volume chauffé n'échange pas avec le nœud intérieur.
+## Lot 33 — Protubérances   ·   statut : livré
+**Objectif :** un mur qui dépasse du bâtiment était vu comme une paroi dont la face « intérieure » échange avec le
+nœud d'air chauffé (propriétaire, 2026-11-16) — aberrant : ses deux faces sont dehors.
+**Tâches :**
+- [x] `api/protrusions.py` : rayon lancé de chaque triangle vers l'intérieur sur le maillage du bâtiment — hors
+  volume s'il ressort sans rien rencontrer, s'il rencontre à moins de 80 cm une face opposée (deux faces d'une même
+  plaque ; un coin en biseau pan de toit / mur n'en est pas un), ou si la première face est abordée par l'extérieur
+  (bout d'un mur qui bute sur la façade) ; garde-fou : au-delà de 50 % de l'enveloppe, maillage hors convention
+  (murs épais en deux faces, maillage ouvert), rien n'est reclassé et l'avertissement le dit
+- [x] `building_solver` : un triangle « hors volume » reste une ailette (conduction, inertie, soleil, ombre portée)
+  dont les deux faces échangent avec l'air extérieur ; ni couplage au nœud d'air, ni flux d'enveloppe, ni
+  température radiante, ni cadre ; indices inchangés (ombrage précalculé valable) ; appliqué à tout calcul N2 et
+  à l'outil Calcul 3D (`detect_protrusions`, actif par défaut)
+- [x] Compte rendu (`protrusions`) dans le résultat ; ligne dans les limites du N2 quand des triangles sont reclassés
+**Tests à passer avant de clore le lot :**
+- [x] `api/tests/test_protuberances.py` : bâtiment fermé et volumes accolés (rien), biseaux d'égout (rien), mur de
+  20 cm dépassant de 3 m (ses 8 triangles), murs épais en deux faces (rien, avertissement), solveur (besoin égal à
+  celui du bâtiment seul ; +11,5 % sans la détection)
+- [x] Suite backend complète verte
+**Vérifié le :** 2026-11-16 — enveloppes LiDAR réelles (hôtel de ville de Tours 342 triangles, rue Colbert 66,
+Langeais 64) : aucun triangle reclassé, détection en 0,01 s ; une première version comptait 1 à 4 triangles d'égout
+comme minces (biseau pan de toit / mur), d'où la condition de faces opposées.
+**Limites :** une annexe non chauffée épaisse (garage accolé) n'est pas un élément mince : elle reste dans le volume
+tant qu'elle n'est pas retirée de l'enveloppe ; la face arrière d'une ailette n'est pas ensoleillée.
 
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant

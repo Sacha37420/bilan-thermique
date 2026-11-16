@@ -218,7 +218,7 @@ def _build_triangle_systems(triangles, paroi_layers_by_id, dx_max):
     return systems
 
 
-def _assemble_global_kc(systems, areas, h_i_list, frame_g=None):
+def _assemble_global_kc(systems, areas, h_i_list, frame_g=None, outside=None, h_outside=25.0):
     """h_i_list : une valeur PAR TRIANGLE (Lot R — ISO 6946 par orientation via
     h_i_from_tilt, ou la même constante répétée pour tous si h_i_auto est
     désactivé — voir run_building_simulation) : remplace l'ancien h_i scalaire
@@ -255,6 +255,12 @@ def _assemble_global_kc(systems, areas, h_i_list, frame_g=None):
         K_global[off:off + n, off:off + n] += K * area
         C_global[off:off + n, off:off + n] += C * area
 
+        if outside is not None and outside[i]:
+            # Lot 33 : hors du volume chauffé — la face « intérieure » échange avec l'air extérieur (second membre :
+            # _assemble_F_hour), pas avec le nœud d'air.
+            K_global[last, last] += h_outside * area
+            continue
+
         K_global[last, last] += h_i * area
         K_global[last, air_idx] -= h_i * area
         K_global[air_idx, last] -= h_i * area
@@ -286,7 +292,7 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
                       occluder_intersector=None, centroids=None, vegetation_scene=None,
                       air_idx=None, g_vent=0.0, apports_internes_w=0.0, t_ground=None,
                       frame_g=None, shading_fs_dir=None, shading_fs_dif=None, volet_closed=False,
-                      diagnostics=None, ground_reflect_factor=None):
+                      diagnostics=None, ground_reflect_factor=None, outside=None, h_outside=25.0):
     """h_e_vec : la valeur DE CETTE HEURE, PAR TRIANGLE (Lot R — constante du
     run ou dérivée du vent, uniforme par défaut ; Lot J — réduite pour les
     triangles dont le volet/store est fermé, voir SHADING_PROFILES/
@@ -401,9 +407,14 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
 
         f_local = np.zeros(n)
         f_local[0] += h_e_vec[i] * t_boundary
+        is_out = outside is not None and outside[i]
+        if is_out:
+            f_local[n - 1] += h_outside * t_ext      # Lot 33 : seconde face dehors aussi
         for kind, ref, value in wall_solver._propagate_solar(layers, e_glo, mesh):
             if kind == 'surface':
                 f_local[ref] += value
+            elif kind == 'interior' and is_out:
+                continue                              # transmis au travers d'une ailette : ressort dehors
             elif kind == 'interior':
                 # Rayonnement transmis intégralement (aucune couche opaque
                 # rencontrée, ex. un simple/double vitrage) : a fini de
@@ -433,7 +444,7 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
         # (voir _assemble_global_kc) — utilise le même t_boundary que la paroi
         # elle-même (t_ground si ce triangle est 'ground', t_ext sinon ; combo
         # non réaliste pour une fenêtre mais géré sans crash).
-        if frame_g is not None and frame_g[i] and air_idx is not None:
+        if frame_g is not None and frame_g[i] and air_idx is not None and not is_out:
             F[air_idx] += frame_g[i] * t_boundary
             frame_source_w += frame_g[i] * t_boundary
 
@@ -646,9 +657,15 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     du ciel est aussi recalculé une fois (pas par heure, il ne dépend que de
     la géométrie) plutôt que d'utiliser la formule analytique par défaut.
     """
-    triangles = building_envelope['triangles']
-    if not triangles:
+    if not building_envelope.get('triangles'):
         raise BuildingSimulationError("Le bâtiment n'a aucun triangle.")
+    # Lot 33 : un mur qui dépasse du volume chauffé (ailette, mur prolongé, double face) n'échange pas avec le nœud
+    # intérieur — ses deux faces sont dehors (`api.protrusions`). Indices des triangles inchangés (ombrage précalculé).
+    protrusion_report = {'n': 0, 'aire_m2': 0.0, 'part': 0.0}
+    if payload.get('detect_protrusions', True):
+        from . import protrusions
+        building_envelope, protrusion_report = protrusions.mark(building_envelope)
+    triangles = building_envelope['triangles']
 
     dx_max = payload['dx_max']
     h_e_constant = payload['h_e']
@@ -762,6 +779,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # Refonte (Lot 12, E9) : paroi mitoyenne contre un local chauffé — adiabatique : aucun échange
     # côté extérieur (flux nul), aucun ensoleillement. Elle garde sa capacité et sa conduction.
     is_adiabatic = [tri.get('boundary') == 'adiabatic' for tri in triangles]
+    is_outside = [tri.get('boundary') == 'hors_volume' for tri in triangles]
 
     shading_delta_r = []
     shading_fs_dir = []
@@ -779,7 +797,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     systems = _build_triangle_systems(triangles, paroi_layers_by_id, dx_max)
     K_global, C_global, offsets, air_idx, n_dof = _assemble_global_kc(
-        systems, areas, h_i_list, frame_g=frame_g,
+        systems, areas, h_i_list, frame_g=frame_g, outside=is_outside, h_outside=h_e_constant,
     )
 
     planning = payload.get('planning')
@@ -861,7 +879,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # l'aire (approximation usuelle sans facteurs de forme), et température opérative
     # θ_op = (θ_air + θ_rm) / 2 (air calme, ISO 7730) — même grandeur de confort que le N1.
     inner_idx = np.array([offsets[i] + systems[i][0]['n_wall_nodes'] - 1 for i in range(len(systems))])
-    inner_w = np.array(areas, dtype=float)
+    # Lot 33 : une paroi hors du volume chauffé ne rayonne pas vers l'intérieur.
+    inner_w = np.array([0.0 if is_outside[i] else a for i, a in enumerate(areas)], dtype=float)
     inner_w = inner_w / max(inner_w.sum(), 1e-12)
     t_mrt_series = [float(T[inner_idx] @ inner_w)]
     t_op_series = [0.5 * (t_air_series[0] + t_mrt_series[0])]
@@ -893,7 +912,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     # Dirichlet, donc AUCUN de ces postes n'agit sur la solution (même
     # raisonnement que g_vent/apports_internes_w, déjà ignorés dans ce mode).
     track_balance = mode in ('free', 'thermostat')
-    frame_g_total = sum(frame_g)
+    frame_g_total = sum(g for g, out in zip(frame_g, is_outside) if not out)   # Lot 33 : sans les ailettes
     balance_j = {
         'envelope': 0.0, 'solar_transmitted': 0.0, 'internal_gains': 0.0,
         'ventilation': 0.0, 'frames': 0.0, 'hvac': 0.0,
@@ -975,6 +994,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             frame_g=frame_g, shading_fs_dir=shading_fs_dir, shading_fs_dif=shading_fs_dif,
             volet_closed=volet_closed, diagnostics=hour_diagnostics,
             ground_reflect_factor=ground_reflect_factor,
+            outside=is_outside, h_outside=h_e_constant,
         )
         b_free = (C_global / DT_SECONDS) @ T + F
 
@@ -1036,6 +1056,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         flux = 0.0
         t_air_next = T_next[air_idx]
         for i, (mesh, K, C, layers) in enumerate(systems):
+            if is_outside[i]:
+                continue
             off = offsets[i]
             n = mesh['n_wall_nodes']
             t_surf = T_next[off + n - 1]
@@ -1091,6 +1113,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     return {
         'hours': len(weather),
+        'protrusions': protrusion_report,
         'balance': balance,
         't_air': t_air_series,
         't_mrt': t_mrt_series,
