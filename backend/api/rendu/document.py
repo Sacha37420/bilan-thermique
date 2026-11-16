@@ -48,6 +48,8 @@ def resoudre(ctx, spec):
 
 def bloc(ctx, b):
     t = b['type']
+    if 'a_regler' in b:
+        return {'type': t, 'indisponible': f"Bloc à régler : {b['a_regler']}"}
     if t == 'texte':
         return {'type': t, 'html': texte.vers_html(b['contenu'])}
     if t == 'saut_de_page':

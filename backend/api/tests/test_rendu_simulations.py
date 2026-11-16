@@ -72,6 +72,18 @@ class SimulationsRenduTest(RenduMixin, TestCase):
         self.assertEqual(ind['indisponible'], 'Aucun chiffre choisi : bloc à régler.')
         self.assertTrue(tab['colonnes'])
 
+    def test_graphe_pas_encore_regle_ne_bloque_pas_le_document(self):
+        d = self.client_doc(doc({'type': 'graphe', 'graphe': {'forme': 'barres', 'x': None, 'y': [], 'couleur': 'niveau'}},
+                                {'type': 'texte', 'contenu': 'suite'}))
+        g, t = d['sections'][0]['blocs']
+        self.assertTrue(g['indisponible'].startswith('Bloc à régler : '))
+        self.assertIn('suite', t['html'])
+        with self.assertRaises(spec_mod.SpecError):                        # un modèle enregistré reste strict
+            spec_mod.valider(doc({'type': 'graphe', 'graphe': {'forme': 'barres', 'x': None, 'y': []}}))
+        r = self.g.post('/api/rendu/document/', {'spec': doc({'type': 'inconnu'}), 'cible': {'batiment': self.b1.pk}},
+                        format='json')
+        self.assertEqual(r.status_code, 400)
+
     def test_chiffres_cles_une_seule_simulation_imposee(self):
         self.n2_a_jour(self.b1, k=0.3)
         ind = self.client_doc(doc({'type': 'indicateurs', 'cles': ['heating_kwh_m2'], 'series': 'reel',

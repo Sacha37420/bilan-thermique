@@ -243,7 +243,19 @@ def _bloc(b, portee, mesures):
     return {'type': 'saut_de_page'}
 
 
-def valider(spec, mesures=None):
+def _bloc_tolerant(b, portee, mesures):
+    """Aperçu et exports : un bloc mal réglé (tout juste ajouté…) devient « à régler » au lieu de faire refuser tout le
+    document. Un type inconnu reste un refus."""
+    try:
+        return _bloc(b, portee, mesures)
+    except SpecError as exc:
+        if not isinstance(b, dict) or b.get('type') not in TYPES_BLOCS:
+            raise
+        return {'type': b['type'], 'a_regler': str(exc)}
+
+
+def valider(spec, mesures=None, tolerant=False):
+    """`tolerant` (aperçu, exports) : voir `_bloc_tolerant` ; un modèle enregistré reste validé strictement."""
     mesures = mesures if mesures is not None else catalogue.mesures()
     if not isinstance(spec, dict):
         raise SpecError('Spécification attendue (objet).')
@@ -273,7 +285,7 @@ def valider(spec, mesures=None):
         if total > MAX_BLOCS_TOTAL:
             raise SpecError('Document trop long (150 blocs au plus).')
         out.append({'titre': _titre(s.get('titre'), 'Titre de section trop long (200 caractères au plus).'),
-                    'blocs': [_bloc(b, portee, mesures) for b in blocs]})
+                    'blocs': [(_bloc_tolerant if tolerant else _bloc)(b, portee, mesures) for b in blocs]})
     return {'version': 1, 'portee': portee,
             'titre': _titre(spec.get('titre'), 'Titre trop long (200 caractères au plus).'),
             'mise_en_page': {'format': fmt, 'orientation': ori, 'sommaire': _bool(mp.get('sommaire'), True),
