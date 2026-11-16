@@ -121,15 +121,15 @@ remonte en amendement, jamais en contournement.
 - [x] Bâtiment : vue 3D des résultats N2 — pertes d'hiver, gains d'été, solaire absorbé, températures de surface — échelle et légende, triangle cliquable (valeurs), lien vers le calcul
 - [x] Le bloc `vue3d` du rendu utilise la même vue
 **Tests à passer :**
-- [ ] Navigateur réel (compte de test), clair et sombre : construire un graphe de chaque famille, l'enregistrer, l'exporter dans les trois formats et ouvrir les fichiers
-- [ ] Vue 3D sur un N2 réel ; cas sans N2 (message, lien pour le lancer si gestionnaire)
-- [ ] Aucune erreur console ; budgets `ng build` tenus (Plotly hors bundle initial)
+- [ ] Navigateur réel (compte de test), clair et sombre : construire un graphe de chaque famille, l'enregistrer, l'exporter dans les trois formats et ouvrir les fichiers — **en partie** (2026-11-16) : exports des trois formats téléchargés et relus, graphes vus dans la comparaison de parc et les exports, 15 formes validées par le serveur dans Chromium ; **non joué** : construire chaque forme à l'écran et enregistrer un modèle personnalisé
+- [x] Vue 3D sur un N2 réel ; cas sans N2 (message, lien pour le lancer si gestionnaire)
+- [x] Aucune erreur console ; budgets `ng build` tenus (Plotly hors bundle initial)
 **Vérifié le :** 2026-11-16 — intégré (commit `7da2e8c`), `ng build` OK ; navigateur réel et budgets de production au lot 40.
 
-## Lot 40 — Intégration et documentation   ·   statut : en cours
-- [ ] Rapports des secteurs vérifiés (version du contrat), fichiers partagés appliqués en un seul edit
-- [ ] Déploiement séquencé (image Django, image du conteneur de rendu, frontend), `app-test.sh`, cloisonnement 3/3
-- [ ] Parcours réel de bout en bout : parc d'essai → bouquets → potentiels → fiche d'identité → comparaison de parc → rendu personnalisé → exports HTML, Word, PDF ouverts → vue 3D ; parc d'essai supprimé
+## Lot 40 — Intégration et documentation   ·   statut : livré
+- [x] Rapports des secteurs vérifiés (version du contrat), fichiers partagés appliqués en un seul edit
+- [x] Déploiement séquencé (image Django, image du conteneur de rendu, frontend), `app-test.sh`, cloisonnement 3/3
+- [x] Parcours réel de bout en bout : parc d'essai → bouquets → potentiels → fiche d'identité → comparaison de parc → rendu personnalisé → exports HTML, Word, PDF ouverts → vue 3D ; parc d'essai supprimé
 **Documentation (actualisation complète)**
 - [x] `README.md` : but, six onglets, parcours, protections, améliorations / bouquets / potentiels, rendu et exports, conteneur de rendu, ressources (2 vCPU), tests
 - [x] `frontend/README.md` : remplacer le gabarit Angular (structure, build, budgets, Plotly à la demande)
@@ -137,5 +137,17 @@ remonte en amendement, jamais en contournement.
 - [x] `FEUILLE_DE_ROUTE.md` : lots 35 à 40 livrés et vérifiés
 - [x] `backend/api/moteurs.py` : sol simulé, protubérances, protections, améliorations, DH RE2020, sorties par triangle
 - [x] Page Théorie : sol 1D, MNS, horizon par profil, protubérances, protections et lames, végétalisation, albédos, DH RE2020, application de chaque action par niveau
-- [ ] `CLAUDE.md` du lab (service de rendu, pièges) et mémoire
-**Vérifié le :**
+- [x] `CLAUDE.md` du lab (service de rendu, pièges) et mémoire
+**Vérifié le :** 2026-11-16 — suite backend **669 tests OK** (banc d'essai et `app-test.sh` sur l'image de service) ;
+`ng build` production OK (bundle initial 377 ko, Plotly à part) ; `validate-app.sh bilan-thermique` OK (service de rendu
+sur réseau interne) ; mise en service séquencée (backend, worker, frontend, `bilan-thermique-rendu` sain, aucune
+sortie réseau constatée depuis le conteneur de rendu) ; cloisonnement `lab-runner` **3/3**. **Parcours réel** en
+navigateur (compte de test, clair et sombre, **0 erreur console**) : parc d'essai, bâtiment par son adresse (chaîne 48 s),
+potentiels N1 des deux bouquets du lab, potentiels du parc, comparaison de parc (chiffres clés, tableau, graphe, carte),
+fiche d'identité avec potentiels par bouquet, exports **HTML** (4,6 Mo, Plotly embarqué, 6 figures, sommaire), **PDF**
+(11 pages, signets, sommaire), **Word** (titres, 12 tableaux, 6 images) téléchargés et relus, calcul N2 réel puis **vue 3D**
+(64 triangles, pertes d'hiver, triangle cliquable avec ses valeurs) ; parc d'essai supprimé. Défauts trouvés par ce
+parcours et corrigés : export resté « en file d'attente » (date non sérialisable), bouton des potentiels grisé sans
+explication, unités et sol absents de la fiche, clés techniques dans la liste du parc, bouquet « Économiser l'énergie »
+à 14 908 °C·h (récupération de la double flux toute l'année → by-pass d'été : 7 794 °C·h, le reste tenant à l'absence
+d'ouverture des fenêtres, réglage désactivé par défaut — décision du propriétaire).

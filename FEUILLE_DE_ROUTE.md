@@ -906,7 +906,7 @@ d'identité et dans le parc ; les résultats N2 par triangle en 3D dans la fiche
   ouverts ; vue 3D sur un N2 réel et cas sans N2 ; aucune erreur console — **au lot 40**
 **Vérifié le :** 2026-11-16 — intégré, 663 tests backend OK ; vérification en navigateur au lot 40.
 
-## Lot 40 — Intégration et documentation   ·   statut : en cours
+## Lot 40 — Intégration et documentation   ·   statut : livré
 **Objectif :** intégrer les quatre secteurs, mettre en service, rejouer le parcours réel de bout en bout et actualiser
 toute la documentation interne de l'app.
 **Tâches :**
@@ -916,15 +916,27 @@ toute la documentation interne de l'app.
   désactivée par défaut (`confort.ouverture_*`, contrat I9) — `test_physique_bypass.py`, `test_physique_ouverture.py`
 - [x] Documentation : `README.md`, `frontend/README.md`, `refonte.md` (§ 16, D40 à D48), cette feuille de route,
   `to_do_potentiels.md`, fiches des moteurs (`backend/api/moteurs.py`), page Théorie
-- [ ] Déploiement séquencé (image Django, image du service de rendu, frontend), `app-test.sh`, cloisonnement 3/3
-- [ ] Parcours réel : parc d'essai → bouquets → potentiels → fiche d'identité → comparaison de parc → rendu
+- [x] Déploiement séquencé (image Django, image du service de rendu, frontend), `app-test.sh`, cloisonnement 3/3
+- [x] Parcours réel : parc d'essai → bouquets → potentiels → fiche d'identité → comparaison de parc → rendu
   personnalisé → exports HTML, Word, PDF ouverts → vue 3D ; parc d'essai supprimé
-- [ ] `CLAUDE.md` du lab (service de rendu, pièges) et mémoire
+- [x] `CLAUDE.md` du lab (service de rendu, pièges) et mémoire
 **Tests à passer avant de clore le lot :**
-- [ ] Suite backend complète verte sur le code intégré
-- [ ] `ng build` sans erreur ; navigateur réel, clair et sombre, aucune erreur console
-- [ ] `validate-app.sh bilan-thermique --quality-only` accepte la composition (service de rendu compris)
-**Vérifié le :**
+- [x] Suite backend complète verte sur le code intégré
+- [x] `ng build` sans erreur ; navigateur réel, clair et sombre, aucune erreur console
+- [x] `validate-app.sh bilan-thermique --quality-only` accepte la composition (service de rendu compris)
+**Vérifié le :** 2026-11-16 — suite backend **669 tests OK** (banc d'essai et `app-test.sh` sur l'image de service) ;
+`ng build` production OK (bundle initial 377 ko, Plotly à part) ; `validate-app.sh bilan-thermique` OK (service de rendu
+sur réseau interne) ; mise en service séquencée (backend, worker, frontend, `bilan-thermique-rendu` sain, aucune
+sortie réseau constatée depuis le conteneur de rendu) ; cloisonnement `lab-runner` **3/3**. **Parcours réel** en
+navigateur (compte de test, clair et sombre, **0 erreur console**) : parc d'essai, bâtiment par son adresse (chaîne 48 s),
+potentiels N1 des deux bouquets du lab, potentiels du parc, comparaison de parc (chiffres clés, tableau, graphe, carte),
+fiche d'identité avec potentiels par bouquet, exports **HTML** (4,6 Mo, Plotly embarqué, 6 figures, sommaire), **PDF**
+(11 pages, signets, sommaire), **Word** (titres, 12 tableaux, 6 images) téléchargés et relus, calcul N2 réel puis **vue 3D**
+(64 triangles, pertes d'hiver, triangle cliquable avec ses valeurs) ; parc d'essai supprimé. Défauts trouvés par ce
+parcours et corrigés : export resté « en file d'attente » (date non sérialisable), bouton des potentiels grisé sans
+explication, unités et sol absents de la fiche, clés techniques dans la liste du parc, bouquet « Économiser l'énergie »
+à 14 908 °C·h (récupération de la double flux toute l'année → by-pass d'été : 7 794 °C·h, le reste tenant à l'absence
+d'ouverture des fenêtres, réglage désactivé par défaut — décision du propriétaire).
 
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
