@@ -213,3 +213,10 @@ STORAGE_API_URL = config('STORAGE_API_URL', default='http://storage-backend:8000
 RENDU_SERVICE_URL = config('RENDU_SERVICE_URL', default='http://bilan-thermique-rendu:3000')
 RENDU_SERVICE_KEY = config('RENDU_SERVICE_KEY', default='')
 RENDU_EXPORTS_DIR = config('RENDU_EXPORTS_DIR', default='/data/rendu-exports')
+
+# Chantier bt-trois-niveaux : le recalcul automatique ne part pas pendant les tests (sauf un test qui l'active par
+# override_settings(RECALCUL_EN_TEST=True)) — les tests existants ne doivent pas se mettre à recalculer.
+import sys as _sys
+TESTING = len(_sys.argv) > 1 and _sys.argv[1] == 'test'
+RECALCUL_EN_TEST = False
+

@@ -635,4 +635,4 @@ def extract_document(self, job_id, run_id):
 # Chantier bt-potentiels : tâches des secteurs « actions et bouquets » et « rendu », enregistrées avec celles-ci.
 from .ameliorations.taches import *  # noqa: E402,F401,F403
 from .rendu.taches import *  # noqa: E402,F401,F403
-
+from .recalcul.taches import *  # noqa: E402,F401,F403

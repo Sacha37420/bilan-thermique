@@ -938,6 +938,38 @@ explication, unités et sol absents de la fiche, clés techniques dans la liste 
 à 14 908 °C·h (récupération de la double flux toute l'année → by-pass d'été : 7 794 °C·h, le reste tenant à l'absence
 d'ouverture des fenêtres, réglage désactivé par défaut — décision du propriétaire).
 
+## Lot 41 — Fondation des calculs automatiques   ·   statut : livré
+**Objectif :** modèle Recalcul, réglages, routes. Détail : `to_do_trois_niveaux.md`.
+**Tâches :**
+- [x] Voir `to_do_trois_niveaux.md`, lot 41
+**Tests à passer avant de clore le lot :**
+- [x] Voir `to_do_trois_niveaux.md`, lot 41
+**Vérifié le :** 2026-11-16 — voir `to_do_trois_niveaux.md`
+
+## Lot 42 — Calculs automatiques   ·   statut : à faire
+**Objectif :** N0, N1, N2 du réel et des potentiels calculés et recalculés d'eux-mêmes. Détail : `to_do_trois_niveaux.md`.
+**Tâches :**
+- [ ] Voir `to_do_trois_niveaux.md`, lot 42
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_trois_niveaux.md`, lot 42
+**Vérifié le :**
+
+## Lot 43 — Données à trois niveaux   ·   statut : à faire
+**Objectif :** potentiels N0/N1/N2, tableau du parc et rendu par niveau. Détail : `to_do_trois_niveaux.md`.
+**Tâches :**
+- [ ] Voir `to_do_trois_niveaux.md`, lot 43
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_trois_niveaux.md`, lot 43
+**Vérifié le :**
+
+## Lot 44 — Écran et intégration   ·   statut : à faire
+**Objectif :** trois niveaux et état des calculs dans Parc, Bâtiment, Calculs, Rendu. Détail : `to_do_trois_niveaux.md`.
+**Tâches :**
+- [ ] Voir `to_do_trois_niveaux.md`, lot 44
+**Tests à passer avant de clore le lot :**
+- [ ] Voir `to_do_trois_niveaux.md`, lot 44
+**Vérifié le :**
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

@@ -759,3 +759,22 @@ class ExportRendu(models.Model):
     class Meta:
         db_table = 'exports_rendu'
 
+
+class Recalcul(models.Model):
+    """Chantier bt-trois-niveaux (I0) : état du recalcul automatique d'un bâtiment — réel et potentiels, N0/N1/N2,
+    planifié par signaux, regroupé, exécuté en file de fond (`api.recalcul`)."""
+
+    STATUTS = [('inactif', 'inactif'), ('planifie', 'planifié'), ('en_cours', 'en cours'), ('erreur', 'erreur')]
+    building = models.OneToOneField(Building, on_delete=models.CASCADE, related_name='recalcul')
+    statut = models.CharField(max_length=10, choices=STATUTS, default='inactif')
+    cause = models.CharField(max_length=200, blank=True, default='')
+    demande_le = models.DateTimeField(null=True, blank=True)
+    prevu_pour = models.DateTimeField(null=True, blank=True)
+    commence_le = models.DateTimeField(null=True, blank=True)
+    termine_le = models.DateTimeField(null=True, blank=True)
+    message = models.TextField(blank=True, default='')
+    etapes = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = 'recalculs'
+

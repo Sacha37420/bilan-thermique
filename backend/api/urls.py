@@ -16,6 +16,7 @@ from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
 # Chantier bt-potentiels (contrat chantiers/bt-potentiels, I1-I7) — routes déclarées par la fondation.
 from . import views_indicateurs as vind, views_triangles as vtri, views_potentiels as vpot, views_rendu as vrd
 from .ameliorations import views as vam
+from .recalcul import views as vrc
 from .views import (
     MeView, Calcul1DView,
     ParoiModelListCreateView, ParoiModelDetailView,
@@ -145,4 +146,8 @@ urlpatterns = [
     path('rendu/gabarits/', vrd.GabaritsView.as_view()),
     path('parcs/<int:pk>/rapports/', vrd.RapportsParcView.as_view()),
     path('rapports/<int:pk>/', vrd.RapportDetailView.as_view()),
+    # ── Chantier bt-trois-niveaux (I2, secteur C) ──
+    path('batiments/<int:pk>/calculs/etat/', vrc.EtatBatimentView.as_view()),
+    path('batiments/<int:pk>/calculs/recalculer/', vrc.RecalculerView.as_view()),
+    path('parcs/<int:pk>/calculs/etat/', vrc.EtatParcView.as_view()),
 ]

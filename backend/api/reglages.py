@@ -62,6 +62,17 @@ def _orchestration():
            aide='Lancé après la chaîne automatique.', groupe='Calcul automatique'),
         _e('calcul.n1', 'Calcul horaire simplifié (N1) automatique', 'bool', True, modeles=['N1'],
            aide='Lancé après la chaîne automatique, avec sa fourchette.', groupe='Calcul automatique'),
+        # Chantier bt-trois-niveaux : les trois niveaux, réel et potentiels, calculés et tenus à jour d'eux-mêmes.
+        _e('calcul.n2', 'Calcul détaillé par paroi (N2) automatique', 'bool', True, modeles=['N2'],
+           aide='Calculé après N0/N1, en file de fond, un calcul lourd à la fois.', groupe='Calcul automatique'),
+        _e('calcul.potentiels', 'Potentiels des bouquets automatiques', 'bool', True,
+           aide='Chaque bouquet visible est calculé aux niveaux automatiques (N0, N1, N2 selon les réglages ci-dessus).',
+           groupe='Calcul automatique'),
+        _e('calcul.recalcul_auto', 'Recalcul automatique après une modification', 'bool', True,
+           aide='Une donnée, une géométrie, une paroi, une protection ou un réglage modifié relance les calculs qui en '
+                'dépendent (N0/N1 tout de suite, N2 et potentiels en file de fond).', groupe='Calcul automatique'),
+        _e('calcul.recalcul_delai_s', 'Regroupement des modifications', 'int', 30, unite='s', min=5, max=600,
+           aide='Les modifications faites dans ce délai donnent un seul recalcul.', groupe='Calcul automatique'),
         _e('environnement.mode', 'Environnement observé (LiDAR HD × BD TOPO)', 'enum', 'chaine',
            choix={'manuel': 'À la demande (onglet Bâtiment)',
                   'avant_n2': 'Avant chaque calcul détaillé, s’il manque',
