@@ -184,7 +184,7 @@ def _bloc(b, portee, mesures):
         return {'type': t, 'contenu': c}
     if t == 'indicateurs':
         cles = b.get('cles')
-        if (not isinstance(cles, list) or not cles or len(cles) > 20
+        if (not isinstance(cles, list) or len(cles) > 20
                 or any(c not in mesures or mesures[c]['grain'] != 'batiment' for c in cles)):
             raise SpecError('Indicateurs inconnus (vingt au plus).')
         return _avec_niveaux({'type': t, 'cles': list(dict.fromkeys(cles)), 'series': _series(b.get('series'))}, b)
@@ -199,7 +199,7 @@ def _bloc(b, portee, mesures):
             cols = tableaux.colonnes_defaut(src)  # tableau tout juste ajouté : colonnes par défaut, pas un refus
         if not isinstance(cols, list) or not cols or len(cols) > 25 or any(c not in connues for c in cols):
             raise SpecError('Colonnes de tableau inconnues.')
-        tri = b.get('tri')
+        tri = b.get('tri') or None  # '' = ordre du serveur (bloc tout juste ajouté)
         if tri is not None and tri not in connues:
             raise SpecError('Colonne de tri inconnue.')
         ordre = b.get('ordre') or 'asc'

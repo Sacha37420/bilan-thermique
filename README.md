@@ -202,7 +202,7 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
 
 ## Tests
 
-- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **749 tests**
+- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **750 tests**
   au 2026-11-16. Aucun appel réseau : tout service externe (open data, IA, service de rendu) est simulé. Depuis le lab :
   `bash chantiers/tests/essai.sh bilan-thermique` (PostgreSQL jetable, réseau fermé).
 - Service de rendu : `npm test` (unitaires) et `npm run test:integration` dans `rendu-service/` (dans son image).
