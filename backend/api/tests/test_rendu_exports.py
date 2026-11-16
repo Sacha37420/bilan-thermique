@@ -184,6 +184,22 @@ class ExportsTest(RenduMixin, TestCase):
             print('\n@@DOCX_SIZE@@' + str(len(data)) + '@@FIN@@')
 
 
+@override_settings(RENDU_EXPORTS_DIR=_TMP)
+class CreerExportTest(TestCase):
+    """Lot 40 (parcours réel) : un document portant une date (calcul d'un potentiel) faisait échouer la demande
+    d'export, qui laissait une ligne « en file d'attente » à jamais."""
+
+    def test_document_avec_date_et_rien_de_cree_en_cas_d_echec(self):
+        import datetime
+        from ..models import ExportRendu
+        e = exports.creer('g', {'titre': 't', 'calcule_le': datetime.datetime(2026, 11, 16, 12, 0)}, {}, {}, 'html')
+        self.assertIn('2026-11-16T12:00:00', (exports._dir(e.pk) / 'document.json').read_text(encoding='utf-8'))
+        n = ExportRendu.objects.count()
+        with self.assertRaises(TypeError):
+            exports.creer('g', {'titre': 't', 'x': object()}, {}, {}, 'html')
+        self.assertEqual(ExportRendu.objects.count(), n)
+
+
 @override_settings(RENDU_SERVICE_URL='http://rendu.test:3000')
 class ServiceClientTest(TestCase):
     def test_sans_cle(self):

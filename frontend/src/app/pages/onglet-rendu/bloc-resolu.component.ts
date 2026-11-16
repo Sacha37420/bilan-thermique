@@ -116,6 +116,7 @@ export class BlocResoluComponent {
   }
   valeurFiche(e: LigneFiche): string {
     const v = this.cellule(e.valeur);
-    return v !== '—' && e.unite && typeof e.valeur === 'number' ? `${v} ${e.unite}` : v;
+    // Lot 40 : le serveur envoie souvent la valeur déjà mise en forme (texte) — l'unité était alors perdue.
+    return v !== '—' && e.unite && !String(v).trim().endsWith(e.unite) ? `${v} ${e.unite}` : v;
   }
 }

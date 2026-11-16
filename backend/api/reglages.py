@@ -119,6 +119,21 @@ def _parametrage():
         _e('isolants.majoration_iti_pct', 'Majoration du U pour une isolation intérieure', 'number',
            questionnaire.ITI_MAJORATION_PCT, unite='%', min=0, max=50, groupe='Isolants',
            aide='Ponts thermiques de plancher et de refend d’une isolation par l’intérieur.'),
+        # Lot 40 (décision du propriétaire, 2026-11-16) : ouverture des fenêtres en été, réglable par parc,
+        # désactivée par défaut — les résultats existants ne bougent pas tant qu'elle n'est pas activée.
+        _e('confort.ouverture_fenetres', 'Ouverture des fenêtres en été', 'bool', False, groupe='Confort d’été',
+           modeles=['N1', 'N2'],
+           aide='Hypothèse : les occupants ouvrent les baies quand l’intérieur est trop chaud et l’extérieur plus frais '
+                '(cadre RE2020 du calcul des degrés-heures). Désactivée : aucune ouverture n’est simulée.'),
+        _e('confort.ouverture_seuil_c', 'Ouverture : température intérieure de déclenchement', 'number', 25.0,
+           unite='°C', min=22, max=30, groupe='Confort d’été', modeles=['N1', 'N2']),
+        _e('confort.ouverture_ecart_c', 'Ouverture : extérieur plus frais d’au moins', 'number', 1.0,
+           unite='°C', min=0, max=5, groupe='Confort d’été', modeles=['N1', 'N2']),
+        _e('confort.ouverture_vol_h', 'Ouverture : renouvellement d’air', 'number', 3.0, unite='vol/h', min=0.5,
+           max=10, groupe='Confort d’été', modeles=['N1', 'N2'],
+           aide='Débit ajouté quand les baies sont ouvertes (ordre de grandeur Th-BCE 2020 : 2 à 5 vol/h).'),
+        _e('confort.ouverture_occupation', 'Ouverture : seulement aux heures d’occupation (tertiaire)', 'bool', True,
+           groupe='Confort d’été', modeles=['N1', 'N2']),
     ]
     for key, b in scenarios.BUNDLES.items():
         out.append(_e(f'bouquets.{key}.actif', b['label'], 'bool', True, groupe='Améliorations',

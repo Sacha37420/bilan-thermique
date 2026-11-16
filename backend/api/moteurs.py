@@ -1,16 +1,31 @@
 """Catalogue des moteurs de calcul (chantier bt-navigation, contrat § 2.4) — `GET /api/calculs/moteurs/`.
 
 Statique. Les textes sont repris des docstrings et constantes des moteurs (`engines/n0.py`,
-`engines/n1.py`, `engines/inputs.py`, `engines/n2_inputs.py`, `engines/systems.py`,
-`uncertainty.py`, `simulation.py`, `solver.py`, `building_solver.py`, `access.py`, `views.py`) :
-modifier un moteur, c'est relire sa fiche ici.
+`engines/n1.py`, `engines/inputs.py`, `engines/n2_inputs.py`, `engines/systems.py`, `engines/sol.py`,
+`engines/shading.py`, `engines/surcharges.py`, `engines/vegetation.py`, `engines/comfort.py`, `horizon.py`,
+`protrusions.py`, `uncertainty.py`, `simulation.py`, `solver.py`, `building_solver.py`, `access.py`, `views.py`,
+`ameliorations/`) : modifier un moteur, c'est relire sa fiche ici.
 """
 
 from . import building_solver, calc_service, simulation, solver, uncertainty
 from .engines import n2_inputs
 
 _COMMON = ('Hypothèses communes avec le N2 (pour rester comparables, § 6.3) : pas d’échange infrarouge avec le '
-           'ciel, ciel isotrope, albédo du sol 0,20, plancher bas couplé à une température de sol constante.')
+           'ciel, ciel isotrope, albédo du sol 0,20 (sinon celui des abords, `abords.albedo`), plancher bas couplé au '
+           'sol simulé en 1D d’après la météo du calcul (Lot 32 : colonne de 15 m, terre-plein, vide sanitaire ou '
+           'sous-sol non chauffé ; `plancher.u` est le U équivalent vers l’extérieur, le U propre en est déduit, '
+           'EN ISO 13370).')
+_COMFORT = ('Confort d’été : degrés-heures RE2020 sur la température opérative, T_conf = 0,33·θ_rm + 21,8 °C bornée à '
+            '[26 ; 28] °C le jour (EN 16798-1, catégorie II), 26 °C la nuit en logement ; heures comptées : toutes en '
+            'logement, 8 h–19 h en semaine sinon. Le DH base 26 °C reste à côté.')
+_SUMMER = ('Été : surventilation nocturne si la fiche ou une amélioration la prévoit (22 h–7 h, mai–septembre, air '
+           'extérieur sous le seuil, intérieur au-dessus de 24 °C et plus chaud d’1 °C) ; by-pass de la double flux '
+           '(échangeur coupé quand l’air extérieur, au-dessus de 12 °C, est plus frais que dedans et que l’intérieur '
+           'dépasse la consigne de 2 °C — seuils de l’app, à confirmer) ; ouverture des fenêtres seulement si le parc '
+           'l’active (désactivée par défaut). Chacune est écrite comme hypothèse dans les entrées figées.')
+_AMELIORATIONS = ('Améliorations : faits, surcharges (arbres plantés, toiture et murs végétalisés, rafraîchissement de '
+                  'l’air — hypothèse affichée, non calculée) et protections de l’amélioration, appliqués selon le '
+                  'catalogue des actions ; ce que le calcul en a fait est décrit dans ses entrées figées.')
 _BRIDGES = 'Ponts thermiques : non comptés (hors périmètre, comme le N2 — `refonte.md` D9).'
 _SYSTEMS = ('Du besoin à l’énergie finale, primaire, au CO₂ et au coût : rendement global = génération × émission × '
             'distribution × régulation (repères de la méthode 3CL). Aide à la décision, pas un DPE (D6).')
@@ -19,7 +34,10 @@ _FICHE_IN = ['Fiche effective du bâtiment (valeur retenue par clé, avec sa pro
              '(emprise recalée, hauteur à l’égout mesurée) : emprise, murs exposés par orientation, mitoyenneté, '
              'horizon par façade (profil par tranche de 10° d’azimut, mesuré depuis des points de la façade à trois '
              'hauteurs : le direct est réduit à la part de la façade qui voit le soleil ; le diffus n’est pas masqué)',
-             'Protections solaires paramétriques (Lot 14)', 'Météo horaire (année type du site ou jeu choisi)']
+             'Protections solaires (catalogue v2 : débords inclinés et latéraux, joues, lames, fermetures pilotées '
+             'avec leur ΔR, vitrages, végétal), facteurs heure par heure',
+             'Améliorations : faits, surcharges et protections de l’amélioration calculée',
+             'Météo horaire (année type du site ou jeu choisi)']
 _DECLARE = ('Toute personne qui peut modifier la fiche : gestionnaire de parc, gestionnaire ou occupant du bâtiment ; '
             'un lecteur ne lance rien.')
 _MANAGE = 'Gestionnaire de parc ou du bâtiment (D2/D37 : jamais en lot).'
@@ -39,9 +57,14 @@ CATALOGUE = [
                     'ventilation) et Q_gn les apports (internes + solaires), η le facteur d’utilisation des apports '
                     '(a = 1 + τ/15, τ la constante de temps du bâtiment en heures). Mêmes paramètres et mêmes apports '
                     'solaires que le N1 (`n1.solar_terms`) : seul le pas de temps change.'),
-        'hypotheses': [_COMMON],
+        'hypotheses': [_COMMON,
+                       ('Protections, arbres plantés et rafraîchissement de l’air : facteurs calculés heure par heure '
+                        'puis sommés par mois. Surventilation nocturne, by-pass d’été et ouverture des fenêtres ne sont '
+                        'pas représentés (pas de nuit ni de température intérieure dans un bilan mensuel).'),
+                       _AMELIORATIONS],
         'entrees': _FICHE_IN,
-        'sorties': ['Besoin de chauffage annuel et mensuel', 'Énergie finale, primaire, CO₂, coût, étiquette du modèle'],
+        'sorties': ['Besoin de chauffage annuel et mensuel', 'Énergie finale, primaire, CO₂, coût, étiquette du modèle',
+                    'Aucun indicateur de confort d’été (degrés-heures : N1 et N2)'],
         'duree': '< 0,1 s.',
         'qui': _DECLARE,
         'limites': [_BRIDGES, _SYSTEMS],
@@ -55,10 +78,16 @@ CATALOGUE = [
                     '(C.4 de la norme). Vectorisé sur S jeux de paramètres.'),
         'hypotheses': [_COMMON,
                        ('Fourchette : chaque valeur numérique de la fiche est tirée autour de sa valeur effective avec '
-                        'un écart relatif qui dépend de sa méthode (un défaut est très incertain, une mesure peu).')],
+                        'un écart relatif qui dépend de sa méthode (un défaut est très incertain, une mesure peu).'),
+                       ('Vitrages : conductance horaire, ΔR des fermetures ajouté au prorata de leur position (nuit '
+                        'comprise) ; toiture et murs végétalisés : puits d’évapotranspiration en surface '
+                        '(Priestley-Taylor).'),
+                       _SUMMER, _COMFORT, _AMELIORATIONS],
         'entrees': _FICHE_IN,
         'sorties': ['Besoins (kWh), puissance maximale',
                     'Températures d’air et opérative (θ_op = 0,3 θ_air + 0,7 θ_s — confort d’été, D9)',
+                    'Degrés-heures RE2020, heures d’inconfort, DH base 26 °C ; séries mensuelles',
+                    'Heures de surventilation nocturne, de by-pass et d’ouverture des fenêtres',
                     'Bilan par poste, besoins mensuels',
                     f'Fourchette P10–P90 du besoin de chauffage ({uncertainty.DEFAULT_SAMPLES} tirages)',
                     'Énergie finale, primaire, CO₂, coût, étiquette du modèle'],
@@ -84,7 +113,16 @@ CATALOGUE = [
             ('Réglages : ventilation effective, consignes, apports internes et horaires d’occupation identiques à N1, '
              'pour que les niveaux restent comparables.'),
             ('Mode « géométrie experte » (D35) : si l’enveloppe du bâtiment est entièrement assignée à la main, elle est '
-             'prise telle quelle avec ses parois du catalogue ; seuls les réglages et la météo viennent de la fiche.'),
+             'prise telle quelle avec ses parois du catalogue ; seuls les réglages et la météo viennent de la fiche. Les '
+             'améliorations d’enveloppe (U, verdure) n’y sont alors pas appliquées, et le calcul le dit.'),
+            ('Protubérances (Lot 33) : un triangle hors du volume chauffé (mur qui dépasse) reste une ailette dont les '
+             'deux faces échangent avec l’air extérieur — ni couplage au nœud d’air, ni flux d’enveloppe.'),
+            ('Sol : température du sol simulé portée par chaque heure de la météo ; couches du plancher au U propre.'),
+            ('Protections : débords et joues construits en obstacles géométriques quel que soit leur mode ; '
+             'fermetures mobiles, lames, vitrages et végétal appliqués par triangle de baie, heure par heure selon '
+             'leur position (ΔR côté extérieur). Arbres plantés : houppiers translucides, grille d’ombrage d’été et '
+             'd’hiver. Albédo des abords : grille relevée remplacée par la valeur de la fiche ou de l’amélioration.'),
+            _SUMMER, _COMFORT,
         ],
         'entrees': ['Fiche effective du bâtiment', 'Géométrie (emprise, hauteur, niveaux, toiture) ou enveloppe experte',
                     'Obstacles : environnement relié (LiDAR × BD TOPO) s’il existe — généré au début du calcul si '
@@ -92,14 +130,18 @@ CATALOGUE = [
                     'solaires géométriques (Lot 14)',
                     'Réflexion par le sol : albédo relevé sur les orthophotos, avec un environnement relié', 'Météo horaire'],
         'sorties': ['Besoins de chauffage et de refroidissement, puissance maximale', 'Températures d’air et opérative',
-                    'Bilan, besoins mensuels', 'Énergie finale, primaire, CO₂, coût, étiquette du modèle'],
+                    'Degrés-heures RE2020, heures d’inconfort, DH base 26 °C ; séries mensuelles',
+                    'Bilan, besoins mensuels', 'Énergie finale, primaire, CO₂, coût, étiquette du modèle',
+                    ('Par triangle : pertes d’hiver (octobre–avril), gains d’été (juin–août), solaire absorbé l’été, '
+                     'températures de surface intérieure — onglet Bâtiment › Résultats en 3D'),
+                    'Compte rendu des protubérances (triangles reclassés hors volume)'],
         'duree': (f'Par année simulée : {_num(_a)} s + {_num(_b)} s par triangle, + {_num(_shade)} s pour l’ombrage '
                   '(mesures du Lot 23). En tâche de fond : un calcul lourd à la fois sur le lab.'),
         'qui': _MANAGE,
         'limites': [
             'Un seul nœud d’air (pas de planchers intermédiaires ni de refends, D9).',
             'La consigne réduite hors occupation du tertiaire n’est pas reproduite (le planning du N2 ne porte pas de consigne).',
-            'Les protections paramétriques ne jouent que dans N0/N1 (le N2 voit les protections géométriques).',
+            'Les lames ne sont pas maillées : leur effet est un facteur sur le rayonnement des triangles de baie.',
         ],
         'version': n2_inputs.ENGINE_VERSION, 'expert_route': None,
     },
@@ -124,10 +166,14 @@ CATALOGUE = [
         'methode': ('Chaque triangle de l’enveloppe est sa propre paroi 1D, tous couplés au même nœud d’air intérieur '
                     'pondéré par l’aire ; rayonnement solaire par triangle (orientation et visibilité solaire '
                     'précalculée).'),
-        'hypotheses': ['Enveloppe triangulaire assignée à la main, parois du catalogue (page Maillage).'],
+        'hypotheses': ['Enveloppe triangulaire assignée à la main, parois du catalogue (page Maillage).',
+                       ('Protubérances détectées (actif par défaut) ; protections géométriques seulement — les '
+                        'protections paramétriques ne jouent pas dans cet outil (elles jouent dans le N2 de la fiche).')],
         'entrees': ['Enveloppe maillée et ses parois', 'Environnement (ombrage)', 'Météo horaire',
                     'Réglages du formulaire de la page Calcul 3D'],
-        'sorties': ['Températures, besoins, flux par paroi'],
+        'sorties': ['Températures, besoins, bilan', 'Degrés-heures RE2020 et séries mensuelles',
+                    'Résultats par triangle (pertes d’hiver, gains d’été, solaire absorbé, températures de surface), '
+                    'enregistrés avec le calcul'],
         'duree': 'Mesuré à ~28 s pour 338 triangles sur une année horaire complète ; en tâche de fond.',
         'qui': _MANAGE.split(' (')[0] + '.',
         'limites': [f'Au plus {building_solver.MAX_TOTAL_DOF} degrés de liberté et {building_solver.MAX_WEATHER_POINTS} heures.',

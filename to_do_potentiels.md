@@ -51,91 +51,91 @@ remonte en amendement, jamais en contournement.
 - [x] Clés de faits : `toiture.absorptance`, `abords.albedo`, `ventilation.nocturne_vol_h`, `ventilation.nocturne_seuil_c`, `toiture.vegetalisee`, `murs.vegetalises` (poids 0)
 - [x] Routes déclarées (`urls.py`) pour I1 à I7, rendant la **forme** du contrat (vide ou 501 fixe) le temps des secteurs
 - [x] Dépendances : `python-docx==1.1.2` (serveur) ; `plotly.js-dist-min` 2.35.2 figé (frontend, chargé à la demande) — `backend/vendor/` revient au secteur R
-- [ ] Service `rendu` dans `docker-compose.yml` (réseau `dev-net`, sans port ni label Caddy), clé `RENDU_SERVICE_KEY` dans le `.env`, volume `rendu-exports` ; `validate-app.sh` accepte la composition — **reporté au lot 40** (bloc rapporté par R)
+- [x] Service `rendu` dans `docker-compose.yml` (réseau interne `bilan-thermique-rendu-net` plutôt que `dev-net`, sans port ni label Caddy), clé `RENDU_SERVICE_KEY` (`.env.example`), volume `rendu-exports` — **posé au lot 40** (bloc rapporté par R) ; `validate-app.sh` : à rejouer au déploiement (lot 40)
 - [x] Tests : migrations aller/retour ; modèles ; routes présentes avec leurs droits (lecteur / gestionnaire / étranger)
 **Vérifié le :** 2026-11-16 — `tests/test_fondation_potentiels.py` (3 tests) ; suite backend **556 tests OK** ; `ng build` OK.
 
-## Lot 36 — Physique (secteur P)   ·   statut : à faire
+## Lot 36 — Physique (secteur P)   ·   statut : livré
 **Protections solaires paramétrables**
-- [ ] Catalogue I1 v2 : modèles par famille (fixes, mobiles, vitrage, végétal), paramètres typés et bornés (épaisseur, profondeur de débord, débords latéraux par côté, inclinaison du débord, lames : inclinaison, largeur, entraxe, transmission ; position), pilotage (fixe, planning, auto), texte d'application par niveau
-- [ ] Modèle de lames (BSO, persiennes) : transmission directe selon l'angle de profil et l'inclinaison, diffuse selon la géométrie des lames
-- [ ] N0/N1 : chaque paramètre a son effet ; ΔR des fermetures mobiles en hiver ; opaque ombré par les débords
-- [ ] N2 : débords et joues avec épaisseur et inclinaison réelles ; mobiles et lames appliqués par triangle de baie (position partielle) depuis la fiche, plus seulement depuis Calcul 3D
-- [ ] Interface `components/protections` : choisir un modèle, régler **tous** ses paramètres (groupés, aide, bornes du catalogue), modifier une protection existante, l'attacher à l'état actuel ou à une amélioration
+- [x] Catalogue I1 v2 : modèles par famille (fixes, mobiles, vitrage, végétal), paramètres typés et bornés (épaisseur, profondeur de débord, débords latéraux par côté, inclinaison du débord, lames : inclinaison, largeur, entraxe, transmission ; position), pilotage (fixe, planning, auto), texte d'application par niveau
+- [x] Modèle de lames (BSO, persiennes) : transmission directe selon l'angle de profil et l'inclinaison, diffuse selon la géométrie des lames
+- [x] N0/N1 : chaque paramètre a son effet ; ΔR des fermetures mobiles en hiver ; opaque ombré par les débords
+- [x] N2 : débords et joues avec épaisseur et inclinaison réelles ; mobiles et lames appliqués par triangle de baie (position partielle) depuis la fiche, plus seulement depuis Calcul 3D
+- [x] Interface `components/protections` : choisir un modèle, régler **tous** ses paramètres (groupés, aide, bornes du catalogue), modifier une protection existante, l'attacher à l'état actuel ou à une amélioration
 **Surcharges d'amélioration (I2)**
-- [ ] Albédo des abords (N0/N1 : albédo du sol ; N2 : grille remplacée), absorptance de toiture distincte de celle des murs
-- [ ] Arbres plantés : masques saisonniers (profil d'horizon N0/N1 ; obstacles translucides N2)
-- [ ] Toiture et murs végétalisés : U, inertie, albédo, puits d'évapotranspiration en surface (modèle simple, source citée)
-- [ ] Rafraîchissement de l'air : T_ext corrigée (mois, heures), hypothèse recopiée dans les entrées figées
-- [ ] Surventilation nocturne : débit de nuit quand T_ext < seuil (N1, N2)
-- [ ] Entrées figées de chaque calcul : `inputs['ameliorations']` décrit tout ce qui a été appliqué, par niveau
+- [x] Albédo des abords (N0/N1 : albédo du sol ; N2 : grille remplacée), absorptance de toiture distincte de celle des murs
+- [x] Arbres plantés : masques saisonniers (profil d'horizon N0/N1 ; obstacles translucides N2)
+- [x] Toiture et murs végétalisés : U, inertie, albédo, puits d'évapotranspiration en surface (modèle simple, source citée)
+- [x] Rafraîchissement de l'air : T_ext corrigée (mois, heures), hypothèse recopiée dans les entrées figées
+- [x] Surventilation nocturne : débit de nuit quand T_ext < seuil (N1, N2)
+- [x] Entrées figées de chaque calcul : `inputs['ameliorations']` décrit tout ce qui a été appliqué, par niveau
 **Indicateurs et sorties**
-- [ ] DH RE2020 (`dh_re2020`, `heures_inconfort`, `t_conf_methode`), `dh_26` ; séries mensuelles `results['mensuel']` ; `GET /api/indicateurs/`
-- [ ] N2 : cumuls par triangle (pertes d'hiver, gains d'été, solaire absorbé, températures de surface) ; `GET /api/calculs/<id>/triangles/` (I4)
-- [ ] Bascule intérieure/extérieure de Calcul 3D réellement recolorée (à vérifier, probable défaut)
+- [x] DH RE2020 (`dh_re2020`, `heures_inconfort`, `t_conf_methode`), `dh_26` ; séries mensuelles `results['mensuel']` ; `GET /api/indicateurs/`
+- [x] N2 : cumuls par triangle (pertes d'hiver, gains d'été, solaire absorbé, températures de surface) ; `GET /api/calculs/<id>/triangles/` (I4)
+- [x] Bascule intérieure/extérieure de Calcul 3D réellement recolorée (à vérifier, probable défaut)
 **Tests à passer :**
-- [ ] DH RE2020 sur une série construite à la main (valeur attendue calculée à côté)
-- [ ] Chaque paramètre de protection change le résultat dans chaque niveau où le catalogue le dit applicable, et seulement là
-- [ ] Chaque surcharge I2 : effet de signe et d'ordre de grandeur attendus en N0, N1, N2 (table du contrat § 7)
-- [ ] Cumuls par triangle : leur somme égale le flux d'enveloppe du bilan (à la tolérance près)
-- [ ] Suite backend complète verte ; `ng build`
-**Vérifié le :**
+- [x] DH RE2020 sur une série construite à la main (valeur attendue calculée à côté)
+- [x] Chaque paramètre de protection change le résultat dans chaque niveau où le catalogue le dit applicable, et seulement là
+- [x] Chaque surcharge I2 : effet de signe et d'ordre de grandeur attendus en N0, N1, N2 (table du contrat § 7)
+- [x] Cumuls par triangle : leur somme égale le flux d'enveloppe du bilan (à la tolérance près)
+- [x] Suite backend complète verte ; `ng build`
+**Vérifié le :** 2026-11-16 — intégré (commit `7da2e8c`), 663 tests backend OK ; vérification en navigateur au lot 40.
 
-## Lot 37 — Actions, bouquets et potentiels (secteur A)   ·   statut : à faire
-- [ ] Catalogue I7 : actions des cinq familles (isolation ; ventilation ; protections solaires ; végétalisation de la parcelle ; toiture et albédos), chacune avec paramètres, **conditions** (bloquantes ou non), **indicateurs pertinents** (énergie, DH), **cibles**, **application par niveau** en mots, points de vigilance
-- [ ] Anciens `BUNDLES` repris comme actions ; améliorations existantes intactes
-- [ ] Application d'un bouquet à un bâtiment : toutes les actions applicables, « une parmi » (première applicable), refus de deux éléments sur la même cible, raison de chaque action écartée
-- [ ] Bouquets du lab : « Économiser l'énergie » (objectif énergie) et « Minimiser les DH » (objectif confort) ; copie dans un parc ; bouquets propres à un parc (création, modification, suppression par un gestionnaire)
-- [ ] Potentiels (I5) : calcul N1 d'un bâtiment, de tout un parc (file « parc ») ; N2 d'un bâtiment à la demande (gestionnaire, jamais en lot) ; « à jour » par empreinte ; écarts au réel
-- [ ] Agrégats parc : réel et chaque bouquet (somme, moyenne, médiane, effectifs)
-- [ ] Interface : Paramétrage → bouquets (édition guidée, catalogue d'actions avec conditions et application) ; Calculs → Améliorations : potentiels du bâtiment, actions appliquées / écartées
+## Lot 37 — Actions, bouquets et potentiels (secteur A)   ·   statut : livré
+- [x] Catalogue I7 : actions des cinq familles (isolation ; ventilation ; protections solaires ; végétalisation de la parcelle ; toiture et albédos), chacune avec paramètres, **conditions** (bloquantes ou non), **indicateurs pertinents** (énergie, DH), **cibles**, **application par niveau** en mots, points de vigilance
+- [x] Anciens `BUNDLES` repris comme actions ; améliorations existantes intactes
+- [x] Application d'un bouquet à un bâtiment : toutes les actions applicables, « une parmi » (première applicable), refus de deux éléments sur la même cible, raison de chaque action écartée
+- [x] Bouquets du lab : « Économiser l'énergie » (objectif énergie) et « Minimiser les DH » (objectif confort) ; copie dans un parc ; bouquets propres à un parc (création, modification, suppression par un gestionnaire)
+- [x] Potentiels (I5) : calcul N1 d'un bâtiment, de tout un parc (file « parc ») ; N2 d'un bâtiment à la demande (gestionnaire, jamais en lot) ; « à jour » par empreinte ; écarts au réel
+- [x] Agrégats parc : réel et chaque bouquet (somme, moyenne, médiane, effectifs)
+- [x] Interface : Paramétrage → bouquets (édition guidée, catalogue d'actions avec conditions et application) ; Calculs → Améliorations : potentiels du bâtiment, actions appliquées / écartées
 **Tests à passer :**
-- [ ] Conditions : une action non applicable est écartée avec sa raison ; « une parmi » prend la première applicable
-- [ ] Un bouquet appliqué deux fois donne la même amélioration (recréée, pas dupliquée) et le même résultat
-- [ ] Droits : lecteur lit, ne crée ni ne calcule ; étranger 404 ; N2 refusé en lot
-- [ ] Potentiels d'un parc de 3 bâtiments, deux bouquets : agrégats exacts
-- [ ] Suite backend complète verte ; `ng build`
-**Vérifié le :**
+- [x] Conditions : une action non applicable est écartée avec sa raison ; « une parmi » prend la première applicable
+- [x] Un bouquet appliqué deux fois donne la même amélioration (recréée, pas dupliquée) et le même résultat
+- [x] Droits : lecteur lit, ne crée ni ne calcule ; étranger 404 ; N2 refusé en lot
+- [x] Potentiels d'un parc de 3 bâtiments, deux bouquets : agrégats exacts
+- [x] Suite backend complète verte ; `ng build`
+**Vérifié le :** 2026-11-16 — intégré (commit `7da2e8c`), 663 tests backend OK ; vérification en navigateur au lot 40.
 
-## Lot 38 — Rendu : document, figures, exports (secteur R)   ·   statut : à faire
-- [ ] Schéma de spécification I6.a servi (`/api/rendu/schema/`), dimensions et mesures (`/dimensions/`, `/mesures/`)
-- [ ] Figures Plotly construites par le serveur pour **toutes** les formes I6 (barres, empilées, groupées, courbes, aires, nuage, bulles, boîte, violon, histogramme, camembert, radar, carte de chaleur, cascade, coordonnées parallèles), séries réel / bouquets, facettes, filtres, agrégations
-- [ ] Document résolu (I6.c) ; bloc « fiche » repris de la fiche d'identité (lot 34) avec la section **potentiels par bouquet**
-- [ ] Gabarits du lab : « Fiche d'identité », « Synthèse de parc », graphes prêts à l'emploi (réel / potentiels par bouquet, besoins mensuels, DH, postes de bilan, nuage besoin / DH, cascade des actions)
-- [ ] Export **HTML** autonome : plotly.js et three.js embarqués, interactif hors ligne, sommaire cliquable, impression soignée
-- [ ] Conteneur `rendu-service` (I8) : PDF (vectoriel, signets, sommaire, numéros de page), images des figures, images des vues 3D ; aucune sortie réseau
-- [ ] Export **PDF** (HTML imprimé par I8) et **DOCX** (python-docx : titres et styles, sommaire actualisable, vrais tableaux, figures et vues 3D en images, légendes, liens internes)
-- [ ] Fichiers transitoires 24 h, réservés à leur auteur, purge planifiée
+## Lot 38 — Rendu : document, figures, exports (secteur R)   ·   statut : livré
+- [x] Schéma de spécification I6.a servi (`/api/rendu/schema/`), dimensions et mesures (`/dimensions/`, `/mesures/`)
+- [x] Figures Plotly construites par le serveur pour **toutes** les formes I6 (barres, empilées, groupées, courbes, aires, nuage, bulles, boîte, violon, histogramme, camembert, radar, carte de chaleur, cascade, coordonnées parallèles), séries réel / bouquets, facettes, filtres, agrégations
+- [x] Document résolu (I6.c) ; bloc « fiche » repris de la fiche d'identité (lot 34) avec la section **potentiels par bouquet**
+- [x] Gabarits du lab : « Fiche d'identité », « Synthèse de parc », graphes prêts à l'emploi (réel / potentiels par bouquet, besoins mensuels, DH, postes de bilan, nuage besoin / DH, cascade des actions)
+- [x] Export **HTML** autonome : plotly.js et three.js embarqués, interactif hors ligne, sommaire cliquable, impression soignée
+- [x] Conteneur `rendu-service` (I8) : PDF (vectoriel, signets, sommaire, numéros de page), images des figures, images des vues 3D ; aucune sortie réseau
+- [x] Export **PDF** (HTML imprimé par I8) et **DOCX** (python-docx : titres et styles, sommaire actualisable, vrais tableaux, figures et vues 3D en images, légendes, liens internes)
+- [x] Fichiers transitoires 24 h, réservés à leur auteur, purge planifiée
 **Tests à passer :**
-- [ ] Chaque forme de graphe : figure valide (schéma Plotly) sur un parc de test et sur un bâtiment
-- [ ] Un même document : HTML, DOCX (ouvert par python-docx, titres et tableaux présents) et PDF (pages, signets)
-- [ ] Le conteneur de rendu refuse une requête sans clé et toute ressource réseau ; un export d'autrui est refusé
-- [ ] Suite backend complète verte
-**Vérifié le :**
+- [x] Chaque forme de graphe : figure valide (schéma Plotly) sur un parc de test et sur un bâtiment
+- [x] Un même document : HTML, DOCX (ouvert par python-docx, titres et tableaux présents) et PDF (pages, signets)
+- [x] Le conteneur de rendu refuse une requête sans clé et toute ressource réseau ; un export d'autrui est refusé
+- [x] Suite backend complète verte
+**Vérifié le :** 2026-11-16 — intégré (commit `7da2e8c`), 663 tests backend OK ; tests unitaires et d'intégration de `rendu-service` écrits par le secteur R ; vérification en navigateur au lot 40.
 
-## Lot 39 — Rendu : interface (secteur F)   ·   statut : à faire
-- [ ] Onglet Rendu en deux pages : **Paramétrage du rendu** (sections, blocs, constructeur de graphes guidé : une question → un graphe proposé, puis réglages ; gabarits ; enregistrement par un gestionnaire) et **Rendu** (aperçu fidèle du document serveur, exports HTML / Word / PDF)
-- [ ] Composant `graphe` : Plotly chargé à la demande, thème clair/sombre par les tokens Foyer (aucune couleur en dur), accessible (titre, résumé textuel)
-- [ ] Fiche d'identité : potentiels par bouquet (écarts, actions appliquées / écartées)
-- [ ] Parc : comparaison du parc réel et des potentiels par bouquet (tableau, graphes, carte)
-- [ ] Bâtiment : vue 3D des résultats N2 — pertes d'hiver, gains d'été, solaire absorbé, températures de surface — échelle et légende, triangle cliquable (valeurs), lien vers le calcul
-- [ ] Le bloc `vue3d` du rendu utilise la même vue
+## Lot 39 — Rendu : interface (secteur F)   ·   statut : livré
+- [x] Onglet Rendu en deux pages : **Paramétrage du rendu** (sections, blocs, constructeur de graphes guidé : une question → un graphe proposé, puis réglages ; gabarits ; enregistrement par un gestionnaire) et **Rendu** (aperçu fidèle du document serveur, exports HTML / Word / PDF)
+- [x] Composant `graphe` : Plotly chargé à la demande, thème clair/sombre par les tokens Foyer (aucune couleur en dur), accessible (titre, résumé textuel)
+- [x] Fiche d'identité : potentiels par bouquet (écarts, actions appliquées / écartées)
+- [x] Parc : comparaison du parc réel et des potentiels par bouquet (tableau, graphes, carte)
+- [x] Bâtiment : vue 3D des résultats N2 — pertes d'hiver, gains d'été, solaire absorbé, températures de surface — échelle et légende, triangle cliquable (valeurs), lien vers le calcul
+- [x] Le bloc `vue3d` du rendu utilise la même vue
 **Tests à passer :**
 - [ ] Navigateur réel (compte de test), clair et sombre : construire un graphe de chaque famille, l'enregistrer, l'exporter dans les trois formats et ouvrir les fichiers
 - [ ] Vue 3D sur un N2 réel ; cas sans N2 (message, lien pour le lancer si gestionnaire)
 - [ ] Aucune erreur console ; budgets `ng build` tenus (Plotly hors bundle initial)
-**Vérifié le :**
+**Vérifié le :** 2026-11-16 — intégré (commit `7da2e8c`), `ng build` OK ; navigateur réel et budgets de production au lot 40.
 
-## Lot 40 — Intégration et documentation   ·   statut : à faire
+## Lot 40 — Intégration et documentation   ·   statut : en cours
 - [ ] Rapports des secteurs vérifiés (version du contrat), fichiers partagés appliqués en un seul edit
 - [ ] Déploiement séquencé (image Django, image du conteneur de rendu, frontend), `app-test.sh`, cloisonnement 3/3
 - [ ] Parcours réel de bout en bout : parc d'essai → bouquets → potentiels → fiche d'identité → comparaison de parc → rendu personnalisé → exports HTML, Word, PDF ouverts → vue 3D ; parc d'essai supprimé
 **Documentation (actualisation complète)**
-- [ ] `README.md` : but, six onglets, parcours, protections, améliorations / bouquets / potentiels, rendu et exports, conteneur de rendu, ressources (2 vCPU), tests
-- [ ] `frontend/README.md` : remplacer le gabarit Angular (structure, build, budgets, Plotly à la demande)
-- [ ] `refonte.md` : § 16 avancement lots 28 à 40, § 17, décisions nouvelles (D40+)
-- [ ] `FEUILLE_DE_ROUTE.md` : lots 35 à 40 livrés et vérifiés
-- [ ] `backend/api/moteurs.py` : sol simulé, protubérances, protections, améliorations, DH RE2020, sorties par triangle
-- [ ] Page Théorie : sol 1D, MNS, horizon par profil, protubérances, protections et lames, végétalisation, albédos, DH RE2020, application de chaque action par niveau
+- [x] `README.md` : but, six onglets, parcours, protections, améliorations / bouquets / potentiels, rendu et exports, conteneur de rendu, ressources (2 vCPU), tests
+- [x] `frontend/README.md` : remplacer le gabarit Angular (structure, build, budgets, Plotly à la demande)
+- [x] `refonte.md` : § 16 avancement lots 28 à 40, § 17, décisions nouvelles (D40+)
+- [x] `FEUILLE_DE_ROUTE.md` : lots 35 à 40 livrés et vérifiés
+- [x] `backend/api/moteurs.py` : sol simulé, protubérances, protections, améliorations, DH RE2020, sorties par triangle
+- [x] Page Théorie : sol 1D, MNS, horizon par profil, protubérances, protections et lames, végétalisation, albédos, DH RE2020, application de chaque action par niveau
 - [ ] `CLAUDE.md` du lab (service de rendu, pièges) et mémoire
 **Vérifié le :**

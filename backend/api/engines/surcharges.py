@@ -237,6 +237,10 @@ def describe(building, scenario, level, n2_mode=None):
                 'appliquee': ok, 'application': how}
         if f.key == 'ventilation.nocturne_vol_h' and ok:
             item['hypothese'] = HYPOTHESE_NOCTURNE
+        if level != 'N0' and ok and (f.key == 'ventilation.rendement_recup' or
+                                     (f.key == 'ventilation.type' and f.value == 'vmc_df')):
+            from .inputs import HYPOTHESE_BYPASS
+            item['hypothese'] = HYPOTHESE_BYPASS
         out.append(item)
     valid, rejected = clean(scenario.surcharges or {})
     for k, v in valid.items():
@@ -259,3 +263,39 @@ def describe(building, scenario, level, n2_mode=None):
                     'appliquee': m is not None, 'application': m['application'][level] if m else
                     'non appliquée : type de protection inconnu'})
     return out
+
+
+# ── Ouverture des fenêtres en été (lot 40, I9 — réglage du parc, désactivé par défaut) ──────────────────────────
+
+HYPOTHESE_OUVERTURE = ('Ouverture des fenêtres en été (réglage du parc) : de mai à septembre, renouvellement de {vol_h:g} '
+                       'vol/h ajouté quand '
+                       'l’air intérieur de l’heure précédente dépasse {seuil_c:g} °C et l’air extérieur est plus frais '
+                       'd’au moins {ecart_c:g} °C{occ} ; échangeur double flux by-passé baies ouvertes. Principe : '
+                       'ouverture des baies par les occupants en été (cadre RE2020, Th-BCE 2020) ; seuils et débit : '
+                       'réglages du parc.')
+
+
+def window_opening(building):
+    """Réglages I9 effectifs du parc du bâtiment, ou None si l'ouverture est désactivée (défaut, et hors parc)."""
+    from .. import reglages
+    cfg = reglages.for_building(building, 'parametrage') or reglages.defaults('parametrage')
+    if not cfg.get('confort.ouverture_fenetres'):
+        return None
+    out = {'seuil_c': float(cfg['confort.ouverture_seuil_c']), 'ecart_c': float(cfg['confort.ouverture_ecart_c']),
+           'vol_h': float(cfg['confort.ouverture_vol_h']), 'occupation': bool(cfg['confort.ouverture_occupation'])}
+    out['hypothese'] = HYPOTHESE_OUVERTURE.format(
+        occ=', aux heures d’occupation pour le tertiaire' if out['occupation'] else '', **out)
+    return out
+
+
+def opening_allowed(hidx, residential, occupation):
+    """Heures où l'ouverture peut jouer : « en été », de mai à septembre (mêmes mois que la surventilation nocturne ;
+    hors été, ouvrir un bureau surchauffé par grand froid ajouterait du chauffage) ; tertiaire « occupation » :
+    8 h–19 h, lundi–vendredi, comme N1."""
+    from .shading import month_of
+    hidx = np.asarray(hidx)
+    ok = np.isin(month_of(hidx), NIGHT_MONTHS)
+    if residential or not occupation:
+        return ok
+    hour, day = hidx % 24, (hidx // 24) % 7
+    return ok & (hour >= 8) & (hour < 19) & (day < 5)
