@@ -12,3 +12,4 @@
 .n2 h3 { margin: 0; font-size: 1rem; }
 .n2-progress { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin: .5rem 0; color: var(--text-mute); }
 .n2-progress progress { flex: 1 1 12rem; min-height: .75rem; accent-color: var(--accent); }
+.others { display: flex; flex-wrap: wrap; gap: var(--space-3); }

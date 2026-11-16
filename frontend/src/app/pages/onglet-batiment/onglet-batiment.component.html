@@ -1,0 +1,153 @@
+<div class="rf-page">
+  <p class="rf-eyebrow">Bâtiment</p>
+  <app-contexte-bar />
+
+  @if (ctx.batimentId() === null) {
+    <h1>Choisir un bâtiment</h1>
+    @if (!ctx.parcId()) {
+      <p class="rf-sub">Choisissez d'abord un parc dans le bandeau ci-dessus, puis un de ses bâtiments.</p>
+    } @else if (ctx.chargement()) {
+      <p class="rf-hint" role="status">Chargement des bâtiments du parc…</p>
+    } @else if (!ctx.batiments().length) {
+      <p class="rf-sub">Ce parc ne contient encore aucun bâtiment.
+        <a routerLink="/parc" [queryParams]="ctx.queryParams({ vue: 'ajouter' })">Ajouter un bâtiment au parc</a>.</p>
+    } @else {
+      <p class="rf-sub">Choisissez le bâtiment à examiner — dans le bandeau ou ci-dessous. Il restera le bâtiment courant
+        dans tous les onglets.</p>
+      <ul class="choix">
+        @for (b of ctx.batiments(); track b.id) {
+          <li><button type="button" class="rf-btn choix-btn" (click)="ctx.choisirBatiment(b.id)">
+            <strong>{{ b.name || ('Bâtiment ' + b.id) }}</strong>
+            <small>{{ b.address }}@if (b.usage) { · {{ usageLabels[b.usage] || b.usage }} }</small>
+          </button></li>
+        }
+      </ul>
+    }
+  } @else {
+    @let row = ctx.batiment();
+    <h1>{{ row?.name || info()?.name || ('Bâtiment ' + ctx.batimentId()) }}</h1>
+    @if (row?.address || info()?.address) { <p class="rf-sub">{{ row?.address || info()?.address }}</p> }
+    @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+
+    <nav class="rf-tabs" aria-label="Sections du bâtiment">
+      @for (t of vues; track t.id) {
+        <button type="button" [class.active]="vue() === t.id" [attr.aria-pressed]="vue() === t.id" (click)="setVue(t.id)">{{ t.label }}</button>
+      }
+    </nav>
+
+    @let bid = ctx.batimentId()!;
+    @switch (vue()) {
+      @case ('synthese') {
+        <section class="rf-card" aria-labelledby="id-title">
+          <div class="rf-card-head"><h2 id="id-title">Identité</h2></div>
+          <dl class="ident">
+            <div><dt>Usage</dt><dd>{{ row?.usage ? (usageLabels[row!.usage!] || row!.usage) : '—' }}</dd></div>
+            <div><dt>Surface chauffée</dt><dd>@if (row?.surface_m2 ?? info()?.surface_ref_m2; as s) { {{ s | number: '1.0-0' }} m² } @else { — }</dd></div>
+            <div><dt>Année de construction</dt><dd>{{ row?.annee ?? '—' }}</dd></div>
+            <div><dt title="Référentiel national des bâtiments">Identifiant RNB</dt><dd><code>{{ row?.rnb_id || info()?.rnb_id || '—' }}</code></dd></div>
+          </dl>
+          @if (row) {
+            <div class="scores">
+              <span class="rf-gauge" title="À quel point les données du bâtiment sont sûres">confiance
+                <span [class]="'rf-gauge-bar ' + gaugeClass(row.confidence)"><i [style.width.%]="row.confidence * 100"></i></span>
+                {{ row.confidence * 100 | number: '1.0-0' }} %</span>
+              <span class="rf-gauge" title="Part des données renseignées autrement que par une valeur par défaut">complétude
+                <span [class]="'rf-gauge-bar ' + gaugeClass(row.completeness)"><i [style.width.%]="row.completeness * 100"></i></span>
+                {{ row.completeness * 100 | number: '1.0-0' }} %</span>
+            </div>
+            @if (row.approfondissement; as a) {
+              <p class="appro"><span class="rf-badge" [class]="'rf-badge ap-' + a.niveau" title="Jusqu'où l'étude de ce bâtiment est allée">
+                {{ a.libelle || approLabels[a.niveau] }}</span> @if (a.detail) { <small>{{ a.detail }}</small> }</p>
+            }
+            @if (row.modeles?.length) {
+              <p class="rf-hint">Simulations faites :
+                @for (m of row.modeles!; track m.niveau) {
+                  <span class="rf-badge" [class.m-mesure]="m.a_jour" [class.m-infere]="!m.a_jour"
+                        [title]="m.a_jour ? 'à jour' : 'à refaire : les données ont changé'">{{ m.libelle || mots[m.niveau] }} ({{ m.niveau }})</span>
+                }
+              </p>
+            }
+          }
+          <details class="sources">
+            <summary>Données automatiques (open data)</summary>
+            @if (info(); as b) {
+              <p class="rf-hint">État de la chaîne : <strong>{{ b.pipeline_status || 'jamais lancée' }}</strong></p>
+              @if (stepsOf(b).length) {
+                <ul class="steps">
+                  @for (s of stepsOf(b); track s.key) {
+                    <li [class.ko]="!s.ok"><span aria-hidden="true">{{ s.ok ? '✓' : '✗' }}</span>
+                      {{ stepLabels[s.key] || s.key }} @if (s.error) { — {{ s.error }} }</li>
+                  }
+                </ul>
+              }
+              <button type="button" class="rf-btn" (click)="reinit()" [disabled]="initJob()?.status === 'RUNNING' || initJob()?.status === 'PENDING'">
+                Relancer la récupération automatique</button>
+              <p class="rf-hint">Relancer ne touche à aucune de vos corrections.</p>
+              @if (initJob(); as j) { <p class="rf-hint" role="status">{{ j.message }} @if (j.status === 'RUNNING') { ({{ j.progress }} %) }</p> }
+            } @else { <p class="rf-hint" role="status">Chargement…</p> }
+          </details>
+        </section>
+        <app-resultat-carte [buildingId]="bid" [refresh]="version()" />
+        <app-questionnaire [buildingId]="bid" [refresh]="version()" (changed)="onChanged()" />
+        <p class="rf-hint">Pour corriger n'importe quelle valeur une à une :
+          <a routerLink="/batiment" [queryParams]="ctx.queryParams({ vue: 'donnees' })">Données et provenance</a>.</p>
+      }
+
+      @case ('donnees') {
+        <app-bt-donnees [buildingId]="bid" [cle]="cle()" [refresh]="version()" (changed)="onChanged()" />
+      }
+
+      @case ('geometrie') {
+        <app-geometrie [buildingId]="bid" (changed)="onChanged()" />
+        <section class="rf-card" aria-labelledby="mesh-title">
+          <div class="rf-card-head"><h2 id="mesh-title">Maillage 3D de l'enveloppe</h2></div>
+          <p class="avert" role="note">⚠ Certains gestes ci-dessous <strong>remplacent le maillage 3D</strong> (régénérer, raffiner,
+            réintégrer les vitrages, remplacer par un fichier) : les parois assignées à la main peuvent être perdues.
+            Une confirmation est demandée avant chacun d'eux.</p>
+          @for (id of [bid]; track id) {
+            @defer (on viewport) { <app-batiment [embedId]="id" /> }
+            @placeholder { <p class="rf-hint">La vue 3D se charge quand elle apparaît à l'écran…</p> }
+          }
+          <p class="rf-hint">Outil complet (import d'un maillage, création d'un bâtiment) :
+            <a routerLink="/maillage">éditeur de maillage</a>.</p>
+        </section>
+      }
+
+      @case ('physique') {
+        <app-bt-donnees [buildingId]="bid" [blocs]="blocsPhysique" [refresh]="version()" (changed)="onChanged()" />
+        <app-systemes [buildingId]="bid" [refresh]="version()" (changed)="onChanged()" />
+        <app-protections [buildingId]="bid" (changed)="onChanged()" />
+      }
+
+      @case ('meteo') {
+        <app-meteo-carte [buildingId]="bid" (changed)="onChanged()" />
+        <p class="rf-hint">C'est ici, et seulement ici, que se choisit la météo des simulations de ce bâtiment.</p>
+      }
+
+      @case ('environnement') {
+        @for (id of [bid]; track id) {
+          @defer { <app-environnement [embedBuildingId]="id" /> }
+          @placeholder { <p class="rf-hint">Chargement de l'environnement…</p> }
+        }
+        <section class="rf-card" aria-labelledby="fac-title">
+          <div class="rf-card-head"><h2 id="fac-title">Façades et vitrages (photos de rue)</h2></div>
+          @if (building(); as cb) {
+            @if (cb.georef_lat !== null) {
+              <p class="avert" role="note">⚠ Intégrer les vitrages modifie le maillage 3D du bâtiment.
+                À faire avant de raffiner le maillage (onglet Géométrie).</p>
+              @defer { <app-facade-panel [building]="cb" [paroiModels]="paroiModels()" (buildingChange)="onFacades($event)" /> }
+              @placeholder { <p class="rf-hint">Chargement des façades…</p> }
+            } @else {
+              <p class="rf-hint">Le bâtiment n'est pas encore placé sur la carte : corrigez sa position dans
+                <a routerLink="/batiment" [queryParams]="ctx.queryParams({ vue: 'geometrie' })">Géométrie</a>.</p>
+            }
+          } @else { <p class="rf-hint" role="status">Chargement…</p> }
+        </section>
+      }
+
+      @case ('mesures') {
+        <app-mesures [buildingId]="bid" (changed)="onChanged()" />
+      }
+    }
+  }
+</div>

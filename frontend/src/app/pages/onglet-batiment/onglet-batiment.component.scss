@@ -1,0 +1,23 @@
+:host { display: block; }
+.choix { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-3); }
+.choix-btn { width: 100%; height: 100%; text-align: left; display: flex; flex-direction: column; align-items: flex-start;
+  gap: var(--space-1); padding: var(--space-3) var(--space-4); }
+.choix-btn small { color: var(--text-mute); font-weight: 400; font-size: var(--text-xs); }
+.ident { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3); margin: 0 0 var(--space-4); }
+.ident dt { color: var(--text-mute); font-size: var(--text-xs); }
+.ident dd { margin: 0; font-weight: 600; }
+.scores { display: flex; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.appro { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin: 0 0 var(--space-3); }
+.appro small { color: var(--text-mute); font-size: var(--text-sm); }
+.rf-badge.ap-automatique { background: var(--bg); color: var(--text-mute); }
+.rf-badge.ap-complete { background: var(--accent-tint); color: var(--accent); }
+.rf-badge.ap-documente { background: var(--accent-tint); color: var(--accent-deep); border-color: var(--accent); }
+.rf-badge.ap-mesure, .rf-badge.ap-expert { background: var(--success-tint); color: var(--success); border-color: var(--success); }
+.rf-hint .rf-badge { margin-right: var(--space-1); }
+.sources summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+.steps { list-style: none; padding: 0; margin: 0 0 var(--space-3); font-size: var(--text-sm); display: grid; gap: var(--space-1); }
+.steps li span { color: var(--success); font-weight: 700; }
+.steps li.ko span, .steps li.ko { color: var(--danger); }
+.avert { background: var(--warning-tint); color: var(--text); border: 1px solid var(--warning); border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3); font-size: var(--text-sm); }
+code { font-family: var(--font-mono); }

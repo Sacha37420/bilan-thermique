@@ -49,6 +49,14 @@ GENERATOR_EFFICIENCY = {
 }
 
 
+def period_slug(label):
+    """Identifiant d'une période pour les réglages de parc : « avant 1915 » → « avant_1915 »."""
+    return label.replace(' ', '_').replace('-', '_')
+
+
+PERIOD_SLUGS = [period_slug(row[1]) for row in PERIODS]
+
+
 def period_for(year):
     y = int(year) if year else DEFAULT_YEAR
     for row in PERIODS:
@@ -68,15 +76,41 @@ def ventilation_type_for(year, usage):
     return 'vmc_sf_auto'
 
 
-def defaults(year=None, usage=None, wall_material=None):
-    """{clé: valeur} par défaut pour une fiche — tout est `defaut`."""
-    usage = usage if usage in USAGE_DEFAULTS else 'autre'
+def period_values(year, cfg=None):
+    """(libellé, mur.u, toiture.u, plancher.u, baies.uw, n50, inertie) de la période, avec les valeurs
+    du parc (`cfg` = réglages « parametrage » effectifs, clés `archetypes.<période>.…`) si données."""
     _end, label, u_mur, u_toit, u_pb, uw, n50, inertie = period_for(year)
+    if cfg:
+        slug = period_slug(label)
+        g = lambda k, d: cfg.get(f'archetypes.{slug}.{k}', d)  # noqa: E731
+        u_mur, u_toit, u_pb, uw, n50 = g('mur_u', u_mur), g('toiture_u', u_toit), g('plancher_u', u_pb), \
+            g('baies_uw', uw), g('n50', n50)
+    return label, u_mur, u_toit, u_pb, uw, n50, inertie
+
+
+def ventilation_values(vent, cfg=None):
+    debit, recup = VENTILATION_DEFAULT[vent]
+    if cfg:
+        debit = cfg.get(f'ventilation.{vent}.debit', debit)
+        recup = cfg.get(f'ventilation.{vent}.recup', recup)
+    return debit, recup
+
+
+def generator_efficiency(gen, cfg=None):
+    eta = GENERATOR_EFFICIENCY[gen]
+    return cfg.get(f'rendements.{gen}', eta) if cfg else eta
+
+
+def defaults(year=None, usage=None, wall_material=None, cfg=None):
+    """{clé: valeur} par défaut pour une fiche — tout est `defaut`. `cfg` : réglages « parametrage »
+    effectifs du parc du bâtiment (None hors parc : constantes ci-dessus)."""
+    usage = usage if usage in USAGE_DEFAULTS else 'autre'
+    label, u_mur, u_toit, u_pb, uw, n50, inertie = period_values(year, cfg)
     if wall_material in ('bois', 'pan_de_bois'):
         inertie = 'legere'
     ratio, t_set, gains, m2_occ = USAGE_DEFAULTS[usage]
     vent = ventilation_type_for(year, usage)
-    debit, recup = VENTILATION_DEFAULT[vent]
+    debit, recup = ventilation_values(vent, cfg)
     y = int(year) if year else DEFAULT_YEAR
     out = {
         'mur.u': u_mur, 'toiture.u': u_toit, 'plancher.u': u_pb, 'baies.uw': uw,
@@ -87,7 +121,7 @@ def defaults(year=None, usage=None, wall_material=None):
         'usage.consigne_chauffage_c': t_set, 'usage.apports_w_m2': gains,
         'mur.isolation': 'aucune' if y < 1975 else 'iti',
         'plancher.type': 'terre_plein' if usage == 'maison' else 'sous_sol',
-        'systeme.generateur': 'chaudiere_gaz', 'systeme.rendement_generation': GENERATOR_EFFICIENCY['chaudiere_gaz'],
+        'systeme.generateur': 'chaudiere_gaz', 'systeme.rendement_generation': generator_efficiency('chaudiere_gaz', cfg),
         'enveloppe.couleur_absorptance': 0.6, 'baies.occultations': usage in ('maison', 'logement_collectif'),
         'identite.mitoyennete': 0.0,
     }

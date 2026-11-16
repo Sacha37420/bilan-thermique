@@ -44,7 +44,8 @@
         @if (roof !== 'terrasse') { <label class="rf-field"><span>Pente (°)</span><input type="number" [(ngModel)]="pitch"></label> }
       </div>
       @if (data()?.has_manual_parois) {
-        <label class="check"><input type="checkbox" [(ngModel)]="regen"> Régénérer l'enveloppe 3D (perd les parois assignées à la main)</label>
+        <label class="check warn"><input type="checkbox" [(ngModel)]="regen"> Régénérer l'enveloppe 3D</label>
+        @if (regen) { <p class="rf-error" role="note">⚠ Attention : régénérer remplace le maillage 3D ; les parois assignées à la main sont perdues.</p> }
       }
       <div class="rf-row">
         <button type="button" class="rf-btn primary" (click)="save()">Enregistrer la géométrie</button>

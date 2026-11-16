@@ -1,0 +1,93 @@
+:host { display: block; }
+
+.reglage summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+.reglage .rf-row { margin: var(--space-3) 0; }
+.rf-field.grow { flex: 1 1 18rem; }
+.rf-field.grow input { width: 100%; }
+.cols { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3);
+        display: flex; flex-wrap: wrap; column-gap: var(--space-4); margin: 0 0 var(--space-3); }
+.cols legend { color: var(--text-mute); font-size: var(--text-xs); padding: 0 var(--space-1); }
+.check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; cursor: pointer; font-size: var(--text-sm); }
+.check input { width: 20px; height: 20px; accent-color: var(--accent); }
+.reglage-pied { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.reglage-pied .rf-hint { margin: 0; flex: 1 1 20rem; }
+.outils { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-4); }
+
+/* ── Feuille (aperçu imprimable) ── */
+.feuille { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
+           padding: var(--space-6); display: grid; gap: var(--space-5); }
+.entete, .bandeau { display: flex; flex-wrap: wrap; gap: var(--space-4); justify-content: space-between; align-items: flex-end;
+                    border-bottom: 2px solid var(--accent); padding-bottom: var(--space-4); }
+.surtitre { margin: 0; font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
+.titre { margin: var(--space-1) 0 0; font-size: var(--text-2xl); line-height: 1.15; }
+.meta { margin: var(--space-2) 0 0; color: var(--text-mute); font-size: var(--text-sm); display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.meta code { font-family: var(--font-mono); }
+.adresse { margin: var(--space-1) 0 0; font-size: var(--text-lg); }
+.bloc h3 { margin: 0 0 var(--space-3); font-size: var(--text-lg); }
+.bloc { break-inside: avoid; }
+.deux { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+tr.fort td { font-weight: 600; }
+.pied { border-top: 1px solid var(--border); padding-top: var(--space-3); color: var(--text-mute); font-size: var(--text-xs); }
+
+.barres { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.barres li { display: grid; grid-template-columns: minmax(8rem, 14rem) 1fr 3rem; gap: var(--space-3); align-items: center; font-size: var(--text-sm); }
+.bb { height: 12px; background: var(--border); border-radius: var(--radius-full); overflow: hidden; }
+.bb > i { display: block; height: 100%; background: var(--accent); }
+.bb.low > i { background: var(--danger); } .bb.mid > i { background: var(--warning); } .bb.high > i { background: var(--success); }
+.bn { font-family: var(--font-mono); text-align: right; }
+
+.carte { --map-h: 380px; }
+.legende { list-style: none; padding: 0; margin: var(--space-3) 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4);
+           font-size: var(--text-sm); font-family: var(--font-mono); }
+.legende li { display: inline-flex; align-items: center; gap: var(--space-2); }
+.pastille { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border); display: inline-block; }
+
+.classement { margin: 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); columns: 2; }
+.classement li { break-inside: avoid; }
+.classement a, .tableau a { color: var(--accent); }
+.classement .cv { font-family: var(--font-mono); color: var(--text-mute); margin-left: var(--space-2); font-size: var(--text-sm); }
+
+/* ── Fiche d'identité ── */
+.bandeau { align-items: stretch; }
+.bandeau-txt { flex: 1 1 22rem; }
+.minicarte { flex: 0 1 300px; min-width: 240px; --map-h: 220px; }
+.jauges { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; margin-top: var(--space-3); font-size: var(--text-sm); }
+.avertissement { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--warning); background: var(--warning-tint);
+                 color: var(--text); font-size: var(--text-sm); border-radius: var(--radius-sm); }
+.resultats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3); }
+.resultat { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-3); background: var(--bg); }
+.resultat.prefere { border-color: var(--accent); box-shadow: inset 0 3px 0 var(--accent); }
+.res-tete { margin: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.code { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-mute); }
+.resultat dl { margin: 0; display: grid; gap: var(--space-2); }
+.resultat dt { font-size: var(--text-xs); color: var(--text-mute); }
+.resultat dd { margin: 0; font-size: var(--text-sm); }
+.resultat .fort dd { font-size: var(--text-base); font-weight: 600; }
+.faits th[scope=row] { font-size: var(--text-sm); text-transform: none; letter-spacing: 0; color: var(--text); font-weight: 500; width: 45%; }
+.faits .prov { text-align: right; width: 1%; white-space: nowrap; }
+.faits tr.sous th { color: var(--accent); background: var(--bg); }
+td.bon { color: var(--success); font-weight: 600; }
+
+@media (max-width: 899px) {
+  .feuille { padding: var(--space-4); }
+  .deux { grid-template-columns: 1fr; }
+  .classement { columns: 1; }
+  .barres li { grid-template-columns: 1fr 3rem; }
+  .barres .bb { grid-column: 1 / -1; grid-row: 2; }
+  .minicarte { flex-basis: 100%; }
+}
+
+/* ── Impression : seule la feuille, sur A4 ── */
+@media print {
+  @page { size: A4; margin: 14mm; }
+  ::ng-deep .sidebar, ::ng-deep .topbar, ::ng-deep .mobile-panel { display: none !important; }
+  ::ng-deep .shell, ::ng-deep .content, ::ng-deep .main { display: block !important; margin: 0 !important; padding: 0 !important; }
+  .no-print { display: none !important; }
+  .rf-page { padding: 0; max-width: none; }
+  .feuille { border: 0; padding: 0; border-radius: 0; gap: var(--space-4); }
+  .titre { font-size: var(--text-xl); }
+  .carte { --map-h: 300px; }
+  .rf-table-wrap { overflow: visible; }
+  .classement a, .tableau a { color: inherit; text-decoration: none; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -2,6 +2,7 @@
   @for (item of navItems; track item.label) {
     <a
       [routerLink]="item.path"
+      [queryParams]="ctx.queryParams()"
       routerLinkActive="active"
       [routerLinkActiveOptions]="{ exact: item.exact ?? false }"
       class="nav-link"

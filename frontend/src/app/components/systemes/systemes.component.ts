@@ -1,7 +1,9 @@
-import { Component, Input, OnChanges, inject, output, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, Input, OnChanges, inject, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe, KeyValuePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { ContexteService } from '../../core/contexte.service';
 import { Catalogue, Fiche } from '../../core/refonte.types';
 
 interface Energy {
@@ -18,15 +20,17 @@ const ENERGY: Record<string, string> = { electricite: 'Électricité', gaz: 'Gaz
 @Component({
   selector: 'app-systemes',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, KeyValuePipe],
+  imports: [FormsModule, DecimalPipe, KeyValuePipe, RouterLink],
   templateUrl: './systemes.component.html',
   styleUrl: './systemes.component.scss',
 })
 export class SystemesComponent implements OnChanges {
   @Input({ required: true }) buildingId!: number;
+  protected ctx = inject(ContexteService);
   @Input() refresh = 0;
   changed = output<void>();
   private rf = inject(RefonteApiService);
+  private cdr = inject(ChangeDetectorRef);
   catalogue = signal<Catalogue | null>(null);
   energy = signal<Energy | null>(null);
   form: Record<string, string> = {};
@@ -40,6 +44,8 @@ export class SystemesComponent implements OnChanges {
     this.rf.fiche(this.buildingId).subscribe({ next: (f: Fiche) => {
       for (const k of KEYS) this.form[k] = (f.facts[k]?.value as string) ?? '';
       this.efficiency = (f.facts['systeme.rendement_generation']?.value as number) ?? null;
+      // Application sans zone : le formulaire est un objet ordinaire, on demande un rendu.
+      this.cdr.markForCheck();
     } });
     this.loadEnergy();
   }

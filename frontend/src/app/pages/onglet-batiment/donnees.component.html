@@ -1,0 +1,87 @@
+<p class="rf-hint legend">
+  Chaque valeur dit d'où elle vient : <span class="rf-badge m-mesure">mesuré</span>
+  <span class="rf-badge m-document">document</span> <span class="rf-badge m-declare">déclaré</span>
+  <span class="rf-badge m-infere">inféré</span> <span class="rf-badge m-defaut">défaut</span>.
+  Corriger une valeur pose une surcharge ; « Revenir à l'automatique » la retire. Rien n'est effacé.
+</p>
+@if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+@if (!fiche() || !catalogue()) { <p class="rf-hint" role="status">Chargement des données…</p> }
+@else {
+  @for (bl of blocks(); track bl.id) {
+    <section class="rf-card" [attr.aria-labelledby]="'bl-' + bl.id">
+      <h2 [id]="'bl-' + bl.id">{{ bl.label }}</h2>
+      <div class="rf-table-wrap">
+        <table class="rf-table facts">
+          <thead><tr><th scope="col">Donnée</th><th scope="col">Valeur</th><th scope="col">Provenance</th><th scope="col" class="num">Confiance</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+          <tbody>
+            @for (k of bl.keys; track k.key) {
+              @let f = fact(k.key);
+              <tr [class.empty]="!f" [class.focus]="editing() === k.key" [id]="rowId(k.key)">
+                <td>{{ k.label }} @if (k.help) { <abbr class="help" [title]="k.help" aria-label="Aide">?</abbr> }</td>
+                <td class="val">
+                  @if (editing() === k.key) {
+                    <div class="edit">
+                      @switch (k.kind) {
+                        @case ('enum') {
+                          <select [(ngModel)]="editValue" [attr.aria-label]="k.label">
+                            @for (c of (k.choices ?? {}) | keyvalue; track c.key) { <option [ngValue]="c.key">{{ c.value }}</option> }
+                          </select>
+                        }
+                        @case ('bool') { <label class="check"><input type="checkbox" [(ngModel)]="editValue"> oui</label> }
+                        @default {
+                          <input type="number" [(ngModel)]="editValue" [min]="k.min" [max]="k.max" step="any" [attr.aria-label]="k.label">
+                          <span class="unit">{{ k.unit }}</span>
+                        }
+                      }
+                      <select [(ngModel)]="editMethod" aria-label="D'où vient cette valeur">
+                        <option value="declare">déclaré</option>
+                        <option value="mesure">mesuré</option>
+                      </select>
+                      <input type="text" [(ngModel)]="editSource" placeholder="source (facture, visite…)" aria-label="Source">
+                      <button type="button" class="rf-btn primary small" (click)="save(k)" [disabled]="saving()">Enregistrer</button>
+                      <button type="button" class="rf-btn small" (click)="editing.set(null)">Annuler</button>
+                    </div>
+                  } @else {
+                    <strong>{{ display(k, f?.value) }}</strong>
+                    @if (f?.automatic; as a) {
+                      <small class="auto">automatique : {{ display(k, a.value) }} ({{ methodLabels[a.method] }})</small>
+                    }
+                  }
+                </td>
+                <td>
+                  @if (f) {
+                    <span class="rf-badge" [class]="'rf-badge m-' + f.method">{{ methodLabels[f.method] }}</span>
+                    <small class="src">{{ f.source }}@if (f.author) { · {{ f.author }} } · {{ f.created_at | date: 'dd/MM/yy' }}</small>
+                  }
+                </td>
+                <td class="num">{{ f ? (f.confidence * 100 | number: '1.0-0') + ' %' : '' }}</td>
+                <td class="acts">
+                  @if (editing() !== k.key) {
+                    <button type="button" class="rf-btn small" (click)="startEdit(k)" [attr.aria-label]="'Corriger — ' + k.label">Corriger</button>
+                    @if (f && f.mine && (f.method === 'declare' || f.method === 'mesure' || f.method === 'document')) {
+                      <button type="button" class="rf-btn small" (click)="backToAuto(f)">Revenir à l'automatique</button>
+                    }
+                    @if (f) { <button type="button" class="rf-btn small" (click)="showHistory(k)" [attr.aria-label]="'Historique — ' + k.label" title="Historique">⋯</button> }
+                  }
+                </td>
+              </tr>
+              @if (history()?.key === k.key) {
+                <tr class="hist"><td colspan="5">
+                  <ul>
+                    @for (h of history()!.rows; track h.id) {
+                      <li [class.off]="h.retired || h.superseded">
+                        {{ h.created_at | date: 'dd/MM/yy HH:mm' }} — {{ display(k, h.value) }}
+                        <span class="rf-badge" [class]="'rf-badge m-' + h.method">{{ methodLabels[h.method] }}</span>
+                        {{ h.source }} @if (h.retired) { (retirée) } @else if (h.superseded) { (remplacée) }
+                      </li>
+                    }
+                  </ul>
+                </td></tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  }
+}

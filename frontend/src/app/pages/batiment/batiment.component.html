@@ -1,6 +1,7 @@
 <div class="page-batiment" [class.embedded]="!!embedId" [attr.role]="embedId ? null : 'main'">
 
   @if (!embedId) {
+  <p><a class="rf-btn small" routerLink="/batiment" [queryParams]="{ vue: 'geometrie' }">← Revenir à l'onglet Bâtiment (géométrie)</a></p>
   <div class="batiment-head">
     <p class="eyebrow"><span class="dot"></span> Enveloppe 3D</p>
     <h1>Bâtiment</h1>
@@ -48,9 +49,9 @@
           </a>
         }
         @if (embedId) {
-          <a class="checklist-item next-step" routerLink="/fiche" [queryParams]="{ b: embedId, onglet: 'simulation' }">
+          <a class="checklist-item next-step" routerLink="/calculs" [queryParams]="{ b: embedId, vue: 'simulation', type: 'N2' }">
             <span class="status-badge todo">→</span>
-            <span class="checklist-label">Lancer le calcul (onglet Simulation)</span>
+            <span class="checklist-label">Lancer le calcul détaillé (onglet Calculs)</span>
           </a>
         } @else {
           <a class="checklist-item next-step" routerLink="/calcul-3d">

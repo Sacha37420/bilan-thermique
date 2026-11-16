@@ -1,9 +1,9 @@
 <section class="rf-card" aria-labelledby="calc-title">
   <div class="rf-card-head">
-    <h2 id="calc-title">Calculs</h2>
-    <label class="filter">Niveau
+    <h2 id="calc-title">Historique des calculs</h2>
+    <label class="filter">Simulation
       <select class="rf-input" [value]="level()" (change)="setLevel($any($event.target).value)">
-        <option value="">Tous</option><option value="N0">N0</option><option value="N1">N1</option><option value="N2">N2</option>
+        <option value="">Toutes</option><option value="N0">Mensuel (N0)</option><option value="N1">Horaire simplifié (N1)</option><option value="N2">Détaillé par paroi (N2)</option>
       </select>
     </label>
     <button type="button" class="rf-btn" [disabled]="picked().length !== 2" (click)="compare()">
@@ -13,13 +13,13 @@
     <a routerLink="/parois">modèles de paroi</a> · <a routerLink="/calcul-3d">Calcul 3D avancé</a></p>
   @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
   @if (!runs().length) {
-    <p class="rf-hint">Aucun calcul pour ce bâtiment. Lancez-en un depuis la Synthèse.</p>
+    <p class="rf-hint">Aucun calcul pour ce bâtiment. <a routerLink="/calculs" [queryParams]="ctx.queryParams({ vue: 'simulation' })">Lancer une simulation</a>.</p>
   } @else {
     <div class="table-wrap">
       <table class="rf-table runs">
         <thead><tr>
-          <th scope="col"><span class="sr">Comparer</span></th><th scope="col">Date</th><th scope="col">Niveau</th>
-          <th scope="col">Variante</th><th scope="col">État</th><th scope="col" class="num">Besoin (kWh/m²·an)</th>
+          <th scope="col"><span class="sr">Comparer</span></th><th scope="col">Date</th><th scope="col">Simulation</th>
+          <th scope="col">Pour</th><th scope="col">État</th><th scope="col" class="num">Besoin (kWh/m²·an)</th>
           <th scope="col" class="num">Puissance max (kW)</th><th scope="col" class="num">h &gt; 28 °C</th><th scope="col"></th>
         </tr></thead>
         <tbody>
@@ -28,13 +28,13 @@
               <td><input type="checkbox" class="pick" [checked]="picked().includes(r.id)" (change)="togglePick(r.id)"
                          [disabled]="r.status !== 'DONE'" [attr.aria-label]="'Comparer le calcul du ' + (r.created_at | date: 'dd/MM HH:mm')" /></td>
               <td>{{ r.created_at | date: 'dd/MM/yyyy HH:mm' }}</td>
-              <td>{{ r.level }}</td>
-              <td>{{ r.scenario_name ?? 'état actuel' }}</td>
+              <td>{{ levelLabel[r.level] }}</td>
+              <td>{{ r.scenario_name ? 'amélioration « ' + r.scenario_name + ' »' : 'état actuel' }}</td>
               <td>
                 @if (r.status !== 'DONE') { <span class="rf-badge m-infere">{{ r.status === 'ERROR' ? 'échec' : 'en cours' }}</span> }
                 @else if (r.up_to_date === true) { <span class="rf-badge m-mesure">à jour</span> }
-                @else if (r.up_to_date === false) { <span class="rf-badge m-infere">périmé</span> }
-                @else { <span class="rf-badge m-defaut">Calcul 3D</span> }
+                @else if (r.up_to_date === false) { <span class="rf-badge m-infere" title="Les données du bâtiment ont changé depuis ce calcul">à refaire</span> }
+                @else { <span class="rf-badge m-defaut">outil Calcul 3D</span> }
               </td>
               <td class="num">{{ num(r, 'heating_kwh_m2') ?? '—' }}</td>
               <td class="num">{{ num(r, 'heating_kw_max') ?? '—' }}</td>
@@ -55,15 +55,15 @@
     <div class="rf-card-head">
       <h2 id="det-title">{{ levelLabel[d.level] }} · {{ d.created_at | date: 'dd/MM/yyyy HH:mm' }}</h2>
       @if (d.up_to_date === true) { <span class="rf-badge m-mesure">à jour</span> }
-      @else if (d.up_to_date === false) { <span class="rf-badge m-infere">périmé — la fiche a changé depuis</span> }
+      @else if (d.up_to_date === false) { <span class="rf-badge m-infere">à refaire — les données du bâtiment ont changé depuis</span> }
       <button type="button" class="rf-btn small" (click)="close()">Fermer</button>
     </div>
     <p class="rf-hint">
-      {{ d.scenario_name ?? 'État actuel' }} · météo : {{ d.weather.source ?? '—' }}@if (d.weather.n_hours) { ({{ d.weather.n_hours }} h) }
+      {{ d.scenario_name ? 'Amélioration « ' + d.scenario_name + ' »' : 'État actuel' }} · météo : {{ d.weather.source ?? '—' }}@if (d.weather.n_hours) { ({{ d.weather.n_hours }} h) }
       @if (d.duration_s) { · calculé en {{ d.duration_s | number: '1.0-1' }} s }
       · @if (d.mode === 'experte') { enveloppe experte (parois assignées à la main) }
       @else if (d.mode === 'calcul_3d') { lancé depuis la page Calcul 3D (réglages du formulaire) }
-      @else { entrées tirées de la fiche }
+      @else { entrées tirées des données du bâtiment }
     </p>
     @if (d.status === 'ERROR') { <p class="rf-error" role="alert">{{ d.message }}</p> }
 
@@ -202,8 +202,8 @@
       <button type="button" class="rf-btn small" (click)="close()">Fermer</button>
     </div>
     <p class="rf-hint">
-      A : {{ c.a.level }} du {{ c.a.created_at | date: 'dd/MM/yyyy HH:mm' }} ({{ c.a.scenario_name ?? 'état actuel' }}) ·
-      B : {{ c.b.level }} du {{ c.b.created_at | date: 'dd/MM/yyyy HH:mm' }} ({{ c.b.scenario_name ?? 'état actuel' }})
+      A : {{ levelLabel[c.a.level] }} du {{ c.a.created_at | date: 'dd/MM/yyyy HH:mm' }} ({{ c.a.scenario_name ?? 'état actuel' }}) ·
+      B : {{ levelLabel[c.b.level] }} du {{ c.b.created_at | date: 'dd/MM/yyyy HH:mm' }} ({{ c.b.scenario_name ?? 'état actuel' }})
       @if (c.weather) { · météo différente : {{ c.weather.a }} / {{ c.weather.b }} }
     </p>
     <h3>Résultats</h3>
@@ -218,8 +218,8 @@
         }
       </tbody>
     </table>
-    <h3>Données de la fiche qui diffèrent</h3>
-    @if (!c.facts.length) { <p class="rf-hint">Aucune : les deux calculs partent de la même fiche.</p> }
+    <h3>Données du bâtiment qui diffèrent</h3>
+    @if (!c.facts.length) { <p class="rf-hint">Aucune : les deux calculs partent des mêmes données.</p> }
     @else {
       <table class="rf-table">
         <thead><tr><th scope="col">Donnée</th><th scope="col">A</th><th scope="col">B</th></tr></thead>

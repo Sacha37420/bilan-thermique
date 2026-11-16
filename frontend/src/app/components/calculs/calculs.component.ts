@@ -2,6 +2,7 @@ import { Component, Input, OnChanges, computed, inject, signal } from '@angular/
 import { DatePipe, DecimalPipe, UpperCasePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { ContexteService } from '../../core/contexte.service';
 import { Catalogue, CatalogueKey } from '../../core/refonte.types';
 import { SerieJourComponent } from '../serie-jour/serie-jour.component';
 
@@ -24,7 +25,7 @@ interface Comparison {
   weather: { a?: string; b?: string } | null;
 }
 
-export const LEVEL_LABEL: Record<Level, string> = { N0: 'N0 — mensuel', N1: 'N1 — horaire réduit', N2: 'N2 — 3D par paroi' };
+export const LEVEL_LABEL: Record<Level, string> = { N0: 'Mensuel (N0)', N1: 'Horaire simplifié (N1)', N2: 'Détaillé par paroi (N2)' };
 const METHOD_LABEL: Record<string, string> = { mesure: 'mesuré', document: 'document', declare: 'déclaré', infere: 'inféré', defaut: 'par défaut' };
 const INDICATORS: [string, string, string][] = [
   ['heating_kwh_m2', 'Besoin de chauffage', 'kWh/m²·an'], ['heating_kwh', 'Besoin de chauffage', 'kWh/an'],
@@ -43,7 +44,7 @@ const BALANCE: Record<string, string> = {
   storage_kwh: 'Stockage dans l’air', closure_error_kwh: 'Écart de fermeture du bilan',
 };
 
-/** Onglet « Calculs » de la fiche (Lot 24) : tous les calculs, le détail de chacun (entrées figées et
+/** Historique des calculs d'un bâtiment (onglet Calculs → Historique) : tous les calculs, le détail de chacun (entrées figées et
  *  résultats complets), la comparaison de deux calculs. */
 @Component({
   selector: 'app-calculs',
@@ -59,6 +60,7 @@ export class CalculsComponent implements OnChanges {
   @Input() openId: number | null = null;
   private opened: number | null = null;
   private rf = inject(RefonteApiService);
+  protected ctx = inject(ContexteService);
   readonly levelLabel = LEVEL_LABEL;
   readonly methodLabel = METHOD_LABEL;
   readonly indicatorDefs = INDICATORS;

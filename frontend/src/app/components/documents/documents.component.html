@@ -1,5 +1,5 @@
 <section class="rf-card" aria-labelledby="docs-h">
-  <div class="rf-card-head"><h2 id="docs-h">Documents</h2></div>
+  <div class="rf-card-head"><h2 id="docs-h">{{ titre }}</h2></div>
   <p class="rf-hint">Déposez un DPE (PDF ou XML de l'ADEME), un audit, une facture. Le texte est lu sur le serveur. Un XML DPE
     donne directement des valeurs, sans IA. Pour un PDF, vous pouvez demander à <strong>votre</strong> IA de proposer des valeurs :
     chacune est contrôlée (plage, cohérence, extrait retrouvé dans le document) et n'entre dans la fiche que si vous l'acceptez.</p>
@@ -39,7 +39,7 @@
         <li>Pages envoyées : {{ e.pages.join(', ') }}</li>
         <li>Environ {{ e.tokens_estimated | number:'1.0-0' }} jetons en entrée{{ e.fits ? '' : ' — trop long pour ce modèle' }}</li>
       </ul>
-      @if (!e.key_configured) { <p class="rf-error">Aucune clé {{ e.provider_label }} : <a routerLink="/ia">configurez-la</a> d'abord.</p> }
+      @if (!e.key_configured) { <p class="rf-error">Aucune clé {{ e.provider_label }} : <a routerLink="/ia" [queryParams]="ctx.queryParams()">configurez-la dans l'onglet IA</a> d'abord.</p> }
       <div class="rf-row">
         <button type="button" class="rf-btn primary" (click)="extract()" [disabled]="!e.key_configured || !e.fits || busy()">Envoyer et lire</button>
         <button type="button" class="rf-btn" (click)="estimate.set(null)">Annuler</button></div>

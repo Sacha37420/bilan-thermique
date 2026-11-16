@@ -1,12 +1,13 @@
 <div class="page-env" [class.embedded]="!!embedBuildingId" [attr.role]="embedBuildingId ? null : 'main'">
 
   @if (!embedBuildingId) {
+  <p><a class="rf-btn small" routerLink="/batiment" [queryParams]="{ vue: 'environnement' }">← Revenir à l'onglet Bâtiment (environnement)</a></p>
   <div class="env-head">
     <p class="eyebrow"><span class="dot"></span> Ombrage</p>
     <h1>Environnement</h1>
     <p class="subtitle">
       Bâtiments voisins, arbres et relief qui masquent le soleil d'un
-      <a routerLink="/batiment">bâtiment</a>, reconstruits automatiquement à partir du relevé
+      <a routerLink="/maillage">bâtiment</a>, reconstruits automatiquement à partir du relevé
       LiDAR HD de l'IGN croisé avec la BD TOPO. Chaque élément reste modifiable : retirez ce qui
       n'existe plus, et choisissez le bâtiment étudié directement dans la scène.
     </p>
@@ -256,7 +257,7 @@
             }
             @if (obj.status === 'studied') {
               @if (studiedBuilding(obj); as b) {
-                <a class="btn-primary" routerLink="/batiment" [queryParams]="{ id: b.id }">Ouvrir « {{ b.name }} »</a>
+                <a class="btn-primary" routerLink="/batiment" [queryParams]="{ b: b.id, vue: 'geometrie' }">Ouvrir « {{ b.name }} »</a>
               } @else {
                 <span class="hint">Le bâtiment étudié issu de cet objet a été supprimé.</span>
               }
@@ -330,12 +331,12 @@
         <p class="hint">
           Parois pré-assignées d'après la BD TOPO — {{ m.basis }}
           Murs : {{ m.assigned.wall ?? 'non assignés' }} · toiture : {{ m.assigned.roof ?? 'non assignée' }}
-          · plancher : {{ m.assigned.floor ?? 'non assigné' }}. Modifiables sur la page Bâtiment.
+          · plancher : {{ m.assigned.floor ?? 'non assigné' }}. Modifiables dans l'onglet Bâtiment → Géométrie.
         </p>
       }
       @if (createdBuilding(); as b) {
         <p class="feedback ok">
-          <a routerLink="/batiment" [queryParams]="{ id: b.id }">Ouvrir « {{ b.name }} » sur la page Bâtiment</a>
+          <a routerLink="/batiment" [queryParams]="{ b: b.id, vue: 'geometrie' }">Ouvrir « {{ b.name }} » dans l'onglet Bâtiment</a>
           pour vérifier ses parois, puis lancer l'ombrage et le calcul.
         </p>
       }

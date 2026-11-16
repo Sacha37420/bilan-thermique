@@ -1,6 +1,8 @@
 <main class="page-parois">
+  <p><a class="rf-btn small" routerLink="/calculs" [queryParams]="{ vue: 'catalogue', type: '1D' }">← Revenir à l'onglet Calculs</a></p>
 
   <div class="parois-head">
+    <a class="retour" routerLink="/parametrage" [queryParams]="{ modele: 'N2' }">← Paramétrage</a>
     <p class="eyebrow"><span class="dot"></span> Bibliothèque</p>
     <h1>Modèles de paroi</h1>
     <p class="subtitle">

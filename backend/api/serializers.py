@@ -302,6 +302,8 @@ class BuildingSerializer(serializers.Serializer):
     environment_id = serializers.PrimaryKeyRelatedField(
         source='environment', queryset=Environment.objects.all(), required=False, allow_null=True,
     )
+    # Chantier bt-navigation (contrat v1.1) : parc du bâtiment, null hors parc — lecture seule.
+    portfolio = serializers.IntegerField(source='portfolio_id', read_only=True, allow_null=True)
     georef_lat = serializers.FloatField(required=False, allow_null=True, default=None,
                                          min_value=-90.0, max_value=90.0)
     georef_lon = serializers.FloatField(required=False, allow_null=True, default=None,

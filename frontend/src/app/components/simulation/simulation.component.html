@@ -1,16 +1,18 @@
 <section class="rf-card" aria-labelledby="sim-title">
-  <div class="rf-card-head"><h2 id="sim-title">Préparer une simulation</h2></div>
+  <div class="rf-card-head"><h2 id="sim-title">Préparer et lancer</h2></div>
   <div class="controls">
-    <div class="levels" role="radiogroup" aria-label="Niveau de calcul">
+    @if (!niveau) {
+    <div class="levels" role="radiogroup" aria-label="Simulation">
       @for (l of levels; track l.id) {
         <button type="button" role="radio" class="lvl" [class.active]="level() === l.id" [attr.aria-checked]="level() === l.id"
                 (click)="setLevel(l.id)">{{ l.label }}</button>
       }
     </div>
-    <label class="field">Variante
+    }
+    <label class="field">Calculer pour
       <select class="rf-input" [value]="scenario() ?? ''" (change)="setScenario($any($event.target).value)">
-        <option value="">État actuel</option>
-        @for (s of scenarios(); track s.id) { <option [value]="s.id">{{ s.name }}</option> }
+        <option value="">l'état actuel</option>
+        @for (s of scenarios(); track s.id) { <option [value]="s.id">l'amélioration « {{ s.name }} »</option> }
       </select>
     </label>
   </div>
@@ -21,19 +23,22 @@
   @if (prep(); as p) {
     <div class="summary" [class.dim]="loading()">
       <div class="rf-kpi"><small>Météo</small><strong class="txt">{{ p.weather?.source ?? '—' }}</strong>
-        <em>{{ p.weather?.n_hours ?? 0 }} h · <a [routerLink]="['/fiche']" [queryParams]="{ b: buildingId, onglet: 'meteo' }">changer</a></em></div>
+        <em>{{ p.weather?.n_hours ?? 0 }} h · <a routerLink="/batiment" [queryParams]="ctx.queryParams({ vue: 'meteo' })">changer</a></em></div>
       <div class="rf-kpi"><small>Durée estimée</small><strong>{{ duration(p.estimate_s) }}</strong>
         <em>@if (p.level === 'N2') { un calcul lourd à la fois sur le lab } @else { calculé tout de suite }</em></div>
       <div class="rf-kpi"><small>Fiabilité des entrées</small>
         <strong class="txt">{{ p.reliability.verdict ?? '—' }}</strong>
         <em>@if (p.reliability.spread_pct !== null) { dispersion ± {{ p.reliability.spread_pct | number: '1.0-0' }} % · }confiance {{ p.reliability.confidence * 100 | number: '1.0-0' }} %</em></div>
       @if (p.range) {
-        <div class="rf-kpi"><small>Fourchette N1 actuelle</small><strong>{{ p.range.heating_kwh_m2_p10 | number: '1.0-0' }}–{{ p.range.heating_kwh_m2_p90 | number: '1.0-0' }}</strong><em>kWh/m²·an (P10–P90)</em></div>
+        <div class="rf-kpi"><small title="P10–P90 : 8 cas sur 10 tombent dans cet intervalle">Fourchette actuelle (horaire simplifié)</small><strong>{{ p.range.heating_kwh_m2_p10 | number: '1.0-0' }}–{{ p.range.heating_kwh_m2_p90 | number: '1.0-0' }}</strong><em>kWh/m²·an</em></div>
       }
     </div>
     @if (p.reliability.verdict_text) { <p class="verdict" [class]="'verdict v-' + p.reliability.verdict!.replace(' ', '-')">{{ p.reliability.verdict_text }}</p> }
 
     @for (b of p.blockers; track b) { <p class="rf-error" role="alert">{{ b }}</p> }
+    @if (p.level === 'N2' && !p.can_launch && !p.blockers.length) {
+      <p class="rf-hint">Le calcul détaillé par paroi est réservé aux gestionnaires du bâtiment, et se lance bâtiment par bâtiment.</p>
+    }
     @if (p.busy && p.can_launch) { <p class="rf-hint">Un calcul lourd tourne déjà sur le lab : le vôtre sera refusé tant qu'il n'est pas fini.</p> }
     @if (job(); as j) {
       <div class="progress" role="status">
@@ -47,7 +52,7 @@
         <button type="button" class="rf-btn" [disabled]="!p.can_launch || !!job()" (click)="launch(true)">Relancer quand même</button>
       } @else {
         <button type="button" class="rf-btn primary" [disabled]="!p.can_launch || !!job()" (click)="launch()">
-          {{ job() ? 'Calcul en cours…' : 'Lancer le ' + p.level }}</button>
+          {{ job() ? 'Calcul en cours…' : 'Lancer la simulation' }}</button>
       }
     </div>
 
@@ -64,7 +69,7 @@
               <td><span [class]="'rf-badge m-' + d.method">{{ methodLabel[d.method] ?? d.method }}</span></td>
               <td class="num"><span class="meter" aria-hidden="true"><i [style.width.%]="d.share_pct > 100 ? 100 : d.share_pct"></i></span>
                 ± {{ d.share_pct / 2 | number: '1.0-0' }} %</td>
-              <td><a class="rf-btn small" [routerLink]="['/fiche']" [queryParams]="{ b: buildingId, onglet: 'donnees' }">Corriger</a></td></tr>
+              <td><a class="rf-btn small" routerLink="/batiment" [queryParams]="ctx.queryParams({ vue: 'donnees', cle: d.key })" [attr.aria-label]="'Corriger — ' + label(d.key)">Corriger</a></td></tr>
           }
         </tbody>
       </table>

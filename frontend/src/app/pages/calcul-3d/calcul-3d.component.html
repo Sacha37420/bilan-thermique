@@ -1,19 +1,21 @@
 <main class="page-calcul3d">
+  <p><a class="rf-btn small" routerLink="/calculs" [queryParams]="{ vue: 'catalogue', type: '3D' }">← Revenir à l'onglet Calculs</a></p>
 
   <div class="head">
     <p class="eyebrow"><span class="dot"></span> Simulation bâtiment</p>
     <h1>Calcul 3D</h1>
     <p class="subtitle">
       Régime transitoire heure par heure sur l'enveloppe complète d'un
-      <a routerLink="/batiment">bâtiment</a> — un système par triangle, tous couplés au même
+      <a routerLink="/maillage">bâtiment</a> — un système par triangle, tous couplés au même
       nœud d'air. Détail de la généralisation dans le dépôt (api/building_solver.py).
     </p>
   </div>
   <p class="notice" role="note">
-    Le calcul N2 se lance désormais depuis la <a routerLink="/fiche">fiche du bâtiment</a> (onglet Simulation) : enveloppe,
-    parois et réglages viennent de la fiche, le résultat dit s'il est à jour. Cette page garde les réglages avancés
-    (planning horaire, régime imposé ou libre, ombrage en temps réel, vent) ; ses calculs apparaissent dans l'onglet
-    Calculs avec la mention « Calcul 3D ».
+    Le calcul détaillé par paroi (N2) se lance désormais depuis l'onglet
+    <a routerLink="/calculs" [queryParams]="{ vue: 'simulation', type: 'N2' }">Calculs → Simulation</a> : enveloppe,
+    parois et réglages viennent des données du bâtiment, le résultat dit s'il est à jour. Cette page garde les réglages avancés
+    (planning horaire, régime imposé ou libre, ombrage en temps réel, vent) ; ses calculs apparaissent dans
+    <a routerLink="/calculs" [queryParams]="{ vue: 'historique' }">Calculs → Historique</a> avec la mention « outil Calcul 3D ».
   </p>
 
   <section class="form-card">

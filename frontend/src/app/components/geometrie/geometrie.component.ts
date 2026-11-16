@@ -142,6 +142,8 @@ export class GeometrieComponent implements OnChanges {
   }
 
   save(): void {
+    if (this.regen && this.data()?.has_manual_parois &&
+        !confirm('Régénérer l’enveloppe 3D remplace le maillage actuel : les parois assignées à la main seront perdues. Continuer ?')) return;
     this.error.set(''); this.ok.set('');
     this.rf.post<GeoPayload>(`/batiments/${this.buildingId}/geometrie/`, {
       footprint_xy: this.pts(), eave_height_m: this.eave, levels: this.levels, roof_type: this.roof,
@@ -153,6 +155,7 @@ export class GeometrieComponent implements OnChanges {
   }
 
   reset(): void {
+    if (!confirm('Revenir à la géométrie automatique ? Votre emprise, hauteur et toiture corrigées seront retirées (elles restent dans l’historique).')) return;
     this.rf.del<GeoPayload>(`/batiments/${this.buildingId}/geometrie/`).subscribe({
       next: d => { this.set(d); this.ok.set('Retour à la géométrie automatique.'); this.changed.emit(); },
     });

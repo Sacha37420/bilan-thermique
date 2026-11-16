@@ -1,4 +1,6 @@
-import { Component, Input, OnChanges, OnDestroy, inject, signal, output } from '@angular/core';
+import { Component, Input, OnChanges, OnDestroy, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
+import { ContexteService } from '../../core/contexte.service';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RefonteApiService } from '../../core/refonte-api.service';
 
@@ -22,31 +24,39 @@ const BALANCE: Record<string, string> = {
   solar_windows_kwh: 'Apports solaires (baies)', solar_opaque_kwh: 'Apports solaires (parois)', internal_kwh: 'Apports internes',
 };
 
-/** Résultat courant d'un bâtiment (refonte, Lot 10) : N1 en tête, N0 en contrôle, provenance du calcul. */
+/** Libellés en mots des niveaux de calcul (contrat bt-navigation §2.1). */
+export const NIVEAU_MOTS: Record<'N0' | 'N1' | 'N2', string> = {
+  N0: 'Mensuel', N1: 'Horaire simplifié', N2: 'Détaillé par paroi',
+};
+
+/**
+ * Résultat d'un bâtiment, en lecture seule (chantier bt-navigation) : on ne lance plus rien d'ici,
+ * le seul point de lancement est l'onglet Calculs → Simulation.
+ * `niveau` null : résumé (N1 en tête, N0 en contrôle, N2 s'il existe) avec lien vers Calculs ;
+ * `niveau` posé : résultat de cette seule simulation.
+ */
 @Component({
   selector: 'app-resultat-carte',
   standalone: true,
-  imports: [DecimalPipe, DatePipe],
+  imports: [DecimalPipe, DatePipe, RouterLink],
   templateUrl: './resultat-carte.component.html',
   styleUrl: './resultat-carte.component.scss',
 })
 export class ResultatCarteComponent implements OnChanges, OnDestroy {
   @Input({ required: true }) buildingId!: number;
   @Input() scenarioId: number | null = null;
-  /** Incrémenté par la page quand la fiche change : relit l'état « à jour / périmé ». */
+  /** Incrémenté par la page quand la fiche change ou qu'un calcul se termine : relit le résultat. */
   @Input() refresh = 0;
-  computed = output<void>();
-  /** Ouvrir l'onglet Simulation (Lot 25). */
-  prepare = output<void>();
+  @Input() niveau: 'N0' | 'N1' | 'N2' | null = null;
+  protected ctx = inject(ContexteService);
   private rf = inject(RefonteApiService);
+  readonly mots = NIVEAU_MOTS;
+  readonly niveaux = ['N0', 'N1', 'N2'] as const;
   latest = signal<Latest | null>(null);
-  busy = signal(false);
-  error = signal('');
   months = MONTHS;
   balanceLabels = BALANCE;
-  /** N2 en cours (Lot 23) : tâche de fond suivie par son job. */
+  /** N2 en cours (tâche de fond) : suivi affiché, sans bouton. */
   n2Job = signal<JobState | null>(null);
-  n2Error = signal('');
   private poll: ReturnType<typeof setTimeout> | null = null;
 
   ngOnChanges(): void { this.load(); this.resumeN2(); }
@@ -59,10 +69,18 @@ export class ResultatCarteComponent implements OnChanges, OnDestroy {
     });
   }
 
-  /** Reprend le suivi d'un N2 lancé avant d'arriver sur la page. */
+  /** Run principal affiché : celui du niveau demandé, ou N1 (repli N0) en résumé. */
+  main(): RunCompact | null {
+    const l = this.latest();
+    if (!l) return null;
+    if (this.niveau) return l[this.niveau];
+    return l.N1 ?? l.N0 ?? null;
+  }
+
   private resumeN2(): void {
     this.stopPoll();
     this.n2Job.set(null);
+    if (this.niveau && this.niveau !== 'N2') return;
     this.rf.get<{ results: RunCompact[] }>(
       `/batiments/${this.buildingId}/calculs/?niveau=N2&scenario=${this.scenarioId ?? ''}`).subscribe({
       next: r => {
@@ -72,30 +90,15 @@ export class ResultatCarteComponent implements OnChanges, OnDestroy {
     });
   }
 
-  computeN2(force = false): void {
-    this.n2Error.set('');
-    this.rf.post<{ runs: RunCompact[] }>(`/batiments/${this.buildingId}/calculer/`,
-      { niveaux: ['N2'], scenario: this.scenarioId, force }).subscribe({
-      next: r => {
-        const run = r.runs?.[0];
-        if (run && run.status !== 'DONE' && run.job) this.follow(run.job);
-        else { this.load(); this.computed.emit(); }
-      },
-      error: e => this.n2Error.set(e?.error?.detail ?? 'Calcul N2 impossible.'),
-    });
-  }
-
   private follow(jobId: number): void {
-    this.stopPoll();
     this.n2Job.set({ status: 'PENDING', progress: 0, message: 'En attente du calculateur…' });
     const tick = () => this.rf.get<JobState>(`/jobs/${jobId}/`).subscribe({
       next: j => {
         this.n2Job.set(j);
-        if (j.status === 'DONE') { this.n2Job.set(null); this.load(); this.computed.emit(); }
-        else if (j.status === 'ERROR') { this.n2Job.set(null); this.n2Error.set(j.message || 'Le N2 a échoué.'); }
+        if (j.status === 'DONE' || j.status === 'ERROR') { this.n2Job.set(null); this.load(); }
         else this.poll = setTimeout(tick, 2000);
       },
-      error: () => { this.n2Job.set(null); this.n2Error.set('Suivi du calcul impossible.'); },
+      error: () => this.n2Job.set(null),
     });
     tick();
   }
@@ -104,38 +107,25 @@ export class ResultatCarteComponent implements OnChanges, OnDestroy {
     if (this.poll) { clearTimeout(this.poll); this.poll = null; }
   }
 
-  n2Gap(): number | null {
-    const a = this.num(this.latest()?.N1, 'heating_kwh'), b = this.num(this.latest()?.N2, 'heating_kwh');
-    return a && b ? Math.round((b / a - 1) * 100) : null;
-  }
-
-  compute(force = false): void {
-    this.busy.set(true);
-    this.error.set('');
-    this.rf.post(`/batiments/${this.buildingId}/calculer/`, { niveaux: ['N0', 'N1'], scenario: this.scenarioId, force }).subscribe({
-      next: () => { this.busy.set(false); this.load(); this.computed.emit(); },
-      error: e => { this.busy.set(false); this.error.set(e?.error?.detail ?? 'Calcul impossible.'); },
-    });
-  }
-
   num(r: RunCompact | null | undefined, k: string): number | null {
     const v = r?.indicators?.[k];
     return typeof v === 'number' ? v : null;
   }
 
   bars(r: RunCompact): { m: string; v: number; h: number }[] {
-    const m = r.results.monthly_heating_kwh ?? [];
+    const m = r.results?.monthly_heating_kwh ?? [];
     const max = Math.max(1, ...m);
     return m.map((v, i) => ({ m: MONTHS[i] ?? String(i + 1), v, h: Math.round((v / max) * 100) }));
   }
 
   balance(r: RunCompact): { k: string; label: string; v: number }[] {
-    const b = r.results.balance ?? {};
+    const b = r.results?.balance ?? {};
     return Object.keys(BALANCE).filter(k => b[k] !== undefined).map(k => ({ k, label: BALANCE[k], v: b[k] }));
   }
 
-  gap(): number | null {
-    const a = this.num(this.latest()?.N1, 'heating_kwh'), b = this.num(this.latest()?.N0, 'heating_kwh');
+  /** Écart en % d'un niveau par rapport au run principal. */
+  gapTo(other: RunCompact | null | undefined): number | null {
+    const a = this.num(this.main(), 'heating_kwh'), b = this.num(other, 'heating_kwh');
     return a && b ? Math.round((b / a - 1) * 100) : null;
   }
 }

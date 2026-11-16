@@ -9,7 +9,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import access, calc_service, facts, questionnaire
+from . import access, calc_service, facts, questionnaire, reglages
 from .views_calc import compact
 from .views_fiche import fiche_payload
 
@@ -38,7 +38,8 @@ class QuestionnaireView(APIView):
         before = calc_service.current_or_latest(b, 'N1')
         conf_before = b.confidence
         try:
-            rows = questionnaire.answers_to_facts(answers, facts.effective_values(b))
+            cfg = reglages.for_building(b, 'parametrage') or None   # réglages du parc ; None hors parc
+            rows = questionnaire.answers_to_facts(answers, facts.effective_values(b), cfg)
             for key, value, src in rows:
                 facts.record(b, key, value, 'declare', source=src, author_sub=access.sub_of(request),
                              author_name=access.name_of(request), refresh=False)
@@ -47,7 +48,7 @@ class QuestionnaireView(APIView):
         if {'annee', 'usage'} & set(answers):
             questionnaire.refresh_archetype(
                 b, facts.effective_values(b),
-                lambda k, v, src: facts.record(b, k, v, 'defaut', source=src, confidence=0.15, refresh=False))
+                lambda k, v, src: facts.record(b, k, v, 'defaut', source=src, confidence=0.15, refresh=False), cfg)
         facts.refresh_scores(b)
         after, calc_error = None, None
         try:

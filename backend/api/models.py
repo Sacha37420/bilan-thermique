@@ -163,6 +163,10 @@ class Portfolio(models.Model):
     description = models.TextField(blank=True)
     owner_sub = models.CharField(max_length=64)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Réglages du parc (chantier bt-navigation) : surcharges seules, clés à plat — `api.reglages`.
+    orchestration = models.JSONField(default=dict, blank=True)
+    parametrage = models.JSONField(default=dict, blank=True)
+    rendu = models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = 'portfolios'

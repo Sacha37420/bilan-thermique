@@ -9,11 +9,12 @@ details summary { cursor: pointer; min-height: 44px; display: flex; align-items:
 .grow { flex: 1 1 16rem; }
 .cmp { margin: var(--space-3) 0; }
 td small { display: block; color: var(--text-mute); font-size: var(--text-xs); }
-.bar { display: inline-block; width: 60px; height: 8px; background: var(--border); border-radius: var(--radius-full); margin-right: var(--space-2); overflow: hidden; vertical-align: middle; }
-.bar i { display: block; height: 100%; background: var(--accent); }
-.dpe { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: var(--radius-sm); font-weight: 800; border: 1px solid var(--border); }
-.dpe[data-l="A"], .dpe[data-l="B"] { background: var(--success-tint); color: var(--success); }
-.dpe[data-l="C"], .dpe[data-l="D"] { background: var(--warning-tint); color: var(--warning); }
-.dpe[data-l="E"], .dpe[data-l="F"], .dpe[data-l="G"] { background: var(--danger-tint); color: var(--danger); }
 h3 { font-size: var(--text-base); margin: var(--space-4) 0 var(--space-2); }
 .vig { font-size: var(--text-sm); padding-left: var(--space-4); }
+.scs li { padding: 0 var(--space-2); border-radius: var(--radius-sm); }
+.scs li.on { background: var(--accent-tint); }
+.diffs { font-size: var(--text-sm); padding-left: var(--space-4); }
+.cmp-table th[scope=row] { text-transform: none; letter-spacing: 0; font-size: var(--text-sm); color: var(--text); }
+.cmp-table th[scope=row] small, .cmp-table td small { display: block; color: var(--text-mute); font-size: var(--text-xs); font-weight: 400; }
+.cmp-table td.better { color: var(--success); }
+.cmp-table td.worse { color: var(--danger); }

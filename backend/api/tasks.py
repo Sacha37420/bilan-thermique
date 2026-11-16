@@ -448,12 +448,20 @@ def init_building(self, job_id, building_id):
 
 def after_init(building, job):
     """Suite de la chaîne (A7→A9) : météo de l'année type du site, calculs N0 puis N1."""
-    from . import calc_service
+    from . import calc_service, pipeline
     if building.georef_lat is None:
         return None
+    # Bâtiment de parc : météo par défaut et calculs automatiques selon les réglages du parc.
+    a7 = pipeline.apply_default_weather(building, job.owner_sub)
+    if a7 is not None:
+        pipe = dict(building.pipeline or {})
+        pipe.setdefault('steps', {})['A7'] = a7
+        building.pipeline = pipe
+        building.save(update_fields=['pipeline'])
+    levels = pipeline.auto_levels(building)
     try:
         job.set_state(progress=96, message="Météo et calculs N0 / N1…")
-        for lvl in ('N0', 'N1'):
+        for lvl in levels:
             calc_service.run_level(building, lvl, owner_sub=job.owner_sub, job=None)
     except calc_service.CalcError as exc:
         pipe = dict(building.pipeline or {})
@@ -463,7 +471,7 @@ def after_init(building, job):
         building.save(update_fields=['pipeline', 'pipeline_status'])
         return None
     pipe = dict(building.pipeline or {})
-    pipe.setdefault('steps', {})['A8'] = {'ok': True}
+    pipe.setdefault('steps', {})['A8'] = {'ok': True, **({} if levels else {'skipped': True, 'message': pipeline.SKIPPED})}
     building.pipeline = pipe
     building.save(update_fields=['pipeline'])
     return None

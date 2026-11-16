@@ -211,7 +211,8 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
   private buildGeometry(reframe: boolean): void {
     if (!this.scene) return;
     this.disposeParts();
-    if (!this.triangles.length || !this.vertices.length) return;
+    // Bâtiment sans maillage (fiche seule) : entrées absentes, rien à dessiner.
+    if (!this.triangles?.length || !this.vertices?.length) return;
 
     const maps = this.loadMaps();
     // Un paquet de triangles par texture (clé = indice), −1 = sans texture.

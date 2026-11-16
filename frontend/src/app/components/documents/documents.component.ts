@@ -4,6 +4,7 @@ import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { ContexteService } from '../../core/contexte.service';
 
 interface Doc { id: number; kind: string; filename: string; size_bytes: number; n_pages: number; pages_with_text: number[];
   stored: boolean; note?: string | null; }
@@ -30,6 +31,9 @@ export class DocumentsComponent implements OnChanges, OnDestroy {
   }
 
   @Input({ required: true }) buildingId!: number;
+  /** Titre de la carte (l'onglet IA le numérote). */
+  @Input() titre = 'Documents';
+  protected ctx = inject(ContexteService);
   changed = output<void>();
   private rf = inject(RefonteApiService);
   private api = inject(ApiService);
