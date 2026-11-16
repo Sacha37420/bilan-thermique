@@ -125,7 +125,7 @@ class CalcRunCompareView(APIView):
 
 
 SERIES_KEYS = ('t_air', 't_op', 't_mrt', 'phi_hc_w', 'envelope_flux_w', 'final_exterior_surface_temp',
-               'final_interior_surface_temp')
+               'final_interior_surface_temp', 'par_triangle')   # par_triangle : I4, servi à part (bt-potentiels)
 
 
 def compact(run):

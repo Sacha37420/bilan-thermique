@@ -1,25 +1,35 @@
-import { Component, Input, OnChanges, inject, output, signal } from '@angular/core';
+import { Component, Input, OnChanges, computed, inject, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DecimalPipe } from '@angular/common';
+import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { Amelioration, Catalogue, EffectRow, Groupe, Modele, Parametre, Protection, Valeur } from './protections.types';
 
-interface Kind { kind: string; family: string; label: string; params?: string[]; }
-interface Device { id: number; kind: string; orientation: string; mode: string; label: string; params: Record<string, number>;
-  control: { mode?: string; hours?: number[]; irradiance_w_m2?: number; t_ext_min_c?: number; position?: number }; }
-interface EffectRow { label: string; device_id: number | null; heating_kwh: number; hours_over_26: number; hours_over_28: number;
-  degree_hours_26: number; t_op_max: number; solar_by_orientation_kwh: Record<string, number>; }
+const ORIENT: Partial<Record<string, string>> = { N: 'nord', E: 'est', S: 'sud', O: 'ouest', all: 'toutes' };
+const PILOTAGE: Partial<Record<string, string>> = { fixe: 'toujours dans la position choisie', planning: 'horaires', auto: 'automatique' };
+/** Groupes de paramètres de pilotage propres à un mode (les autres valent toujours). */
+const GROUPE_MODE: Record<string, string> = { Planning: 'planning', Automatique: 'auto' };
 
-const PARAM_LABELS: Record<string, string> = {
-  depth_m: 'Profondeur (m)', gap_m: 'Hauteur au-dessus de la baie (m)', window_height_m: 'Hauteur de baie (m)',
-  window_width_m: 'Largeur de baie (m)', extension_m: 'Débordement latéral (m)', fin_depth_m: 'Profondeur des joues (m)', g: 'Facteur g',
-};
-const ORIENT: Record<string, string> = { N: 'nord', E: 'est', S: 'sud', O: 'ouest', all: 'toutes' };
+interface Form {
+  kind: string; orientation: string; mode: string; label: string; scenario: number | null;
+  params: Record<string, Valeur>; control: Record<string, Valeur>;
+}
 
-/** Protections solaires (refonte, Lot 14) : fixes, mobiles, vitrage, végétation ; effet été / hiver. */
+function grouper(ps: Parametre[]): Groupe[] {
+  const out: Groupe[] = [];
+  for (const p of ps) {
+    const nom = p.groupe || 'Réglages';
+    let g = out.find(x => x.nom === nom);
+    if (!g) out.push(g = { nom, parametres: [] });
+    g.parametres.push(p);
+  }
+  return out;
+}
+
+/** Protections solaires : modèles du catalogue serveur, tous leurs paramètres, pilotage, état actuel ou amélioration. */
 @Component({
   selector: 'app-protections',
   standalone: true,
-  imports: [FormsModule, DecimalPipe],
+  imports: [FormsModule, DecimalPipe, NgTemplateOutlet],
   templateUrl: './protections.component.html',
   styleUrl: './protections.component.scss',
 })
@@ -27,71 +37,176 @@ export class ProtectionsComponent implements OnChanges {
   @Input({ required: true }) buildingId!: number;
   changed = output<void>();
   private rf = inject(RefonteApiService);
-  kinds = signal<Kind[]>([]);
-  devices = signal<Device[]>([]);
+  catalogue = signal<Catalogue | null>(null);
+  devices = signal<Protection[]>([]);
+  ameliorations = signal<Amelioration[]>([]);
   effect = signal<EffectRow[] | null>(null);
   error = signal('');
   busy = signal(false);
-  paramLabels = PARAM_LABELS;
+  saving = signal(false);
+  editing = signal<number | null>(null);
+  open = signal(false);
+  form = signal<Form>({ kind: '', orientation: 'S', mode: 'parametrique', label: '', scenario: null, params: {}, control: {} });
   orient = ORIENT;
-  form = { kind: 'casquette', orientation: 'S', mode: 'parametrique', params: {} as Record<string, number | null>,
-           ctl: 'auto', hours: '13-18', irradiance: 200, t_min: 20 };
+  pilotageLabel = PILOTAGE;
+
+  modele = computed(() => this.model(this.form().kind));
+  groupes = computed(() => grouper(this.modele()?.parametres ?? []));
+  groupesPilotage = computed(() => {
+    const mode = this.form().control['mode'] as string;
+    return grouper((this.modele()?.pilotage.parametres ?? []).filter(p => !GROUPE_MODE[p.groupe] || GROUPE_MODE[p.groupe] === mode));
+  });
+  famillesModeles = computed(() => {
+    const c = this.catalogue();
+    return c ? c.familles.map(f => ({ ...f, modeles: c.modeles.filter(m => m.famille === f.cle) })).filter(f => f.modeles.length) : [];
+  });
+  attachables = computed(() => this.ameliorations().filter(a => !a.genere));
 
   ngOnChanges(): void {
-    if (!this.kinds().length) this.rf.get<{ kinds: Kind[] }>('/protections/catalogue/').subscribe({ next: c => this.kinds.set(c.kinds) });
+    if (!this.catalogue()) this.rf.get<Catalogue>('/protections/catalogue/').subscribe({
+      next: c => { this.catalogue.set(c); if (!this.form().kind && c.modeles.length) this.setKind(c.modeles[0].cle); },
+      error: e => this.error.set(this.msg(e)),
+    });
     this.load();
+    this.rf.get<{ results: Amelioration[] }>(`/batiments/${this.buildingId}/scenarios/`).subscribe({
+      next: r => this.ameliorations.set(r.results), error: () => this.ameliorations.set([]),
+    });
   }
 
   load(): void {
-    this.rf.get<{ results: Device[] }>(`/batiments/${this.buildingId}/protections/`).subscribe({ next: r => this.devices.set(r.results) });
+    this.rf.get<{ results: Protection[] }>(`/batiments/${this.buildingId}/protections/`).subscribe({
+      next: r => this.devices.set(r.results), error: e => this.error.set(this.msg(e)),
+    });
   }
 
-  current(): Kind | undefined { return this.kinds().find(k => k.kind === this.form.kind); }
-  label(kind: string): string { return this.kinds().find(k => k.kind === kind)?.label ?? kind; }
+  model(kind: string): Modele | undefined { return this.catalogue()?.modeles.find(m => m.cle === kind); }
+  label(kind: string): string { return this.model(kind)?.libelle ?? kind; }
 
-  hoursList(): number[] {
-    const out: number[] = [];
-    for (const part of this.form.hours.split(',')) {
-      const [a, b] = part.split('-').map(x => parseInt(x.trim(), 10));
-      if (Number.isFinite(a)) for (let h = a; h <= (Number.isFinite(b) ? b : a); h++) if (h >= 0 && h <= 23) out.push(h);
+  private defaults(ps: Parametre[], stored: Record<string, Valeur> = {}): Record<string, Valeur> {
+    const out: Record<string, Valeur> = {};
+    for (const p of ps) out[p.cle] = p.cle in stored ? stored[p.cle] : p.defaut;
+    return out;
+  }
+
+  /** Changement de modèle : paramètres et pilotage remis aux valeurs par défaut du catalogue. */
+  setKind(kind: string): void {
+    const m = this.model(kind);
+    const control = m?.pilotage.modes.length ? { mode: m.pilotage.modes.includes('planning') ? 'planning' : m.pilotage.modes[0],
+      ...this.defaults(m.pilotage.parametres) } : {};
+    this.form.update(f => ({ ...f, kind, mode: m?.modes[0] ?? 'parametrique',
+      params: this.defaults(m?.parametres ?? []), control }));
+  }
+
+  patch(part: Partial<Form>): void { this.form.update(f => ({ ...f, ...part })); }
+  setParam(cle: string, v: Valeur): void { this.form.update(f => ({ ...f, params: { ...f.params, [cle]: v } })); }
+  setControl(cle: string, v: Valeur): void { this.form.update(f => ({ ...f, control: { ...f.control, [cle]: v } })); }
+
+  niveaux(p: Parametre): string { return p.niveaux.length && p.niveaux.length < 3 ? p.niveaux.join(' · ') : ''; }
+  appKeys(m: Modele): string[] { return Object.keys(m.application ?? {}); }
+
+  startAdd(): void {
+    this.editing.set(null);
+    this.patch({ label: '', scenario: null, orientation: 'S' });
+    this.setKind(this.form().kind || this.catalogue()?.modeles[0]?.cle || '');
+    this.open.set(true);
+  }
+
+  edit(d: Protection): void {
+    const m = this.model(d.kind);
+    this.editing.set(d.id);
+    this.form.set({ kind: d.kind, orientation: d.orientation, mode: d.mode, label: d.label ?? '', scenario: d.scenario,
+      params: this.defaults(m?.parametres ?? [], d.params ?? {}),
+      control: m?.pilotage.modes.length ? { mode: (d.control?.['mode'] as string) ?? m.pilotage.modes[0],
+        ...this.defaults(m.pilotage.parametres, d.control ?? {}) } : {} });
+    this.error.set('');
+    this.open.set(true);
+  }
+
+  cancel(): void { this.editing.set(null); this.open.set(false); this.error.set(''); }
+
+  private clean(ps: Parametre[], vals: Record<string, Valeur>): Record<string, Valeur> {
+    const out: Record<string, Valeur> = {};
+    for (const p of ps) {
+      let v = vals[p.cle];
+      if (p.type === 'number' || p.type === 'int') {
+        v = v === null || v === undefined || `${v}` === '' ? null : Number(v);
+        if (v !== null && p.type === 'int') v = Math.round(v as number);
+        if (v !== null && !Number.isFinite(v as number)) v = null;
+      } else if (p.type === 'bool') v = !!v;
+      out[p.cle] = v ?? null;
     }
     return out;
   }
 
-  add(): void {
-    const k = this.current();
-    if (!k) return;
-    const params: Record<string, number> = {};
-    for (const p of k.params ?? []) { const v = this.form.params[p]; if (v !== null && v !== undefined && `${v}` !== '') params[p] = Number(v); }
-    const body: Record<string, unknown> = { kind: k.kind, orientation: this.form.orientation, params,
-      mode: k.family === 'fixe' ? this.form.mode : 'parametrique' };
-    if (k.family === 'mobile') body['control'] = this.form.ctl === 'auto'
-      ? { mode: 'auto', irradiance_w_m2: this.form.irradiance, t_ext_min_c: this.form.t_min }
-      : { mode: 'planning', hours: this.hoursList() };
+  submit(): void {
+    const m = this.modele();
+    if (!m) return;
+    const f = this.form();
+    const body: Record<string, unknown> = { kind: m.cle, orientation: f.orientation, label: f.label.trim(),
+      scenario: f.scenario, params: this.clean(m.parametres, f.params) };
+    if (m.modes.includes(f.mode)) body['mode'] = f.mode;
+    if (m.pilotage.modes.length) body['control'] = { mode: f.control['mode'], ...this.clean(m.pilotage.parametres, f.control) };
+    const id = this.editing();
+    const req = id === null ? this.rf.post(`/batiments/${this.buildingId}/protections/`, body) : this.rf.patch(`/protections/${id}/`, body);
     this.error.set('');
-    this.rf.post(`/batiments/${this.buildingId}/protections/`, body).subscribe({
-      next: () => { this.load(); this.effect.set(null); this.changed.emit(); },
-      error: e => this.error.set(this.msg(e)),
+    this.saving.set(true);
+    req.subscribe({
+      next: () => { this.saving.set(false); this.cancel(); this.done(); },
+      error: e => { this.saving.set(false); this.error.set(this.msg(e)); },
     });
   }
 
-  remove(d: Device): void {
-    this.rf.del(`/protections/${d.id}/`).subscribe({ next: () => { this.load(); this.effect.set(null); this.changed.emit(); } });
+  attach(d: Protection, scenario: number | null): void {
+    this.error.set('');
+    this.rf.patch(`/protections/${d.id}/`, { scenario }).subscribe({ next: () => this.done(), error: e => { this.error.set(this.msg(e)); this.load(); } });
   }
+
+  remove(d: Protection): void {
+    this.error.set('');
+    this.rf.del(`/protections/${d.id}/`).subscribe({
+      next: () => { if (this.editing() === d.id) this.cancel(); this.done(); }, error: e => this.error.set(this.msg(e)),
+    });
+  }
+
+  private done(): void { this.load(); this.effect.set(null); this.changed.emit(); }
 
   evaluate(): void {
     this.busy.set(true);
+    this.error.set('');
     this.rf.post<{ rows: EffectRow[] }>(`/batiments/${this.buildingId}/protections/effet/`, {}).subscribe({
       next: r => { this.effect.set(r.rows); this.busy.set(false); },
       error: e => { this.busy.set(false); this.error.set(this.msg(e)); },
     });
   }
 
-  summary(d: Device): string {
-    const p = Object.entries(d.params || {}).map(([k, v]) => `${(PARAM_LABELS[k] ?? k).replace(/ \(.*\)/, '')} ${v}`).join(', ');
-    const c = d.control?.mode === 'auto' ? `automatique > ${d.control.irradiance_w_m2} W/m²` :
-      d.control?.hours?.length ? `fermé ${d.control.hours[0]}–${d.control.hours[d.control.hours.length - 1] + 1} h` : '';
-    return [p, c, d.mode === 'geometrique' ? 'géométrique (N2)' : ''].filter(Boolean).join(' · ');
+  where(d: Protection): string {
+    if (d.scenario === null) return 'état actuel';
+    const a = this.ameliorations().find(x => x.id === d.scenario);
+    return a ? `amélioration « ${a.name} »` : 'amélioration';
+  }
+
+  private fmt(p: Parametre, v: Valeur): string {
+    if (p.type === 'bool') return v ? 'oui' : 'non';
+    if (p.type === 'enum') return p.choix?.find(c => c.valeur === v)?.libelle ?? String(v);
+    return `${String(v).replace('.', ',')}${p.unite ? ' ' + p.unite : ''}`;
+  }
+
+  /** Réglages qui diffèrent du catalogue, et pilotage. */
+  summary(d: Protection): string {
+    const m = this.model(d.kind);
+    if (!m) return '';
+    const diff = m.parametres.filter(p => d.params?.[p.cle] !== undefined && d.params[p.cle] !== p.defaut)
+      .map(p => `${p.libelle} ${this.fmt(p, d.params[p.cle])}`);
+    const mode = d.control?.['mode'] as string | undefined;
+    return [diff.length ? diff.join(', ') : 'réglages par défaut', mode ? `pilotage ${PILOTAGE[mode] ?? mode}` : '',
+      d.mode === 'geometrique' ? 'géométrique (N2)' : ''].filter(Boolean).join(' · ');
+  }
+
+  rowLabel(r: EffectRow): string {
+    if (r.label === 'sans') return 'Sans protection';
+    if (r.label === 'toutes') return 'Toutes les protections';
+    const [k, o] = r.label.split(' ');
+    return `${this.label(k)} (${ORIENT[o] ?? o})`;
   }
 
   private msg(e: { error?: Record<string, unknown> }): string {

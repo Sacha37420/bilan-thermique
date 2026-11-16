@@ -1,54 +1,131 @@
 <section class="rf-card" aria-labelledby="p-title">
   <div class="rf-card-head"><h2 id="p-title">Protections solaires</h2>
+    <button type="button" class="rf-btn" (click)="startAdd()" [disabled]="!catalogue()">Ajouter</button>
     <button type="button" class="rf-btn" (click)="evaluate()" [disabled]="busy()">{{ busy() ? 'Calcul…' : 'Évaluer l’effet' }}</button></div>
   @if (error()) { <p class="rf-error" role="alert">{{ error() }}</p> }
+
   <ul class="devs">
     @for (d of devices(); track d.id) {
-      <li><strong>{{ label(d.kind) }}</strong> — façade {{ orient[d.orientation] }} <small>{{ summary(d) }}</small>
-        <button type="button" class="rf-btn small danger" (click)="remove(d)" [attr.aria-label]="'Retirer ' + label(d.kind)">Retirer</button></li>
+      <li [class.cur]="editing() === d.id">
+        <div class="txt"><strong>{{ d.label || label(d.kind) }}</strong> — façade {{ orient[d.orientation] ?? d.orientation }}
+          <span class="where">· {{ where(d) }}</span><small>{{ summary(d) }}</small></div>
+        <div class="acts">
+          <label class="rf-field att"><span>Rattachée à</span>
+            <select [ngModel]="d.scenario" (ngModelChange)="attach(d, $event)" [attr.aria-label]="'Rattacher ' + label(d.kind)">
+              <option [ngValue]="null">État actuel</option>
+              @for (a of attachables(); track a.id) { <option [ngValue]="a.id">Amélioration « {{ a.name }} »</option> }
+            </select></label>
+          <button type="button" class="rf-btn small" (click)="edit(d)" [attr.aria-label]="'Modifier ' + label(d.kind)">Modifier</button>
+          <button type="button" class="rf-btn small danger" (click)="remove(d)" [attr.aria-label]="'Retirer ' + label(d.kind)">Retirer</button>
+        </div></li>
     } @empty { <li class="rf-hint">Aucune protection déclarée.</li> }
   </ul>
-  <details>
-    <summary>Ajouter une protection</summary>
-    <div class="rf-row add">
-      <label class="rf-field"><span>Type</span>
-        <select [(ngModel)]="form.kind">
-          @for (k of kinds(); track k.kind) { <option [value]="k.kind">{{ k.label }}</option> }
-        </select></label>
-      <label class="rf-field"><span>Façade</span>
-        <select [(ngModel)]="form.orientation"><option value="S">sud</option><option value="O">ouest</option><option value="E">est</option>
-          <option value="N">nord</option><option value="all">toutes</option></select></label>
-      @if (current()?.family === 'fixe') {
-        <label class="rf-field"><span>Méthode</span>
-          <select [(ngModel)]="form.mode"><option value="parametrique">paramétrique (N0, N1)</option>
-            <option value="geometrique">géométrique (N2 aussi)</option></select></label>
+
+  <ng-template #champ let-p="p" let-v="v" let-ctl="ctl">
+    @switch (p.type) {
+      @case ('bool') {
+        <label class="chk"><input type="checkbox" [ngModel]="!!v" (ngModelChange)="ctl ? setControl(p.cle, $event) : setParam(p.cle, $event)">
+          <span>{{ p.libelle }}</span></label>
       }
-      @for (p of current()?.params ?? []; track p) {
-        <label class="rf-field"><span>{{ paramLabels[p] }}</span><input type="number" step="0.05" [(ngModel)]="form.params[p]"></label>
+      @case ('enum') {
+        <label class="rf-field"><span>{{ p.libelle }}</span>
+          <select [ngModel]="v" (ngModelChange)="ctl ? setControl(p.cle, $event) : setParam(p.cle, $event)">
+            @for (c of p.choix ?? []; track c.valeur) { <option [ngValue]="c.valeur">{{ c.libelle }}</option> }
+          </select></label>
       }
-      @if (current()?.family === 'mobile') {
-        <label class="rf-field"><span>Pilotage</span>
-          <select [(ngModel)]="form.ctl"><option value="auto">automatique (soleil, chaleur)</option><option value="planning">horaires</option></select></label>
-        @if (form.ctl === 'auto') {
-          <label class="rf-field"><span>Fermé au-delà de (W/m²)</span><input type="number" [(ngModel)]="form.irradiance"></label>
-          <label class="rf-field"><span>si T ext. > (°C)</span><input type="number" [(ngModel)]="form.t_min"></label>
-        } @else {
-          <label class="rf-field"><span>Heures fermées</span><input type="text" [(ngModel)]="form.hours" placeholder="13-18, 22-23"></label>
+      @default {
+        <label class="rf-field"><span>{{ p.libelle }}{{ p.unite ? ' (' + p.unite + ')' : '' }}</span>
+          <input type="number" [attr.min]="p.min" [attr.max]="p.max" [attr.step]="p.type === 'int' ? 1 : (p.pas ?? 'any')"
+            [placeholder]="p.defaut === null ? 'sans objet' : ''"
+            [ngModel]="v" (ngModelChange)="ctl ? setControl(p.cle, $event) : setParam(p.cle, $event)"></label>
+      }
+    }
+    @if (p.aide || niveaux(p)) { <small class="aide">{{ p.aide }}@if (niveaux(p)) { <em> {{ niveaux(p) }}</em> }</small> }
+  </ng-template>
+
+  @if (open()) {
+    <form class="edit" (ngSubmit)="submit()" aria-labelledby="p-form">
+      <h3 id="p-form">{{ editing() === null ? 'Nouvelle protection' : 'Modifier la protection' }}</h3>
+      <div class="rf-row">
+        <label class="rf-field"><span>Modèle</span>
+          <select name="kind" [ngModel]="form().kind" (ngModelChange)="setKind($event)">
+            @for (f of famillesModeles(); track f.cle) {
+              <optgroup [label]="f.libelle">
+                @for (m of f.modeles; track m.cle) { <option [value]="m.cle">{{ m.libelle }}</option> }
+              </optgroup>
+            }
+          </select></label>
+        <label class="rf-field"><span>Façade</span>
+          <select name="orientation" [ngModel]="form().orientation" (ngModelChange)="patch({ orientation: $event })">
+            <option value="S">sud</option><option value="O">ouest</option><option value="E">est</option>
+            <option value="N">nord</option><option value="all">toutes</option></select></label>
+        @if ((modele()?.modes?.length ?? 0) > 1) {
+          <label class="rf-field"><span>Méthode</span>
+            <select name="mode" [ngModel]="form().mode" (ngModelChange)="patch({ mode: $event })">
+              @for (md of modele()!.modes; track md) {
+                <option [value]="md">{{ md === 'geometrique' ? 'géométrique (N2 aussi)' : 'paramétrique (N0, N1)' }}</option>
+              }
+            </select></label>
+        }
+        <label class="rf-field"><span>Nom (facultatif)</span>
+          <input type="text" name="label" maxlength="120" [ngModel]="form().label" (ngModelChange)="patch({ label: $event })"></label>
+        <label class="rf-field"><span>Appliquée à</span>
+          <select name="scenario" [ngModel]="form().scenario" (ngModelChange)="patch({ scenario: $event })">
+            <option [ngValue]="null">État actuel</option>
+            @for (a of attachables(); track a.id) { <option [ngValue]="a.id">Amélioration « {{ a.name }} »</option> }
+          </select></label>
+      </div>
+      @if (modele(); as m) {
+        @if (m.description) { <p class="rf-hint">{{ m.description }}</p> }
+        @for (g of groupes(); track g.nom) {
+          <fieldset><legend>{{ g.nom }}</legend>
+            <div class="grid">
+              @for (p of g.parametres; track p.cle) {
+                <div class="cell"><ng-container *ngTemplateOutlet="champ; context: { p: p, v: form().params[p.cle], ctl: false }" /></div>
+              }
+            </div></fieldset>
+        }
+        @if (m.pilotage.modes.length) {
+          <fieldset><legend>Pilotage</legend>
+            <div class="grid">
+              <div class="cell"><label class="rf-field"><span>Mode</span>
+                <select name="ctlmode" [ngModel]="form().control['mode']" (ngModelChange)="setControl('mode', $event)">
+                  @for (md of m.pilotage.modes; track md) { <option [value]="md">{{ pilotageLabel[md] ?? md }}</option> }
+                </select></label></div>
+            </div>
+            @for (g of groupesPilotage(); track g.nom) {
+              <p class="sub">{{ g.nom }}</p>
+              <div class="grid">
+                @for (p of g.parametres; track p.cle) {
+                  <div class="cell"><ng-container *ngTemplateOutlet="champ; context: { p: p, v: form().control[p.cle], ctl: true }" /></div>
+                }
+              </div>
+            }
+          </fieldset>
+        }
+        @if (appKeys(m).length) {
+          <details><summary>Comment N0, N1 et N2 l’appliquent</summary>
+            <dl>@for (k of appKeys(m); track k) { <dt>{{ k }}</dt><dd>{{ m.application[k] }}</dd> }</dl></details>
         }
       }
-      <button type="button" class="rf-btn primary" (click)="add()">Ajouter</button>
-    </div>
-  </details>
+      <div class="rf-row">
+        <button type="submit" class="rf-btn primary" [disabled]="saving() || !modele()">{{ editing() === null ? 'Ajouter' : 'Enregistrer' }}</button>
+        <button type="button" class="rf-btn" (click)="cancel()">Annuler</button>
+      </div>
+    </form>
+  }
+
   @if (effect(); as rows) {
     <div class="rf-table-wrap">
       <table class="rf-table">
         <thead><tr><th>Configuration</th><th class="num">h &gt; 26 °C</th><th class="num">h &gt; 28 °C</th><th class="num">degrés-heures</th>
-          <th class="num">T op. max</th><th class="num">Chauffage kWh</th><th class="num">Apports sud kWh</th></tr></thead>
+          <th class="num">DH RE2020</th><th class="num">T op. max</th><th class="num">Chauffage kWh</th><th class="num">Apports sud kWh</th></tr></thead>
         <tbody>
           @for (r of rows; track r.label) {
-            <tr><td>{{ r.label === 'sans' ? 'Sans protection' : r.label === 'toutes' ? 'Toutes les protections' : label(r.label.split(' ')[0]) + ' (' + orient[r.label.split(' ')[1]] + ')' }}</td>
+            <tr><td>{{ rowLabel(r) }}</td>
               <td class="num">{{ r.hours_over_26 }}</td><td class="num">{{ r.hours_over_28 }}</td>
-              <td class="num">{{ r.degree_hours_26 | number: '1.0-0' }}</td><td class="num">{{ r.t_op_max | number: '1.1-1' }}</td>
+              <td class="num">{{ r.degree_hours_26 | number: '1.0-0' }}</td><td class="num">{{ r.dh_re2020 | number: '1.0-0' }}</td>
+              <td class="num">{{ r.t_op_max | number: '1.1-1' }}</td>
               <td class="num">{{ r.heating_kwh | number: '1.0-0' }}</td><td class="num">{{ r.solar_by_orientation_kwh['S'] | number: '1.0-0' }}</td></tr>
           }
         </tbody>

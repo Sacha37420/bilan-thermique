@@ -9,12 +9,16 @@ import { RefonteApiService } from '../../core/refonte-api.service';
 import { USAGE_PROFILES } from '../../core/usage-profiles';
 import { VENTILATION_PROFILES } from '../../core/ventilation-profiles';
 import { SHADING_PROFILES } from '../../core/shading-profiles';
+import { BouquetsEditeurComponent } from '../../components/scenarios/bouquets-editeur.component';
+import { CatalogueProtectionsV2 } from '../../components/scenarios/ameliorations.types';
 import { EntreeReglage, MODELES, ModeleCalcul, Reglages, ValeurReglage, egal, messageErreur } from './reglages.types';
 
 interface Couche { e: number; lam: number; }
 interface ParoiModele { id: number; name: string; description: string; layers: Couche[]; is_glazing?: boolean;
   frame_u?: number | null; frame_fraction?: number | null; }
-interface Protection { kind: string; family: string; label: string; }
+/** Ligne du catalogue des protections, normalisée (I1 v2, ou ancienne forme `kinds`). */
+interface Protection { cle: string; famille: string; libelle: string; description: string; }
+interface AncienCatalogue { kinds?: { kind: string; family: string; label: string }[]; }
 
 /** Colonnes du tableau des archétypes (clés `archetypes.<période>.<champ>`). */
 const ARCH_COLS: { champ: string; libelle: string }[] = [
@@ -22,7 +26,6 @@ const ARCH_COLS: { champ: string; libelle: string }[] = [
   { champ: 'plancher_u', libelle: 'Plancher bas (U)' }, { champ: 'baies_uw', libelle: 'Fenêtres (Uw)' },
   { champ: 'n50', libelle: 'Fuites d’air (n50)' },
 ];
-const FAMILLES: Record<string, string> = { fixe: 'Protection fixe', mobile: 'Protection mobile', vitrage: 'Vitrage', vegetation: 'Végétation' };
 
 /**
  * Onglet Paramétrage (chantier bt-navigation) : pour chaque modèle de calcul, les valeurs que le
@@ -33,7 +36,7 @@ const FAMILLES: Record<string, string> = { fixe: 'Protection fixe', mobile: 'Pro
 @Component({
   selector: 'app-onglet-parametrage',
   standalone: true,
-  imports: [ContexteBarComponent, RouterLink, DecimalPipe],
+  imports: [ContexteBarComponent, RouterLink, DecimalPipe, BouquetsEditeurComponent],
   templateUrl: './onglet-parametrage.component.html',
   styleUrl: './onglet-parametrage.component.scss',
 })
@@ -45,7 +48,6 @@ export class OngletParametrageComponent {
 
   readonly MODELES = MODELES;
   readonly ARCH_COLS = ARCH_COLS;
-  readonly FAMILLES = FAMILLES;
   readonly usages = USAGE_PROFILES;
   readonly ventilations = VENTILATION_PROFILES;
   readonly ombrages = SHADING_PROFILES;
@@ -70,6 +72,8 @@ export class OngletParametrageComponent {
   readonly paroisErreur = signal('');
   readonly protections = signal<Protection[] | null>(null);
   readonly protectionsErreur = signal('');
+  /** Libellés des familles de protections, servis par le catalogue (I1 v2). */
+  readonly famillesProtection = signal<Record<string, string>>({});
 
   readonly sansParc = computed(() => this.ctx.parcId() === null || this.ctx.parcId() === HORS_PARC);
   readonly modifiable = computed(() => !this.defautsSeuls() && !!this.reglages()?.peut_modifier);
@@ -146,8 +150,16 @@ export class OngletParametrageComponent {
       });
     }
     if (this.protections() === null) {
-      this.rf.get<{ kinds: Protection[] }>('/protections/catalogue/').subscribe({
-        next: r => this.protections.set(r.kinds ?? []),
+      this.rf.get<CatalogueProtectionsV2 | AncienCatalogue>('/protections/catalogue/').subscribe({
+        next: r => {
+          if ('modeles' in r && Array.isArray(r.modeles)) {
+            this.famillesProtection.set(Object.fromEntries((r.familles ?? []).map(f => [f.cle, f.libelle])));
+            this.protections.set(r.modeles.map(m => ({ cle: m.cle, famille: m.famille, libelle: m.libelle, description: m.description ?? '' })));
+          } else {
+            // Ancienne forme (avant I1 v2) : pas de libellés de famille servis, la clé est montrée telle quelle.
+            this.protections.set(((r as AncienCatalogue).kinds ?? []).map(k => ({ cle: k.kind, famille: k.family, libelle: k.label, description: '' })));
+          }
+        },
         error: e => this.protectionsErreur.set(messageErreur(e, 'Catalogue des protections')),
       });
     }

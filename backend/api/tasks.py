@@ -143,8 +143,21 @@ def run_building_calcul(self, job_id: int, building_id: int, calcul_payload: dic
             'final_interior_surface_temp': result['final_interior_surface_temp'],
         }
         job.save(update_fields=['result'])
-        # Lot 3 (refonte) : le résultat reste consultable après avoir quitté la page.
-        calc_runs.finish(job_id, job.result, started, surface_m2=building.surface_ref_m2)
+        # Lot 3 (refonte) : le résultat reste consultable après avoir quitté la page. Lot 36 : confort RE2020, séries
+        # mensuelles et cumuls par triangle (I3, I4) gardés avec le calcul seulement (pas dans le job).
+        stored = dict(job.result)
+        try:
+            from .engines import comfort
+            w = calcul_payload.get('weather') or []
+            hidx = [p.get('hour_index') if p.get('hour_index') is not None else i for i, p in enumerate(w)]
+            residential = not any(p.get('occupied') is False for p in w)
+            phi = result.get('phi_hc_w')
+            stored['confort'], stored['mensuel'] = comfort.indicators(result['t_op'][1:], [p['t_ext'] for p in w], hidx,
+                                                                      residential, phi)
+            stored['par_triangle'] = calc_runs.triangle_results(building.envelope, paroi_layers, result['par_triangle'])
+        except (KeyError, ValueError, TypeError, IndexError):
+            pass
+        calc_runs.finish(job_id, stored, started, surface_m2=building.surface_ref_m2)
         job.set_state(
             status=Job.DONE, progress=100,
             message=f"Calcul terminé — {result['hours']}h, "
@@ -617,3 +630,9 @@ def extract_document(self, job_id, run_id):
         run.status, run.message = 'ERROR', msg[:500]
         run.save(update_fields=['status', 'message'])
         job.set_state(status=Job.ERROR, message=msg[:500])
+
+
+# Chantier bt-potentiels : tâches des secteurs « actions et bouquets » et « rendu », enregistrées avec celles-ci.
+from .ameliorations.taches import *  # noqa: E402,F401,F403
+from .rendu.taches import *  # noqa: E402,F401,F403
+

@@ -49,3 +49,6 @@ gunicorn>=23.0,<24.0
 anthropic==1.13.0
 # Texte des PDF, lu localement avant tout envoi (BSD-3, pur Python).
 pypdf==5.4.0
+
+# ── Chantier bt-potentiels (lot 38) : export Word des rendus ──
+python-docx==1.1.2

@@ -1,0 +1,82 @@
+@switch (bloc().type) {
+  @case ('texte') {
+    <label class="rf-field plein"><span>Texte (mise en forme Markdown simple)</span>
+      <textarea rows="6" maxlength="20000" [value]="b('texte').contenu" (change)="poser('contenu', $any($event.target).value)"></textarea></label>
+  }
+  @case ('indicateurs') {
+    <fieldset class="liste"><legend>Chiffres présentés</legend>
+      @for (m of etat.mesuresPortee(); track m.cle) {
+        <label class="check"><input type="checkbox" [checked]="coche('cles', m.cle)" (change)="liste('cles', m.cle, $any($event.target).checked)" />{{ m.libelle }}@if (m.unite) { ({{ m.unite }}) }</label>
+      } @empty { <p class="rf-hint">Liste des grandeurs indisponible.</p> }
+    </fieldset>
+    <app-choix-series [valeur]="b('indicateurs').series" [bouquets]="etat.bouquets()" [nom]="id() + '-s'" (seriesChange)="series($event)" />
+  }
+  @case ('tableau') {
+    <div class="rf-row">
+      <label class="rf-field"><span>Lignes</span>
+        <select (change)="poser('source', $any($event.target).value)">
+          @for (s of SOURCES; track s.cle) { <option [value]="s.cle" [selected]="b('tableau').source === s.cle">{{ s.libelle }}</option> }
+        </select></label>
+      <label class="rf-field"><span>Trier par</span>
+        <select (change)="poser('tri', $any($event.target).value)">
+          <option value="" [selected]="!b('tableau').tri">ordre du serveur</option>
+          @for (c of b('tableau').colonnes; track c) { <option [value]="c" [selected]="b('tableau').tri === c">{{ libelleColonne(c) }}</option> }
+        </select></label>
+      <label class="rf-field"><span>Ordre</span>
+        <select (change)="poser('ordre', $any($event.target).value)">
+          <option value="desc" [selected]="b('tableau').ordre === 'desc'">décroissant</option>
+          <option value="asc" [selected]="b('tableau').ordre === 'asc'">croissant</option>
+        </select></label>
+      <label class="rf-field court"><span>Lignes au plus</span>
+        <input type="number" min="1" max="500" [value]="b('tableau').limite" (change)="poser('limite', entier($any($event.target).value, 1, 500, 50))" /></label>
+    </div>
+    <fieldset class="liste"><legend>Colonnes</legend>
+      @for (c of colonnesPossibles(); track c.cle) {
+        <label class="check"><input type="checkbox" [checked]="coche('colonnes', c.cle)" (change)="liste('colonnes', c.cle, $any($event.target).checked)" />{{ c.libelle }}</label>
+      } @empty { <p class="rf-hint">Liste des colonnes indisponible.</p> }
+    </fieldset>
+  }
+  @case ('graphe') {
+    <app-constructeur-graphe [graphe]="b('graphe').graphe" [portee]="etat.portee()" [cible]="etat.cible()" [questions]="etat.questions()"
+      [dimensions]="etat.dimensionsPortee()" [mesures]="etat.mesuresPortee()" [bouquets]="etat.bouquets()"
+      [catalogueErreur]="etat.catalogueErreur()" (grapheChange)="graphe($event)" />
+  }
+  @case ('carte') {
+    <div class="rf-row">
+      <label class="rf-field"><span>Couleur des bâtiments selon</span>
+        <select (change)="poser('indicateur', $any($event.target).value)">
+          <option value="" [selected]="!b('carte').indicateur">—</option>
+          @for (m of etat.mesuresPortee(); track m.cle) { <option [value]="m.cle" [selected]="b('carte').indicateur === m.cle">{{ m.libelle }}</option> }
+        </select></label>
+      <label class="rf-field"><span>Valeurs</span>
+        <select (change)="poser('series', $any($event.target).value)">
+          <option value="reel" [selected]="b('carte').series === 'reel'">État réel</option>
+          @for (bq of etat.bouquets(); track bq.id) { <option [value]="bq.id" [selected]="b('carte').series === '' + bq.id">{{ bq.nom }}</option> }
+        </select></label>
+    </div>
+    <p class="rf-hint">Carte sans fond en ligne : elle reste lisible dans un export ouvert hors connexion.</p>
+  }
+  @case ('vue3d') {
+    <div class="rf-row">
+      <label class="rf-field"><span>Calcul (numéro, vide = dernier N2)</span>
+        <input type="text" inputmode="numeric" [value]="b('vue3d').calcul === 'dernier_N2' ? '' : b('vue3d').calcul" (change)="calcul($any($event.target).value)" /></label>
+      <label class="rf-field"><span>Grandeur</span>
+        <select (change)="poser('grandeur', $any($event.target).value)">
+          @for (g of GRANDEURS; track g.cle) { <option [value]="g.cle" [selected]="b('vue3d').grandeur === g.cle">{{ g.libelle }}</option> }
+        </select></label>
+      <label class="rf-field"><span>Point de vue</span>
+        <select (change)="poser('camera', $any($event.target).value)">
+          @for (c of CAMERAS; track c) { <option [value]="c" [selected]="b('vue3d').camera === c">{{ NOMS_CAMERA[c] || c }}</option> }
+        </select></label>
+    </div>
+    @if (etat.portee() === 'parc') { <p class="rf-hint">La vue 3D concerne un bâtiment : elle n’apparaît que dans un document de bâtiment.</p> }
+  }
+  @case ('fiche') {
+    <fieldset class="liste"><legend>Parties de la fiche</legend>
+      @for (s of SECTIONS_FICHE; track s.cle) {
+        <label class="check"><input type="checkbox" [checked]="coche('sections', s.cle)" (change)="liste('sections', s.cle, $any($event.target).checked)" />{{ s.libelle }}</label>
+      }
+    </fieldset>
+  }
+  @case ('saut_de_page') { <p class="rf-hint">Le bloc suivant commence une nouvelle page à l’impression et dans les exports.</p> }
+}

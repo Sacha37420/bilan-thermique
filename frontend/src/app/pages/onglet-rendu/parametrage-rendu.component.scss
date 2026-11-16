@@ -1,0 +1,23 @@
+:host { display: grid; gap: var(--space-4); }
+.rf-card { margin: 0; }
+.rf-field.grow { flex: 1 1 18rem; }
+.rf-field.grow input, .rf-field.grow select { width: 100%; }
+.pied { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-end; margin-top: var(--space-3); }
+.pied .rf-hint { margin: 0; flex: 1 1 20rem; }
+.check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; cursor: pointer; font-size: var(--text-sm); margin-right: var(--space-4); }
+.check input { width: 20px; height: 20px; accent-color: var(--accent); }
+.sec-tete { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; margin-bottom: var(--space-3); }
+.outils { display: flex; gap: var(--space-1); }
+.blocs { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
+.bloc { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.bloc.ouvert { border-color: var(--accent); }
+.bloc-tete { display: flex; gap: var(--space-1); align-items: center; padding: var(--space-1); }
+.bloc-nom { flex: 1 1 auto; min-height: 44px; text-align: left; background: none; border: 0; color: var(--text); font: inherit;
+            cursor: pointer; padding: 0 var(--space-2); display: flex; gap: var(--space-2); align-items: baseline; flex-wrap: wrap; }
+.bloc-nom small { color: var(--text-mute); font-size: var(--text-xs); }
+.bloc-corps { padding: var(--space-3); border-top: 1px solid var(--border); }
+.ajout { max-width: 20rem; }
+@media (max-width: 899px) {
+  .rf-field { flex: 1 1 100%; }
+  .ajout { max-width: none; }
+}

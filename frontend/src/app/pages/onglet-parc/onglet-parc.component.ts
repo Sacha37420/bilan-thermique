@@ -10,13 +10,14 @@ import { ParcBatimentsComponent } from './parc-batiments.component';
 import { ParcAjouterComponent } from './parc-ajouter.component';
 import { ParcPartageComponent } from './parc-partage.component';
 import { ParcOrchestrateurComponent } from './parc-orchestrateur.component';
+import { ParcPotentielsComponent } from './parc-potentiels.component';
 import { ROLE_PHRASE, VUES_PARC, VueParc } from './parc.types';
 
 /** Onglet Parc (chantier bt-navigation) : choisir ou créer un parc, puis ses bâtiments, l'ajout, le partage, les sources. */
 @Component({
   selector: 'app-onglet-parc',
   standalone: true,
-  imports: [FormsModule, ContexteBarComponent, ParcBatimentsComponent, ParcAjouterComponent, ParcPartageComponent, ParcOrchestrateurComponent],
+  imports: [FormsModule, ContexteBarComponent, ParcBatimentsComponent, ParcAjouterComponent, ParcPartageComponent, ParcOrchestrateurComponent, ParcPotentielsComponent],
   styleUrls: ['./parc-commun.scss'],
   styles: [`
     .parcs { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
@@ -82,6 +83,7 @@ import { ROLE_PHRASE, VUES_PARC, VueParc } from './parc.types';
 
         @for (k of [ctx.parcId()]; track k) {
           @switch (vue()) {
+            @case ('potentiels') { <app-parc-potentiels /> }
             @case ('ajouter') { <app-parc-ajouter /> }
             @case ('import-partage') { <app-parc-partage /> }
             @case ('orchestrateur') { <app-parc-orchestrateur /> }

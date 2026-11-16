@@ -9,6 +9,11 @@ networks:
     name: dev-net
   bilan-thermique-net:
     driver: bridge
+  # Chantier bt-potentiels (lot 38) : réseau INTERNE du service de rendu (Chromium) — il ne voit ni Redis, ni les
+  # bases, ni Internet ; seuls le backend et le worker le joignent.
+  bilan-thermique-rendu-net:
+    driver: bridge
+    internal: true
 
 volumes:
   # Lot AL — cache des façades (photos Panoramax, modèles de détection,
@@ -19,6 +24,9 @@ volumes:
   # scratch d'atelier-3d) : vidé par clean2.sh, les textures se recomposent
   # (« Recomposer les textures »), les baies restent en base.
   facade-cache:
+  # Exports de rendu (HTML, Word, PDF) : fichiers transitoires (24 h), non-external à dessein — même raisonnement que
+  # le cache des façades ; perdus sans dommage, régénérables.
+  rendu-exports:
 
 services:
 
@@ -31,10 +39,12 @@ services:
       - "${LAB_BIND_ADDR:-127.0.0.1}:8099:8000"
     volumes:
       - facade-cache:/tmp/bilan-thermique-facades
+      - rendu-exports:/data/rendu-exports
     networks:
       - sso-net
       - dev-net
       - bilan-thermique-net
+      - bilan-thermique-rendu-net
     labels:
       caddy: "${DOMAIN}"
       caddy.handle_path: "/bilan-thermique-api/*"
@@ -69,12 +79,42 @@ services:
     command: celery -A config worker --loglevel=info --concurrency=1 -Q celery,parc --prefetch-multiplier=1
     volumes:
       - facade-cache:/tmp/bilan-thermique-facades
+      - rendu-exports:/data/rendu-exports
     depends_on:
       redis:
         condition: service_healthy
     networks:
       - dev-net
       - bilan-thermique-net
+      - bilan-thermique-rendu-net
+
+  # Chantier bt-potentiels (lot 38) : service de rendu — Chromium (Playwright) qui imprime le HTML exporté en PDF et
+  # dessine figures et vues 3D en images pour le Word. Jamais dans l'image Django (règle du lab, comme l'engine de
+  # robot-lab). Aucun port, aucun label Caddy, aucune sortie réseau (réseau interne + interception dans le service).
+  rendu:
+    build: ./rendu-service
+    image: bilan-thermique-rendu
+    container_name: bilan-thermique-rendu
+    restart: unless-stopped
+    environment:
+      RENDU_SERVICE_KEY: ${RENDU_SERVICE_KEY}
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+      - /home/pwuser:size=64m,uid=1000,gid=1000
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    pids_limit: 256
+    networks:
+      - bilan-thermique-rendu-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/sante').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   frontend:
     build: ./frontend

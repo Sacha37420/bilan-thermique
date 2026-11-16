@@ -1,0 +1,19 @@
+{
+  "name": "bilan-thermique-rendu",
+  "private": true,
+  "type": "module",
+  "description": "Service interne de rendu (PDF, images Plotly, vues 3D) de bilan-thermique : Chromium sans aucun accès réseau.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/unit.test.js",
+    "test:integration": "node test/integration.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright": "1.48.0",
+    "plotly.js-dist-min": "2.35.2",
+    "three": "0.180.0"
+  }
+}

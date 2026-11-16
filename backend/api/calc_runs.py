@@ -13,6 +13,7 @@ from .fingerprint import stable_hash
 from .models import CalcRun, Job, ParoiModel
 
 COMFORT_THRESHOLDS_C = (26.0, 28.0)
+I3_COMFORT_KEYS = ('dh_re2020', 'heures_inconfort', 't_conf_methode')
 
 
 def n2_inputs_hash(building, payload):
@@ -76,7 +77,59 @@ def indicators_from(result, surface_m2=None, level=CalcRun.N2):
               'heating_kwh_p10', 'heating_kwh_p90'):
         if result.get(k) is not None:
             ind[k] = result[k]
+    # Lot 36 (I3) : DH RE2020 à seuil adaptatif (`engines.comfort`), DH base 26 gardé sous le nom `dh_26`.
+    # N0 (mensuel, sans série horaire) : clés présentes, valeur nulle.
+    conf = result.get('confort') or {}
+    for k in I3_COMFORT_KEYS:
+        ind[k] = conf.get(k) if level != CalcRun.N0 else None
+    ind['dh_26'] = ind.get('degree_hours_over_26') if level != CalcRun.N0 else None
+    if surface_m2 is None and 'cooling_kwh_m2' not in ind:
+        ind['cooling_kwh_m2'] = None
     return ind
+
+
+def _sig3(x):
+    if x is None:
+        return None
+    x = float(x)
+    return float(f'{x:.3g}') if x == x and abs(x) != float('inf') else None
+
+
+def triangle_results(envelope, layers_by_id, raw):
+    """Résultats N2 par triangle au format I4 (`GET /api/calculs/<id>/triangles/`), depuis les cumuls du solveur
+    (`building_solver`, sortie `par_triangle`) et la géométrie réellement calculée. 3 chiffres significatifs."""
+    from .building_solver import PERIODS
+    tris = envelope['triangles']
+    out_type = []
+    for i, t in enumerate(tris):
+        ls = layers_by_id.get(t.get('paroi_model_id')) or []
+        if raw['hors_volume'][i]:
+            out_type.append('hors_volume')
+        elif ls and all((l.get('tau') or 0) > 0 for l in ls):
+            out_type.append('vitrage')
+        else:
+            out_type.append('paroi')
+    area = [max(float(t.get('area') or 0.0), 1e-9) for t in tris]
+
+    def per_m2(vals):
+        return [_sig3(v / a) for v, a in zip(vals, area)]
+    g = {
+        'pertes_hiver_kwh_m2': per_m2(raw['loss_hiver_kwh']), 'pertes_hiver_kwh': [_sig3(v) for v in raw['loss_hiver_kwh']],
+        'gains_ete_kwh_m2': per_m2(raw['gain_ete_kwh']), 'gains_ete_kwh': [_sig3(v) for v in raw['gain_ete_kwh']],
+        'solaire_ete_kwh_m2': per_m2(raw['solaire_ete_kwh']),
+        't_si_hiver_moy_c': [_sig3(v) for v in raw['t_si_hiver_moy_c']],
+        't_si_ete_max_c': [_sig3(v) for v in raw['t_si_ete_max_c']],
+    }
+    units = {'pertes_hiver_kwh_m2': 'kWh/m²', 'pertes_hiver_kwh': 'kWh', 'gains_ete_kwh_m2': 'kWh/m²',
+             'gains_ete_kwh': 'kWh', 'solaire_ete_kwh_m2': 'kWh/m²', 't_si_hiver_moy_c': '°C', 't_si_ete_max_c': '°C'}
+    return {'repere': 'batiment', 'vertices': [[_sig_coord(c) for c in v] for v in envelope['vertices']],
+            'triangles': [list(t['v']) for t in tris], 'groupes': [t.get('group') or '' for t in tris],
+            'type': out_type, 'periodes': {k: list(v) for k, v in PERIODS.items()}, 'grandeurs': g, 'unites': units}
+
+
+def _sig_coord(c):
+    """Coordonnées au millimètre (3 chiffres significatifs déformeraient le maillage d'un bâtiment de 30 m)."""
+    return round(float(c), 3)
 
 
 def for_job(job_id):

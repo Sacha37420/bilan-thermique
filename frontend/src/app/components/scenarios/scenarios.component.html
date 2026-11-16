@@ -7,6 +7,7 @@
     @for (s of list(); track s.id) {
       <li [class.on]="choisi() === s.id">
         <label class="check"><input type="radio" name="amelioration" [checked]="choisi() === s.id" (change)="choisir(s.id)"> <strong>{{ s.name }}</strong></label>
+        @if (s.genere) { <span class="rf-badge m-document">issue du bouquet « {{ s.bouquet?.nom ?? '?' }} »</span> }
         <small>@for (b of s.bundles; track b) { {{ label(b) }}@if (!$last) { · } }</small>
         <button type="button" class="rf-btn small danger" (click)="remove(s)" [attr.aria-label]="'Supprimer ' + s.name">Supprimer</button>
       </li>

@@ -2,9 +2,11 @@
 
 - N0/N1 : `apply(params, building, scenario)` pose la liste des protections sur les paramètres ;
   `engines.shading` calcule les facteurs horaires avec la météo.
-- N2 : `geometric_occluders(building)` construit, pour chaque protection fixe en mode géométrique,
-  des panneaux (triangles) au-dessus ou à côté des baies de la façade visée ; ils sont ajoutés aux
-  obstacles du lancer de rayons (précalcul et temps réel), sans nouvelle physique.
+- N2 : `geometric_occluders(building)` construit, pour chaque protection fixe en mode géométrique (toutes les
+  fixes géométrisables pour un N2 lancé depuis la fiche, lot 36), des panneaux (triangles) au-dessus ou à côté des
+  baies de la façade visée ; ils sont ajoutés aux obstacles du lancer de rayons (précalcul et temps réel). Les
+  autres protections (mobiles, lames, vitrages, végétation) sont appliquées par triangle de baie
+  (`engines.n2_inputs.mobile_factors`, `building_solver`).
 """
 
 import math
@@ -73,11 +75,20 @@ def _quad(a, b, c, d, verts, tris):
     tris += [{'v': [i, i + 1, i + 2]}, {'v': [i, i + 2, i + 3]}]
 
 
-def geometric_occluders(building, scenario=None, envelope=None):
-    """Enveloppe d'obstacles {'vertices', 'triangles'} des protections fixes en mode géométrique.
+def geometric_occluders(building, scenario=None, envelope=None, all_fixed=False):
+    """Enveloppe d'obstacles {'vertices', 'triangles'} des protections fixes construites en géométrie.
+
+    Débords (casquette, balcon, débord de toiture, plafond de loggia) : panneau d'épaisseur nulle à la sous-face,
+    profondeur D (projection horizontale), incliné de β (bord extérieur abaissé de D·tan β), débordant de e_g à
+    gauche et e_d à droite de la baie (vu de l'extérieur ; repli : 2 m de chaque côté, comme avant le lot 36).
+    Joues : panneaux verticaux de profondeur F, de l'appui à la hauteur H_j (toute la baie à défaut), côté(s) choisi(s).
+    `all_fixed` : toutes les fixes géométrisables, quel que soit leur mode (N2 depuis la fiche, lot 36) ; sinon
+    seulement celles en mode géométrique (page Calcul 3D, ombrage précalculé).
     `envelope` : celle du calcul si elle n'est pas `building.envelope` (N2 depuis la fiche, Lot 23)."""
+    from .engines import shading
     from .models import ParoiModel
-    devs = [d for d in devices_of(building, scenario) if d['mode'] == 'geometrique']
+    devs = [d for d in devices_of(building, scenario) if d['kind'] in shading.GEOMETRIC and
+            (all_fixed or d['mode'] == 'geometrique')]
     if not devs:
         return None
     glazing_ids = set(ParoiModel.objects.filter(is_glazing=True).values_list('pk', flat=True)) | \
@@ -85,7 +96,7 @@ def geometric_occluders(building, scenario=None, envelope=None):
         {'fiche:vitrage'}
     verts, tris = [], []
     for dev in devs:
-        p = dev['params'] or {}
+        kind = dev['kind']
         for o in (['N', 'E', 'S', 'O'] if dev['orientation'] == 'all' else [dev['orientation']]):
             for w in _facade_windows(building, o, glazing_ids, envelope):
                 (nx, ny), (tx, ty) = w['n'], w['t']
@@ -93,16 +104,27 @@ def geometric_occluders(building, scenario=None, envelope=None):
                 def pt(u, d, z):
                     return [u * tx + d * nx, u * ty + d * ny, z]
                 d0 = w['d'] + 0.01
-                if dev['kind'] in ('casquette', 'balcon', 'debord_toit', 'loggia') and p.get('depth_m'):
-                    ext = float(p.get('extension_m', 2.0))
-                    z = w['z1'] + float(p.get('gap_m', 0.0))
-                    d1 = d0 + float(p['depth_m'])
-                    _quad(pt(w['u0'] - ext, d0, z), pt(w['u1'] + ext, d0, z), pt(w['u1'] + ext, d1, z),
-                          pt(w['u0'] - ext, d1, z), verts, tris)
-                if dev['kind'] in ('joues', 'loggia') and p.get('fin_depth_m'):
-                    d1 = d0 + float(p['fin_depth_m'])
-                    for u in (w['u0'], w['u1']):
-                        _quad(pt(u, d0, w['z0']), pt(u, d1, w['z0']), pt(u, d1, w['z1']), pt(u, d0, w['z1']), verts, tris)
+                depth = float(shading.param(dev, 'depth_m') or 0.0)
+                if kind in shading.OVERHANGS and depth > 0:
+                    left, right = shading.extensions(dev)
+                    left = 2.0 if left is None else left
+                    right = 2.0 if right is None else right
+                    tilt = float(shading.param(dev, 'inclinaison_deg') or 0.0) if kind != 'loggia' else 0.0
+                    z = w['z1'] + float(shading.param(dev, 'gap_m') or 0.0)
+                    z_out = z - depth * math.tan(math.radians(tilt))
+                    d1 = d0 + depth
+                    # u croît vers la droite vu de l'extérieur : la gauche est du côté u0.
+                    _quad(pt(w['u0'] - left, d0, z), pt(w['u1'] + right, d0, z), pt(w['u1'] + right, d1, z_out),
+                          pt(w['u0'] - left, d1, z_out), verts, tris)
+                fin = float(shading.param(dev, 'fin_depth_m') or 0.0)
+                if kind in shading.FINS and fin > 0:
+                    d1 = d0 + fin
+                    fh = shading.param(dev, 'fin_height_m') if kind == 'joues' else None
+                    z_top = w['z1'] if fh is None else w['z0'] + float(fh)
+                    sides = (shading.param(dev, 'fin_cote') or 'deux') if kind == 'joues' else 'deux'
+                    us = {'deux': (w['u0'], w['u1']), 'gauche': (w['u0'],), 'droite': (w['u1'],)}[sides]
+                    for u in us:
+                        _quad(pt(u, d0, w['z0']), pt(u, d1, w['z0']), pt(u, d1, z_top), pt(u, d0, z_top), verts, tris)
     return {'vertices': verts, 'triangles': tris} if tris else None
 
 

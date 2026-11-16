@@ -22,8 +22,12 @@ météo viennent de la fiche.
 
 Limites assumées (écrites dans les entrées figées de chaque calcul) : un seul nœud d'air (pas de
 planchers intermédiaires ni de refends, D9) ; la consigne réduite hors occupation du tertiaire n'est pas
-reproduite (le planning du N2 ne porte pas de consigne) ; les protections paramétriques ne jouent que
-dans N0/N1 (le N2 voit les protections géométriques).
+reproduite (le planning du N2 ne porte pas de consigne).
+
+Lot 36 (chantier bt-potentiels) : protections fixes à débord ou à joues construites en obstacles géométriques quel que
+soit leur mode ; mobiles, lames, vitrages et végétation appliqués par triangle de baie (`mobile_factors`) ; toiture et
+murs végétalisés (couches, puits d'évapotranspiration), absorptance de toiture, albédo des abords, surventilation
+nocturne, arbres plantés (houppiers translucides) et rafraîchissement de l'air — `engines.surcharges`.
 """
 
 import math
@@ -34,8 +38,8 @@ import shapely.ops
 
 from .inputs import CEILING_H, GROUND_T_DEFAULT, ORIENTATIONS, RESIDENTIAL, _v, effective_ventilation, u_from_layers
 
-ENGINE_VERSION = 'n2-3'   # -2 : réflexion du sol relevée (albédo de l'environnement relié) ; -3 : sol simulé (Lot 32)
-FICHE_ENGINES = ('n2-1', 'n2-2', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
+ENGINE_VERSION = 'n2-4'   # -2 : réflexion du sol relevée (albédo de l'environnement relié) ; -3 : sol simulé (Lot 32) ; -4 : protections v2, améliorations, sorties par triangle (lot 36)
+FICHE_ENGINES = ('n2-1', 'n2-2', 'n2-3', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
 H_I, H_E, R_GROUND = 7.7, 25.0, 0.5
 DX_MAX = 0.05
 FRAME_FRACTION = 0.2          # part de cadre d'une baie : même valeur que N1 (frame_factor 0,8)
@@ -43,6 +47,7 @@ AIR_CAPACITY_FACTOR = 5.0     # air + mobilier (même hypothèse que la recette 
 T_MAX_FREE = 60.0             # pas de climatisation : la température flotte au-dessus de la consigne
 IDS = {'mur': 'fiche:mur', 'toiture': 'fiche:toiture', 'plancher': 'fiche:plancher', 'vitrage': 'fiche:vitrage'}
 LABELS = {'mur': 'Murs', 'toiture': 'Toiture', 'plancher': 'Plancher bas', 'vitrage': 'Vitrages'}
+GREEN_WALL_ID = 'fiche:mur_vegetal'
 
 # Structure porteuse par matériau de mur : (épaisseur m, λ W/m·K, ρ kg/m³, c J/kg·K) — ordres de grandeur.
 MASONRY = {
@@ -111,36 +116,64 @@ def glazing_layers(uw, g, vitrage=None):
     return out
 
 
-def paroi_layers_from_fiche(values):
-    """{id: couches} des quatre parois de la fiche, et leur description (U obtenu, composition)."""
+def paroi_layers_from_fiche(values, green_roof=None, green_walls=None):
+    """{id: couches} des parois de la fiche, et leur description (U obtenu, composition).
+
+    Lot 36 : absorptance de toiture distincte (`toiture.absorptance`) ; toiture végétalisée : couche de substrat
+    (épaisseur × part, λ et ρc de `engines.vegetation`) dehors, absorptance du feuillage ; murs végétalisés : paroi
+    `fiche:mur_vegetal` (lame d'air R × part dehors, absorptance mêlée) pour les façades choisies."""
+    from . import vegetation as veg
     inertia = _v(values, 'enveloppe.inertie', 'moyenne')
     material = values.get('mur.materiau')
     structure = MASONRY.get(material) or MASONRY[BY_INERTIA.get(inertia, 'parpaing')]
     insulation = _v(values, 'mur.isolation', 'iti')
     alpha = float(_v(values, 'enveloppe.couleur_absorptance', 0.6))
+    alpha_roof = float(values['toiture.absorptance']) if values.get('toiture.absorptance') is not None else alpha
     films = 1.0 / H_I + 1.0 / H_E
     roof_type = _v(values, 'toiture.type', 'terrasse')
     roof_structure = SLAB if roof_type == 'terrasse' else BOARD
+    roof = opaque_layers(_v(values, 'toiture.u', 1.0), roof_structure, insulation='ite',
+                         alpha=alpha_roof, r_films=films, plaster=roof_type == 'terrasse')
+    if green_roof:
+        part = float(green_roof.get('part', 1.0))
+        e = float(green_roof.get('substrat_m', 0.10)) * part
+        a = veg.mixed_alpha(alpha_roof, part)
+        if e > 0.001:
+            sub = _layer(e, veg.SUBSTRATE_LAMBDA, 1200, veg.SUBSTRATE_RHO_C / 1200, alpha=a)
+            roof = [sub] + roof                    # le substrat reçoit le soleil (première couche opaque)
+        else:
+            roof[0] = dict(roof[0], alpha=round(a, 4), r=round(1.0 - a, 4))
     layers = {
         IDS['mur']: opaque_layers(_v(values, 'mur.u', 1.0), structure, insulation=insulation, alpha=alpha,
                                   r_films=films),
-        IDS['toiture']: opaque_layers(_v(values, 'toiture.u', 1.0), roof_structure, insulation='ite',
-                                      alpha=alpha, r_films=films, plaster=roof_type == 'terrasse'),
+        IDS['toiture']: roof,
         IDS['plancher']: opaque_layers(_v(values, 'plancher.u', 1.0), (0.15,) + SLAB[1:], insulation='ite',
                                        alpha=0.6, r_films=1.0 / H_I + R_GROUND, plaster=False),
         IDS['vitrage']: glazing_layers(_v(values, 'baies.uw', 2.8), _v(values, 'baies.g', 0.6),
                                        values.get('baies.vitrage')),
     }
+    labels = dict(LABELS)
+    ids = dict(IDS)
+    if green_walls:
+        part = float(green_walls.get('part', 0.5))
+        a = veg.mixed_alpha(alpha, part)
+        r = veg.WALL_LAYER_R * part
+        base = layers[IDS['mur']]
+        gap = {'e': 0.02, 'lam': round(0.02 / max(r, 1e-4), 5), 'rho': 1.2, 'c': 1000, 'tau': 0.0,
+               'r': round(1.0 - a, 4), 'alpha': round(a, 4)}
+        layers[GREEN_WALL_ID] = [gap] + base
+        ids['mur_vegetal'] = GREEN_WALL_ID
+        labels['mur_vegetal'] = 'Murs végétalisés'
     frames = {IDS['vitrage']: (float(_v(values, 'baies.uw', 2.8)), FRAME_FRACTION)}
     described = {}
-    for part, pid in IDS.items():
+    for part_name, pid in ids.items():
         ls = layers[pid]
-        if part == 'plancher':
+        if part_name == 'plancher':
             u = 1.0 / (1.0 / H_I + sum(l['e'] / l['lam'] for l in ls) + R_GROUND)
         else:
             u = u_from_layers(ls, H_I, H_E)
-        described[part] = {'id': pid, 'label': LABELS[part], 'u': round(u, 3),
-                           'layers': [{k: l[k] for k in ('e', 'lam', 'rho', 'c', 'tau')} for l in ls]}
+        described[part_name] = {'id': pid, 'label': labels[part_name], 'u': round(u, 3),
+                                'layers': [{k: l[k] for k in ('e', 'lam', 'rho', 'c', 'tau')} for l in ls]}
     return layers, frames, described
 
 
@@ -327,7 +360,9 @@ def _expert_parois(building):
 
 # ── Obstacles et réglages ───────────────────────────────────────────────────
 
-def occluders(building, envelope, scenario=None):
+def occluders(building, envelope, scenario=None, all_fixed=False):
+    """Obstacles du lancer de rayons : environnement relié, sinon voisins extrudés ; plus les protections fixes
+    construites en géométrie (lot 36 : toutes les fixes géométrisables depuis la fiche, `all_fixed`)."""
     from .. import shading_service
     from ..geodata import extrude_footprint
     if building.environment_id:
@@ -343,7 +378,7 @@ def occluders(building, envelope, scenario=None):
         env = {'vertices': verts, 'triangles': tris} if tris else None
         source = 'voisins relevés (BD TOPO)' if tris else 'aucun'
     merged = shading_service.merge_envelopes(
-        env, shading_service.geometric_occluders(building, scenario, envelope=envelope)) or env
+        env, shading_service.geometric_occluders(building, scenario, envelope=envelope, all_fixed=all_fixed)) or env
     return merged, source
 
 
@@ -389,17 +424,81 @@ def weather_for_n2(series, north, residential, ground=None):
 
 # ── Point d'entrée ───────────────────────────────────────────────────────────
 
+def _glazing_ids(building):
+    from ..models import ParoiModel
+    return set(ParoiModel.objects.filter(is_glazing=True).values_list('pk', flat=True)) | \
+        {pid for pid, layers in ParoiModel.objects.values_list('pk', 'layers') if any((l.get('tau') or 0) > 0 for l in layers)} | \
+        {IDS['vitrage']}
+
+
+def window_groups(envelope, north, glazing_ids):
+    """Triangles de baie par orientation cardinale : {o: [indices]} (protections appliquées par triangle, lot 36)."""
+    out = {}
+    for i, t in enumerate(envelope['triangles']):
+        if t.get('paroi_model_id') in glazing_ids and 60 < float(t.get('tilt_deg', 90)) < 120:
+            out.setdefault(_cardinal(float(t.get('azimuth_deg', 0.0)), north), []).append(i)
+    return out
+
+
+def _mark_green(envelope, values, green_roof, green_walls, north, mode):
+    """Lot 36 : parois végétalisées (mode fiche) — murs des façades choisies sur `fiche:mur_vegetal` ; coefficient
+    d'évapotranspiration par triangle (`evapo`, `engines.vegetation.latent_coefficient`)."""
+    from . import vegetation as veg
+    if mode != 'fiche' or not (green_roof or green_walls):
+        return envelope
+    tris = [dict(t) for t in envelope['triangles']]
+    ors = set((green_walls or {}).get('orientations') or [])
+    for t in tris:
+        if t.get('paroi_model_id') == IDS['mur'] and t.get('boundary') != 'adiabatic' and green_walls and \
+                _cardinal(float(t.get('azimuth_deg', 0.0)), north) in ors:
+            t['paroi_model_id'] = GREEN_WALL_ID
+            t['evapo'] = round(veg.latent_coefficient(green_walls['lai'], green_walls['part']), 5)
+        elif t.get('paroi_model_id') == IDS['toiture'] and green_roof:
+            t['evapo'] = round(veg.latent_coefficient(green_roof['lai'], green_roof['part']), 5)
+    return {**envelope, 'triangles': tris}
+
+
+def _expert_roof_alpha(envelope, values, layers):
+    """Enveloppe experte : `toiture.absorptance` posée comme absorptance extérieure des toitures opaques (α des
+    couches), sans toucher aux modèles du catalogue."""
+    a = values.get('toiture.absorptance')
+    if a is None:
+        return envelope, False
+    tris = []
+    for t in envelope['triangles']:
+        ls = layers.get(t.get('paroi_model_id')) or []
+        if t.get('boundary') != 'ground' and float(t.get('tilt_deg', 90)) < 60 and ls and not ls[0].get('tau'):
+            t = {**t, 'alpha_ext': float(a)}
+        tris.append(t)
+    return {**envelope, 'triangles': tris}, True
+
+
 def build(building, scenario=None, values=None):
     """Tout ce qu'il faut pour lancer le N2, et sa description figée (`snapshot`), sans la météo."""
     from .. import facts
+    from . import shading as sh
+    from . import surcharges
     vals = values if values is not None else facts.effective_values(building, scenario)
+    s = surcharges.of(scenario)
     a_floor = float(_v(vals, 'identite.surface_m2', 100.0))
     payload, residential = payload_from_fiche(vals, a_floor)
+    north = building.georef_north_offset_deg or 0.0
+    green_roof = s.get('toiture_vegetalisee') if vals.get('toiture.vegetalisee') is not False else None
+    if green_roof is None and vals.get('toiture.vegetalisee') is True:
+        from .vegetation import GREEN_ROOF_DEFAULT
+        green_roof = dict(GREEN_ROOF_DEFAULT)
+    green_walls = s.get('murs_vegetalises') if vals.get('murs.vegetalises') is not False else None
+    if green_walls is None and vals.get('murs.vegetalises') is True:
+        from .vegetation import GREEN_WALLS_DEFAULT
+        green_walls = dict(GREEN_WALLS_DEFAULT)
+    limits = ['Un seul nœud d’air : planchers intermédiaires et refends non modélisés (D9).']
     if _expert_envelope(building):
         mode = 'experte'
-        envelope = building.envelope
         layers, frames, described = _expert_parois(building)
+        envelope, alpha_set = _expert_roof_alpha(building.envelope, vals, layers)
         geom = {'source': 'enveloppe experte (assignée à la main)', 'n_triangles': len(envelope['triangles'])}
+        if green_roof or green_walls:
+            limits.append('Toiture ou murs végétalisés non appliqués : enveloppe experte (parois du catalogue).')
     else:
         mode = 'fiche'
         envelope, geom = envelope_from_fiche(building, scenario, vals)
@@ -409,25 +508,67 @@ def build(building, scenario=None, values=None):
         from .sol import floor_u_node
         u_node, _note = floor_u_node(gp.floor_type, gp.floor_area or gp.a_floor, gp.floor_perimeter, gp.u_floor,
                                      gp.basement_depth)
-        layers, frames, described = paroi_layers_from_fiche({**vals, 'plancher.u': u_node} if gp.floor_area else vals)
-    env, env_source = occluders(building, envelope, scenario)
-    limits = ['Un seul nœud d’air : planchers intermédiaires et refends non modélisés (D9).']
+        layers, frames, described = paroi_layers_from_fiche({**vals, 'plancher.u': u_node} if gp.floor_area else vals,
+                                                            green_roof, green_walls)
+        envelope = _mark_green(envelope, vals, green_roof, green_walls, north, mode)
+    env, env_source = occluders(building, envelope, scenario, all_fixed=True)
     if not residential:
         limits.append('Consigne réduite hors occupation non reproduite (N1 la baisse de 3 °C).')
     from .. import shading_service
-    if any(d['mode'] != 'geometrique' for d in shading_service.devices_of(building, scenario)):
-        limits.append('Protections solaires paramétriques : prises en compte par N0/N1 seulement.')
+    devices = shading_service.devices_of(building, scenario)
+    per_triangle = [d for d in devices if d['kind'] not in sh.GEOMETRIC]
+    groups = window_groups(envelope, north, _glazing_ids(building)) if per_triangle else {}
+    nocturne = None
+    if float(_v(vals, 'ventilation.nocturne_vol_h', 0.0)) > 0:
+        nocturne = {'debit_m3h': round(float(vals['ventilation.nocturne_vol_h']) * a_floor * CEILING_H, 1),
+                    'seuil_c': float(_v(vals, 'ventilation.nocturne_seuil_c', 22.0))}
+    albedo = vals.get('abords.albedo')
     snapshot = {
         'engine': ENGINE_VERSION, 'mode': mode, 'surface_m2': a_floor, 'volume_m3': round(a_floor * CEILING_H, 1),
         'geometry': geom, 'parois': described, 'obstacles': env_source,
         'reglages': {k: v for k, v in payload.items() if k not in ('planning', 'planning_ferme')},
         'occupation': 'logement (constante)' if residential else 'tertiaire : 8 h–19 h, lundi–vendredi',
         'limites': limits,
+        'protections': {'geometriques': [d['id'] for d in devices if d['kind'] in sh.GEOMETRIC],
+                        'par_triangle': [d['id'] for d in per_triangle],
+                        'triangles_de_baie': {o: len(v) for o, v in groups.items()}},
+        'surventilation_nocturne': nocturne,
+        'albedo_abords': float(albedo) if albedo is not None else None,
+        'arbres_plantes': len(s.get('arbres') or []),
+        'ameliorations': surcharges.describe(building, scenario, 'N2', mode),
     }
     ground_params = _ground_params(building, scenario, vals)
     return {'envelope': envelope, 'layers': layers, 'frames': frames, 'payload': payload,
             'environment': env, 'residential': residential, 'a_floor': a_floor, 'values': vals,
-            'snapshot': snapshot, 'ground_params': ground_params}
+            'snapshot': snapshot, 'ground_params': ground_params, 'devices_par_triangle': per_triangle,
+            'window_groups': groups, 'nocturne': nocturne, 'albedo_abords': float(albedo) if albedo is not None else None,
+            'arbres': s.get('arbres') or [], 'g_window': float(_v(vals, 'baies.g', 0.6)), 'north': north}
+
+
+def mobile_factors(built, weather_geo):
+    """Facteurs par triangle de baie, heure par heure, des protections non géométriques (mobiles, lames, vitrages,
+    végétation) — mêmes fonctions que N0/N1 (`engines.shading.orientation_effects`), azimut géographique.
+    Rend la liste attendue par `building_solver` (`payload['baies_facteurs']`)."""
+    from . import shading as sh
+    from . import solar
+    devs, groups = built['devices_par_triangle'], built['window_groups']
+    if not devs or not groups:
+        return []
+    t_e, az, el, dni, dhi, hidx = solar.arrays(weather_geo)
+    occupied = None
+    if not built['residential']:
+        hour, day = hidx % 24, (hidx // 24) % 7
+        occupied = (hour >= 8) & (hour < 19) & (day < 5)
+    out = []
+    for o, idxs in sorted(groups.items()):
+        total, _beam = solar.surface_irradiance(az, el, dni, dhi, solar.ORIENT_AZ[o], 90.0)
+        e = sh.orientation_effects(devs, o, solar.ORIENT_AZ[o], az, el, hidx, total, t_e, built['g_window'], occupied)
+        if not any(d.get('orientation') in (o, 'all') for d in devs):
+            continue
+        out.append({'orientation': o, 'triangles': idxs,
+                    'beam': np.round(e['beam'], 4).tolist(), 'diffuse': np.round(e['diffuse'], 4).tolist(),
+                    'r_add': np.round(e['r_add'], 2).tolist()})
+    return out
 
 
 def _ground_params(building, scenario, vals):

@@ -1,8 +1,8 @@
 /** Types propres à l'onglet Parc (chantier bt-navigation). */
 
-export type VueParc = 'batiments' | 'ajouter' | 'import-partage' | 'orchestrateur';
+export type VueParc = 'batiments' | 'potentiels' | 'ajouter' | 'import-partage' | 'orchestrateur';
 export const VUES_PARC: [VueParc, string][] = [
-  ['batiments', 'Bâtiments'], ['ajouter', 'Ajouter des bâtiments'],
+  ['batiments', 'Bâtiments'], ['potentiels', 'Potentiels par bouquet'], ['ajouter', 'Ajouter des bâtiments'],
   ['import-partage', 'Import et partage'], ['orchestrateur', 'Sources des données'],
 ];
 

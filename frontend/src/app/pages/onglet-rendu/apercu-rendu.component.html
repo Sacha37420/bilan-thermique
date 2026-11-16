@@ -1,0 +1,56 @@
+<div class="no-print">
+  <section class="rf-card" aria-labelledby="ar-exp">
+    <div class="rf-card-head"><h2 id="ar-exp">Exporter</h2>
+      <button type="button" class="rf-btn" (click)="parametrer.emit()">Modifier le paramétrage</button></div>
+    <p class="rf-hint">Le fichier exporté reprend exactement le document ci-dessous@if (etat.modifie()) {&#32;(réglages en cours, non enregistrés)}.
+      Il est gardé 24 heures et n’est téléchargeable que par vous.</p>
+    <div class="formats">
+      @for (f of FORMATS; track f.cle) {
+        <button type="button" class="rf-btn fmt" (click)="exporter(f.cle)" [disabled]="!etat.cible() || !etat.source() || lancement() !== null">
+          <strong>{{ lancement() === f.cle ? 'Envoi…' : f.libelle }}</strong><small>{{ f.aide }}</small></button>
+      }
+      <button type="button" class="rf-btn" (click)="imprimer()" [disabled]="!doc()">Imprimer l’aperçu</button>
+    </div>
+    @if (exportsErreur()) { <p class="rf-hint" role="status">{{ exportsErreur() }}</p> }
+    @if (exports().length) {
+      <ul class="exports" aria-live="polite">
+        @for (x of exports(); track x.id) {
+          <li>
+            <span class="rf-badge" [class.m-mesure]="x.statut === 'fait'" [class.m-infere]="x.statut === 'erreur'" [class.m-defaut]="x.statut === 'en_attente' || x.statut === 'en_cours'">{{ libelleStatut(x.statut) }}</span>
+            <span class="ex-nom">{{ x.nom_fichier || (libelleFormat(x.format) + ' n° ' + x.id) }}</span>
+            <small>{{ heure(x.cree_le) }}@if (x.taille) {&#32;· {{ taille(x.taille) }}}@if (x.statut === 'erreur' && x.message) {&#32;· {{ x.message }}}</small>
+            @if (x.statut === 'fait') { <button type="button" class="rf-btn small" (click)="telecharger(x)">Télécharger</button> }
+          </li>
+        }
+      </ul>
+    }
+  </section>
+</div>
+
+@if (!etat.cible()) {
+  <p class="rf-hint">{{ etat.portee() === 'parc' ? 'Choisissez un parc dans le bandeau pour voir son rendu.' : 'Choisissez un bâtiment dans le bandeau pour voir sa fiche.' }}</p>
+} @else if (chargement() && !doc()) {
+  <p class="rf-hint" role="status">Construction du document…</p>
+} @else if (docErreur()) {
+  <p class="rf-hint" role="status">{{ docErreur() }}</p>
+} @else if (doc(); as d) {
+  <article class="feuille" [class.paysage]="d.mise_en_page.orientation === 'paysage'" [attr.aria-busy]="chargement()">
+    <header class="entete">
+      <p class="surtitre">{{ etat.portee() === 'parc' ? 'Analyse d’ensemble du parc' : 'Fiche du bâtiment' }}</p>
+      <h2 class="titre">{{ d.titre }}</h2>
+    </header>
+    @if (d.mise_en_page.sommaire && d.sections.length > 1) {
+      <nav class="sommaire" aria-label="Sommaire du document">
+        <p>Sommaire</p>
+        <ol>@for (s of d.sections; track s.ancre) { <li><button type="button" (click)="aller(s.ancre)">{{ s.titre }}</button></li> }</ol>
+      </nav>
+    }
+    @for (s of d.sections; track s.ancre) {
+      <section class="sec" [attr.id]="'rendu-' + s.ancre">
+        @if (s.titre) { <h3>{{ s.titre }}</h3> }
+        @for (b of s.blocs; track $index) { <app-bloc-resolu [bloc]="b" /> }
+      </section>
+    }
+    <footer class="pied">Aide à la décision établie à partir des données disponibles : ne remplace pas un DPE.</footer>
+  </article>
+}

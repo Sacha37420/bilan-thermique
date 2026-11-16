@@ -17,6 +17,11 @@
   --warning: #d98e1e; --warning-tint: #fbf0dc;
   --danger:  #e14b4b; --danger-tint:  #fbe6e6;
 
+  /* Données (graphes Plotly, vues 3D — chantier bt-potentiels) : palette catégorielle lisible par les daltoniens,
+     échelles séquentielle et divergente. */
+  --serie-1: #2a78d6; --serie-2: #eb6834; --serie-3: #1baf7a; --serie-4: #eda100;
+  --serie-5: #e87ba4; --serie-6: #008300; --serie-7: #6250d6; --serie-8: #e34948;
+  --seq-bas: #cde2fb; --seq-haut: #104281; --div-froid: #2a78d6; --div-neutre: #f0efec; --div-chaud: #e34948;
   --bg: #f6f7fb; --card: #ffffff; --border: #e2e5ee;
   --text: #12141c; --text-mute: #5b6172;
   --accent-on: #ffffff;
@@ -51,6 +56,9 @@
     --success: #34c07f; --success-tint: #123625;
     --warning: #eba53a; --warning-tint: #3a2c10;
     --danger:  #ef6a6a; --danger-tint:  #3a1717;
+    --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
+    --serie-5: #d55181; --serie-6: #008300; --serie-7: #9085e9; --serie-8: #e66767;
+    --seq-bas: #184f95; --seq-haut: #b7d3f6; --div-froid: #3987e5; --div-neutre: #383835; --div-chaud: #e66767;
     --bg: #0c0e14; --card: #14171f; --border: #262b38;
     --text: #eef0f5; --text-mute: #98a0b3; --accent-on: #0c0e14;
     color-scheme: dark;
@@ -64,6 +72,9 @@
   --success: #34c07f; --success-tint: #123625;
   --warning: #eba53a; --warning-tint: #3a2c10;
   --danger:  #ef6a6a; --danger-tint:  #3a1717;
+  --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
+  --serie-5: #d55181; --serie-6: #008300; --serie-7: #9085e9; --serie-8: #e66767;
+  --seq-bas: #184f95; --seq-haut: #b7d3f6; --div-froid: #3987e5; --div-neutre: #383835; --div-chaud: #e66767;
   --bg: #0c0e14; --card: #14171f; --border: #262b38;
   --text: #eef0f5; --text-mute: #98a0b3; --accent-on: #0c0e14;
   color-scheme: dark;
@@ -74,6 +85,9 @@
   --success: #1fa463; --success-tint: #e4f6ec;
   --warning: #d98e1e; --warning-tint: #fbf0dc;
   --danger:  #e14b4b; --danger-tint:  #fbe6e6;
+  --serie-1: #2a78d6; --serie-2: #eb6834; --serie-3: #1baf7a; --serie-4: #eda100;
+  --serie-5: #e87ba4; --serie-6: #008300; --serie-7: #6250d6; --serie-8: #e34948;
+  --seq-bas: #cde2fb; --seq-haut: #104281; --div-froid: #2a78d6; --div-neutre: #f0efec; --div-chaud: #e34948;
   --bg: #f6f7fb; --card: #ffffff; --border: #e2e5ee;
   --text: #12141c; --text-mute: #5b6172;
   --accent-on: #ffffff;

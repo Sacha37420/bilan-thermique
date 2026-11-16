@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log*
+sortie
+test-results
+playwright-report
+*.pdf
+*.png
+.git

@@ -21,7 +21,8 @@ export interface ViewerTexture {
 
 // EXCEPTION DOCUMENTÉE à « aucune couleur en dur » (Foyer, Lot 5 de la refonte) : three.js
 // (WebGL) ne lit pas les variables CSS. Les couleurs de la scène passent par un token
-// (`--accent`…) résolu ici à l'exécution ; le gris `#888888` n'est qu'un repli si le token manque.
+// (`--accent`…) résolu ici à l'exécution (grille comprise : `--text-mute`, `--border`) ; le gris
+// `#888888` n'est qu'un repli si le token manque.
 function resolveColor(varNameOrHex: string): THREE.Color {
   if (varNameOrHex.startsWith('--')) {
     const value = getComputedStyle(document.documentElement).getPropertyValue(varNameOrHex).trim();
@@ -53,6 +54,18 @@ const NEUTRAL = new THREE.Color(1, 1, 1);
  * rotation de caméra, pas un clic de sélection. */
 const CLICK_TOLERANCE_PX = 5;
 
+/** Décalage de la caméra par rapport au centre, en rayons de la sphère englobante (x est, y nord,
+ * z haut). 'iso' = la vue en biais d'origine (≈ 1,9 rayon). 'dessus' garde un soupçon de recul au
+ * sud : exactement à la verticale, l'orbite (axe z) n'a plus d'orientation et le nord flotte. */
+const CAMERA_DIRECTIONS: Record<string, [number, number, number]> = {
+  iso: [0.95, -1.3, 1.0],
+  sud: [0, -1.85, 0.45],
+  nord: [0, 1.85, 0.45],
+  est: [1.85, 0, 0.45],
+  ouest: [-1.85, 0, 0.45],
+  dessus: [0, -0.02, 1.9],
+};
+
 interface Part {
   mesh: THREE.Mesh;
   geometry: THREE.BufferGeometry;
@@ -81,6 +94,9 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
   @Input() textures: ViewerTexture[] = [];
   @Input() textureIndexFor: (index: number) => number = () => -1;
   @Input() tintForTexturedTriangle: (index: number) => string | null = () => null;
+  /** Point de vue du cadrage (repère : x est, y nord, z haut) : 'iso' | 'sud' | 'nord' | 'est' |
+   * 'ouest' | 'dessus' ('sud' = caméra au sud regardant le nord). null = vue en biais habituelle. */
+  @Input('camera') viewpoint: string | null = null;
 
   @Output() triangleClick = new EventEmitter<number>();
 
@@ -95,6 +111,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
   private resizeObserver?: ResizeObserver;
   private raycaster = new THREE.Raycaster();
   private frameHandle = 0;
+  private grid?: THREE.GridHelper;
 
   ngAfterViewInit(): void {
     this.initScene();
@@ -112,11 +129,17 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     if (!this.scene) return;
     if (changes['vertices'] || changes['triangles']) {
       this.buildGeometry(true);
-    } else if (changes['textures']) {
+      return;
+    }
+    if (changes['textures']) {
       // Texture arrivée après la géométrie (chargement asynchrone) : on
       // reconstruit sans toucher à la caméra.
       this.buildGeometry(false);
+    } else if (changes['colorForTriangle'] || changes['tintForTexturedTriangle']) {
+      // Nouvelle fonction de couleur seule (bascule de grandeur, de surface, de thème) : on repeint.
+      this.repaint();
     }
+    if (changes['viewpoint'] || changes['camera']) this.frameCamera();
   }
 
   ngOnDestroy(): void {
@@ -132,6 +155,7 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
 
   /** À appeler par le parent après un changement d'assignation/sélection (sans reconstruire la géométrie). */
   repaint(): void {
+    this.paintGrid();
     if (!this.parts.length) return;
     const color = colorResolver();
     for (const part of this.parts) {
@@ -177,7 +201,20 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     fill.position.set(-10, 15, -10);
     this.scene.add(fill);
 
-    this.scene.add(new THREE.GridHelper(20, 20, 0x888888, 0xcccccc).rotateX(Math.PI / 2));
+    this.paintGrid();
+  }
+
+  /** Grille au sol aux couleurs des jetons (refaite à chaque repeinte : suit le thème). */
+  private paintGrid(): void {
+    if (!this.scene) return;
+    if (this.grid) {
+      this.scene.remove(this.grid);
+      this.grid.geometry.dispose();
+      (this.grid.material as THREE.Material).dispose();
+    }
+    this.grid = new THREE.GridHelper(20, 20, resolveColor('--text-mute'), resolveColor('--border'));
+    this.grid.rotateX(Math.PI / 2);
+    this.scene.add(this.grid);
   }
 
   private disposeParts(): void {
@@ -270,7 +307,8 @@ export class MeshViewerComponent implements AfterViewInit, OnChanges, OnDestroy 
     // ≈ 1,9 rayon : la sphère englobante remplit la vue (champ de 50°). À 3,2 rayons
     // (valeur d'origine), un quartier entier (environnement observé) n'occupait
     // plus qu'un quart de la largeur.
-    this.camera.position.copy(center).add(new THREE.Vector3(radius * 0.95, -radius * 1.3, radius * 1.0));
+    const [dx, dy, dz] = CAMERA_DIRECTIONS[this.viewpoint ?? ''] ?? CAMERA_DIRECTIONS['iso'];
+    this.camera.position.copy(center).add(new THREE.Vector3(radius * dx, radius * dy, radius * dz));
     this.camera.near = radius / 100;
     this.camera.far = radius * 100;
     this.camera.updateProjectionMatrix();

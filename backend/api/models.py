@@ -408,6 +408,11 @@ class Scenario(models.Model):
     weather = models.JSONField(default=dict, blank=True)
     author_sub = models.CharField(max_length=64, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
+    # Chantier bt-potentiels (I0, I2) : amélioration issue d'un bouquet (= potentiel), recréée à chaque calcul
+    # de potentiel quand `genere` ; surcharges non scalaires (arbres plantés, végétalisation, rafraîchissement).
+    bouquet = models.ForeignKey('Bouquet', null=True, blank=True, on_delete=models.SET_NULL, related_name='scenarios')
+    surcharges = models.JSONField(default=dict, blank=True)
+    genere = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'scenarios'
@@ -667,3 +672,90 @@ class McpToken(models.Model):
 
     def __str__(self):
         return f'{self.prefix}…'
+
+
+# ── Chantier bt-potentiels (lots 35 à 40) — contrat chantiers/bt-potentiels, interface I0 ──
+
+class Bouquet(models.Model):
+    """Bouquet de solutions : liste ordonnée d'actions du catalogue (I7). `portfolio` nul = bouquet du lab
+    (par défaut, lisible par tous, non modifiable)."""
+
+    OBJECTIFS = [('energie', 'Économiser l’énergie'), ('confort', 'Minimiser les DH'), ('libre', 'Libre')]
+    portfolio = models.ForeignKey(Portfolio, null=True, blank=True, on_delete=models.CASCADE, related_name='bouquets')
+    nom = models.CharField(max_length=150)
+    description = models.TextField(blank=True, default='')
+    objectif = models.CharField(max_length=10, choices=OBJECTIFS, default='libre')
+    elements = models.JSONField(default=list, blank=True)
+    ordre = models.IntegerField(default=0)
+    par_defaut = models.BooleanField(default=False)
+    auteur_sub = models.CharField(max_length=64, blank=True, default='')
+    cree_le = models.DateTimeField(auto_now_add=True)
+    modifie_le = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'bouquets'
+        ordering = ['portfolio_id', 'ordre', 'pk']
+
+    def __str__(self) -> str:
+        return f"{self.nom} ({'lab' if self.portfolio_id is None else f'parc {self.portfolio_id}'})"
+
+
+class Potentiel(models.Model):
+    """Potentiel atteignable d'un bâtiment pour un bouquet (I5) : l'amélioration générée et son calcul."""
+
+    STATUTS = [('en_attente', 'en attente'), ('en_cours', 'en cours'), ('fait', 'fait'), ('erreur', 'erreur')]
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name='potentiels')
+    bouquet = models.ForeignKey(Bouquet, on_delete=models.CASCADE, related_name='potentiels')
+    scenario = models.ForeignKey(Scenario, null=True, blank=True, on_delete=models.SET_NULL, related_name='potentiels')
+    niveau = models.CharField(max_length=2, default='N1')
+    statut = models.CharField(max_length=12, choices=STATUTS, default='en_attente')
+    message = models.TextField(blank=True, default='')
+    actions = models.JSONField(default=list, blank=True)
+    run = models.ForeignKey(CalcRun, null=True, blank=True, on_delete=models.SET_NULL, related_name='potentiels')
+    empreinte = models.CharField(max_length=64, blank=True, default='')
+    calcule_le = models.DateTimeField(null=True, blank=True)
+    cree_le = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'potentiels'
+        constraints = [models.UniqueConstraint(fields=['building', 'bouquet', 'niveau'], name='potentiel_unique')]
+
+
+class RapportModele(models.Model):
+    """Gabarit de rendu (I6.a). `portfolio` nul = gabarit du lab."""
+
+    PORTEES = [('parc', 'parc'), ('batiment', 'bâtiment')]
+    portfolio = models.ForeignKey(Portfolio, null=True, blank=True, on_delete=models.CASCADE, related_name='rapports')
+    nom = models.CharField(max_length=150)
+    portee = models.CharField(max_length=10, choices=PORTEES)
+    spec = models.JSONField(default=dict, blank=True)
+    par_defaut = models.BooleanField(default=False)
+    auteur_sub = models.CharField(max_length=64, blank=True, default='')
+    cree_le = models.DateTimeField(auto_now_add=True)
+    modifie_le = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'rapport_modeles'
+        ordering = ['portfolio_id', 'portee', 'nom']
+
+
+class ExportRendu(models.Model):
+    """Fichier d'export transitoire (HTML, DOCX, PDF), réservé à son auteur, expiré après 24 h (I6.d)."""
+
+    FORMATS = [('html', 'HTML'), ('docx', 'Word'), ('pdf', 'PDF')]
+    owner_sub = models.CharField(max_length=64)
+    modele = models.ForeignKey(RapportModele, null=True, blank=True, on_delete=models.SET_NULL, related_name='exports')
+    spec = models.JSONField(default=dict, blank=True)
+    cible = models.JSONField(default=dict, blank=True)
+    format = models.CharField(max_length=4, choices=FORMATS)
+    statut = models.CharField(max_length=12, default='en_attente')
+    message = models.TextField(blank=True, default='')
+    job = models.ForeignKey(Job, null=True, blank=True, on_delete=models.SET_NULL, related_name='exports')
+    chemin = models.CharField(max_length=300, blank=True, default='')
+    taille = models.IntegerField(default=0)
+    cree_le = models.DateTimeField(auto_now_add=True)
+    expire_le = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'exports_rendu'
+

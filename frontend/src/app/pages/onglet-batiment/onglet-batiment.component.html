@@ -113,6 +113,19 @@
         </section>
       }
 
+      @case ('resultats-3d') {
+        <section class="rf-card" aria-labelledby="r3d-title">
+          <div class="rf-card-head"><h2 id="r3d-title">Résultats en 3D</h2></div>
+          <p class="rf-hint">Chaque triangle de l'enveloppe porte les résultats du dernier calcul détaillé par paroi (N2) :
+            pertes d'hiver, gains d'été, solaire absorbé et températures de surface intérieure. Touchez un triangle
+            pour lire toutes ses valeurs.</p>
+          @for (id of [bid]; track id) {
+            @defer (on viewport) { <app-vue3d-batiment [buildingId]="id" /> }
+            @placeholder { <p class="rf-hint">La vue 3D se charge quand elle apparaît à l'écran…</p> }
+          }
+        </section>
+      }
+
       @case ('physique') {
         <app-bt-donnees [buildingId]="bid" [blocs]="blocsPhysique" [refresh]="version()" (changed)="onChanged()" />
         <app-systemes [buildingId]="bid" [refresh]="version()" (changed)="onChanged()" />

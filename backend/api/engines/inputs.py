@@ -5,13 +5,15 @@ chaîne (facultative) → paramètres. `from_envelope(...)` : bâtiment maillé 
 modèles de paroi) → mêmes paramètres, pour comparer N1 et N2 sur un même bâtiment.
 
 Hypothèses communes avec le N2 (pour rester comparables, § 6.3) : pas d'échange infrarouge avec le
-ciel, ciel isotrope, albédo du sol 0,20, plancher bas couplé au sol simulé en 1D d'après la météo
+ciel, ciel isotrope, albédo du sol 0,20 (`abords.albedo` sinon, lot 36), plancher bas couplé au sol simulé en 1D d'après la météo
 (Lot 32, `engines.sol` ; température constante pour `from_envelope`, comparaison N1/N2 historique).
 Ponts thermiques : non comptés (hors périmètre, comme le N2 — `refonte.md` D9).
 """
 
 import math
 from dataclasses import dataclass, field
+
+from .vegetation import GREEN_ROOF_DEFAULT, GREEN_WALLS_DEFAULT
 
 ORIENTATIONS = ('N', 'E', 'S', 'O')
 CEILING_H = 2.5
@@ -52,6 +54,47 @@ class Params:
     # Protections solaires (Lot 14) : [{kind, orientation, mode, params, control}] — engines.shading.
     devices: list = field(default_factory=list)
     sources: dict = field(default_factory=dict)
+    # Lot 36 (chantier bt-potentiels, I2) : leviers des améliorations — tous neutres par défaut.
+    absorptance_roof: float | None = None   # None : celle des murs (`absorptance`)
+    albedo: float = 0.20                    # albédo des abords (sol vu par les façades)
+    night_vent: float = 0.0                 # surventilation nocturne ajoutée (vol/h), `engines.surcharges.night_mask`
+    night_vent_threshold: float = 22.0      # seuil de température extérieure (°C)
+    green_roof: dict | None = None          # {substrat_m, lai, part} — `engines.vegetation`
+    green_walls: dict | None = None         # {orientations, lai, part}
+    trees: list = field(default_factory=list)          # arbres plantés (repère local)
+    facade_points: dict | None = None       # points d'observation par orientation (arbres plantés)
+    north_deg: float = 0.0                  # azimut géographique = azimut local + north_deg
+    wall_height: float = 3.0                # hauteur à l'égout (m)
+
+    @property
+    def u_roof_eff(self):
+        if not self.green_roof:
+            return self.u_roof
+        from .vegetation import green_u, roof_resistance
+        return green_u(self.u_roof, roof_resistance(self.green_roof.get('substrat_m', 0.10)), self.green_roof.get('part', 1.0))
+
+    def u_wall_eff(self, o):
+        u = self.walls[o]['u']
+        g = self.green_walls
+        if not g or o not in (g.get('orientations') or []):
+            return u
+        from .vegetation import WALL_LAYER_R, green_u
+        return green_u(u, WALL_LAYER_R, g.get('part', 1.0))
+
+    @property
+    def alpha_roof(self):
+        a = self.absorptance if self.absorptance_roof is None else self.absorptance_roof
+        if self.green_roof:
+            from .vegetation import mixed_alpha
+            return mixed_alpha(a, self.green_roof.get('part', 1.0))
+        return a
+
+    def alpha_wall(self, o):
+        g = self.green_walls
+        if g and o in (g.get('orientations') or []):
+            from .vegetation import mixed_alpha
+            return mixed_alpha(self.absorptance, g.get('part', 1.0))
+        return self.absorptance
 
     @property
     def h_tr_w(self):
@@ -59,7 +102,7 @@ class Params:
 
     @property
     def h_tr_op_air(self):
-        return sum(w['opaque'] * w['u'] for w in self.walls.values()) + self.roof_area * self.u_roof
+        return sum(w['opaque'] * self.u_wall_eff(o) for o, w in self.walls.items()) + self.roof_area * self.u_roof_eff
 
     @property
     def h_floor(self):
@@ -136,6 +179,13 @@ def from_fiche(values, geometry=None):
         horizon_profile=(geometry or {}).get('horizon_profil') or None,
         ground_model=True, floor_type=floor_type, floor_perimeter=perim * (1.0 - mit),
         basement_depth=values.get('sous_sol.profondeur_m'),
+        absorptance_roof=float(values['toiture.absorptance']) if values.get('toiture.absorptance') is not None else None,
+        albedo=float(_v(values, 'abords.albedo', 0.20)),
+        night_vent=float(_v(values, 'ventilation.nocturne_vol_h', 0.0)),
+        night_vent_threshold=float(_v(values, 'ventilation.nocturne_seuil_c', 22.0)),
+        green_roof=dict(GREEN_ROOF_DEFAULT) if values.get('toiture.vegetalisee') is True else None,
+        green_walls=dict(GREEN_WALLS_DEFAULT) if values.get('murs.vegetalises') is True else None,
+        wall_height=height,
     )
 
 

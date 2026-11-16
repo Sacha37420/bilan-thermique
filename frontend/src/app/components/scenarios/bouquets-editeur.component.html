@@ -1,0 +1,150 @@
+<p class="rf-hint">Un bouquet regroupe des actions (isolation, ventilation, protections…). Appliqué à un bâtiment, il en
+  retient toutes les actions applicables et dit pourquoi les autres sont écartées.</p>
+@if (erreur()) { <p class="rf-error" role="alert">{{ erreur() }}</p> }
+@if (info()) { <p class="rf-ok" role="status">{{ info() }}</p> }
+
+<ng-template #lecture let-b>
+  <ol class="els">
+    @for (e of b.elements; track $index) {
+      <li>
+        @if (estUneParmi(e)) { <span class="rf-badge m-defaut">une parmi</span> }
+        @for (a of sousActions(e); track $index) {
+          <span class="act">{{ libelle(a.action) }}@if (parametres(a.action).length) {
+            <small>@for (p of parametres(a.action); track p.cle) { {{ p.libelle }} : {{ affiche(p, a.parametres[p.cle]) }}@if (!$last) { · } }</small> }</span>
+        }
+      </li>
+    } @empty { <li class="rf-hint">Aucune action.</li> }
+  </ol>
+</ng-template>
+
+@if (data(); as d) {
+  <ul class="bqs">
+    @for (b of duLab().concat(duParc()); track b.id) {
+      <li>
+        <div class="tete">
+          <strong>{{ b.nom }}</strong>
+          @if (b.portfolio === null) { <span class="rf-badge m-defaut">bouquet du lab</span> }
+          <span class="rf-badge m-declare">{{ objectif(b.objectif) }}</span>
+          <span class="btns">
+            @if (d.peut_ecrire && b.portfolio === null) {
+              <button type="button" class="rf-btn small" (click)="copier(b)" [disabled]="busy()">Copier dans le parc</button>
+            }
+            @if (d.peut_ecrire && b.portfolio !== null && b.modifiable) {
+              <button type="button" class="rf-btn small" (click)="modifier(b)">Modifier</button>
+              <button type="button" class="rf-btn small danger" (click)="supprimer(b)">Supprimer</button>
+            }
+          </span>
+        </div>
+        @if (b.description) { <p class="rf-hint">{{ b.description }}</p> }
+        <details><summary>Actions ({{ b.elements.length }})</summary>
+          <ng-container *ngTemplateOutlet="lecture; context: { $implicit: b }" />
+        </details>
+      </li>
+    } @empty { <li class="rf-hint">Aucun bouquet.</li> }
+  </ul>
+  @if (d.peut_ecrire && !edition()) {
+    <button type="button" class="rf-btn primary" (click)="nouveau()">Nouveau bouquet</button>
+  }
+} @else if (!erreur()) { <p class="rf-hint">Chargement…</p> }
+
+@if (edition(); as b) {
+  <div class="edit">
+    <h3>{{ b.id === null ? 'Nouveau bouquet' : 'Modifier « ' + b.nom + ' »' }}</h3>
+    <div class="rf-row">
+      <label class="rf-field grow"><span>Nom</span><input type="text" maxlength="140" [ngModel]="b.nom" (ngModelChange)="champ('nom', $event)"></label>
+      <label class="rf-field"><span>Objectif</span>
+        <select [ngModel]="b.objectif" (ngModelChange)="champ('objectif', $event)">
+          @for (o of OBJECTIFS; track o.cle) { <option [value]="o.cle">{{ o.libelle }}</option> }
+        </select></label>
+    </div>
+    <label class="rf-field"><span>Description</span><textarea rows="2" [ngModel]="b.description" (ngModelChange)="champ('description', $event)"></textarea></label>
+
+    <ng-template #params let-a="a" let-i="i" let-k="k">
+      <div class="params">
+        @for (p of parametres(a.action); track p.cle) {
+          <label class="rf-field" [title]="p.aide">
+            <span>{{ p.libelle }}@if (p.unite && p.type !== 'bool' && p.type !== 'enum') { ({{ p.unite }}) }</span>
+            @switch (p.type) {
+              @case ('bool') { <input type="checkbox" class="cb" [checked]="!!valeur(a, p)" (change)="poser(i, k, p, $any($event.target).checked)"> }
+              @case ('enum') {
+                <select (change)="poser(i, k, p, $any($event.target).value)">
+                  @for (c of choix(p); track c[0]) { <option [value]="c[0]" [selected]="valeur(a, p) === c[0]">{{ c[1] }}</option> }
+                </select>
+              }
+              @default {
+                <input type="number" [attr.min]="p.min" [attr.max]="p.max" [attr.step]="p.pas ?? (p.type === 'int' ? 1 : 'any')"
+                       [value]="valeur(a, p) ?? ''" (change)="poser(i, k, p, $any($event.target).value)">
+              }
+            }
+          </label>
+        }
+      </div>
+    </ng-template>
+
+    <h4>Éléments, dans l'ordre</h4>
+    <ol class="els">
+      @for (e of b.elements; track $index; let i = $index) {
+        <li [class.on]="cibleAjout() === i">
+          <div class="tete">
+            @if (estUneParmi(e)) { <strong>Une parmi</strong> <small>(la première applicable sera retenue)</small> }
+            @else { <strong>{{ libelle(e.action) }}</strong> }
+            <span class="btns">
+              @if (estUneParmi(e)) {
+                <button type="button" class="rf-btn small" [class.primary]="cibleAjout() === i"
+                        (click)="cibleAjout.set(cibleAjout() === i ? null : i)">{{ cibleAjout() === i ? 'Ajout ici ✓' : 'Ajouter ici' }}</button>
+              }
+              <button type="button" class="rf-btn small" (click)="deplacer(i, -1)" [disabled]="$first" aria-label="Monter">↑</button>
+              <button type="button" class="rf-btn small" (click)="deplacer(i, 1)" [disabled]="$last" aria-label="Descendre">↓</button>
+              <button type="button" class="rf-btn small danger" (click)="retirer(i)">Retirer</button>
+            </span>
+          </div>
+          @if (estUneParmi(e)) {
+            <ol class="sous">
+              @for (a of e.une_parmi; track $index; let k = $index) {
+                <li><div class="tete"><span>{{ libelle(a.action) }}</span>
+                  <button type="button" class="rf-btn small danger" (click)="retirerDuGroupe(i, k)">Retirer</button></div>
+                  <ng-container *ngTemplateOutlet="params; context: { a: a, i: i, k: k }" /></li>
+              } @empty { <li class="rf-hint">Vide : choisissez « Ajouter ici » puis des actions du catalogue.</li> }
+            </ol>
+          } @else {
+            <ng-container *ngTemplateOutlet="params; context: { a: e, i: i, k: 0 }" />
+          }
+        </li>
+      } @empty { <li class="rf-hint">Aucun élément : ajoutez des actions depuis le catalogue ci-dessous.</li> }
+    </ol>
+    @for (c of conflits(); track $index) { <p class="rf-error">{{ c }}. Le serveur refusera le bouquet.</p> }
+
+    <h4>Catalogue des actions</h4>
+    <div class="rf-row">
+      <button type="button" class="rf-btn small" (click)="ajouterGroupe()">Nouvel élément « une parmi »</button>
+      <p class="rf-hint grow">@if (cibleAjout() !== null) { Les actions s'ajoutent à l'élément {{ cibleAjout()! + 1 }} (« une parmi »). }
+        @else { Les actions s'ajoutent en fin de liste. }</p>
+    </div>
+    @for (f of familles(); track f.cle) {
+      <details class="fam"><summary>{{ f.libelle }} ({{ f.actions.length }})</summary>
+        @for (a of f.actions; track a.cle) {
+          <details class="act-cat" [class.off]="a.desactivee">
+            <summary>{{ a.libelle }}@if (a.desactivee) { <span class="rf-badge m-defaut">désactivée dans ce parc</span> }</summary>
+            <p>{{ a.description }}</p>
+            <dl>
+              @if (a.indicateurs_pertinents.length) { <dt>Indicateurs</dt><dd>{{ a.indicateurs_pertinents.join(', ') }}</dd> }
+              @if (a.effets) { <dt>Ce qui change</dt><dd>{{ a.effets }}</dd> }
+              @if (a.cibles.length) { <dt>Cibles</dt><dd>{{ a.cibles.join(', ') }}</dd> }
+              @for (n of ['N0', 'N1', 'N2']; track n) { @if ($any(a.application)[n]; as t) { <dt>{{ n }}</dt><dd>{{ t }}</dd> } }
+            </dl>
+            @if (a.conditions.length) {
+              <ul>@for (c of a.conditions; track c.code) { <li>@if (c.bloquante) { <span class="rf-badge m-infere">bloquante</span> } {{ c.libelle }}</li> }</ul>
+            }
+            @if (a.vigilance.length) { <ul>@for (v of a.vigilance; track $index) { <li>Vigilance : {{ v }}</li> }</ul> }
+            <button type="button" class="rf-btn small" (click)="ajouter(a)" [disabled]="a.desactivee">Ajouter au bouquet</button>
+          </details>
+        }
+      </details>
+    } @empty { @if (!catalogue()) { <p class="rf-hint">Chargement du catalogue…</p> } }
+
+    <div class="rf-row fin">
+      <button type="button" class="rf-btn" (click)="fermer()">Annuler</button>
+      <button type="button" class="rf-btn primary" (click)="enregistrer()" [disabled]="busy()">Enregistrer le bouquet</button>
+    </div>
+  </div>
+}
