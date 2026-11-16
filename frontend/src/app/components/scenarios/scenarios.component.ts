@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
 import { RefonteApiService } from '../../core/refonte-api.service';
 import { ContexteService, HORS_PARC } from '../../core/contexte.service';
+import { ResultatNiveauxComponent } from '../resultat-carte/resultat-niveaux.component';
 
 interface Bundle { key: string; label: string; vigilance: string[]; }
 interface Sc { id: number; name: string; bundles: string[]; differences: { label: string; value: unknown; unit: string }[];
@@ -26,7 +27,7 @@ const CMP: { k: string; label: string; unit: string; help: string }[] = [
 @Component({
   selector: 'app-scenarios',
   standalone: true,
-  imports: [FormsModule, DecimalPipe],
+  imports: [FormsModule, DecimalPipe, ResultatNiveauxComponent],
   templateUrl: './scenarios.component.html',
   styleUrl: './scenarios.component.scss',
 })

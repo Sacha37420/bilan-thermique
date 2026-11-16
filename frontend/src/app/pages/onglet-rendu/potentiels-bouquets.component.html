@@ -1,5 +1,5 @@
 @let pb = potentiels();
-<p class="reel">État réel — calcul {{ pb.reel.niveau }}@if (pb.reel.calcule_le) {&#32;du {{ date(pb.reel.calcule_le) }}}
+<p class="reel">État réel — calcul {{ (mots[pb.reel.niveau] || pb.reel.niveau).toLowerCase() }} ({{ pb.reel.niveau }})@if (pb.reel.calcule_le) {&#32;du {{ date(pb.reel.calcule_le) }}}
   @if (!pb.reel.indicateurs) { <span class="rf-badge m-defaut">pas encore calculé</span> }
   @else if (!pb.reel.a_jour) { <span class="rf-badge m-infere">calculé avant les dernières données</span> }</p>
 
@@ -8,7 +8,7 @@
     <article class="bq">
       <header>
         <h4>{{ p.bouquet.nom }}</h4>
-        <p class="meta">{{ OBJECTIFS[p.bouquet.objectif] || p.bouquet.objectif }} · {{ p.niveau }}@if (p.calcule_le) {&#32;· {{ date(p.calcule_le) }}}
+        <p class="meta">{{ OBJECTIFS[p.bouquet.objectif] || p.bouquet.objectif }} · {{ mots[p.niveau] }} ({{ p.niveau }})@if (p.calcule_le) {&#32;· {{ date(p.calcule_le) }}}
           <span class="rf-badge" [class.m-mesure]="p.statut === 'fait' && p.a_jour" [class.m-infere]="p.statut !== 'fait' || !p.a_jour">{{ statut(p) }}</span></p>
       </header>
       @if (p.statut === 'erreur' && p.message) { <p class="rf-hint">{{ p.message }}</p> }

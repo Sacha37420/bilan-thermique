@@ -1,4 +1,5 @@
 /** Types propres à l'onglet Parc (chantier bt-navigation). */
+import { ParcRow } from '../../core/refonte.types';
 
 export type VueParc = 'batiments' | 'potentiels' | 'ajouter' | 'import-partage' | 'orchestrateur';
 export const VUES_PARC: [VueParc, string][] = [
@@ -68,4 +69,15 @@ export interface BatimentPipeline {
   id: number; name: string; pipeline_status: string;
   pipeline: { steps?: Record<string, { ok: boolean; error?: string; skipped?: boolean; message?: string }>;
               sources?: string[]; date?: string } | null;
+}
+
+/** Tableau du parc sur trois niveaux (contrat bt-trois-niveaux v1, I4) : champs ajoutés à chaque ligne. */
+export interface NiveauLigne {
+  heating_kwh_m2: number | null; heating_kwh_m2_p10?: number | null; heating_kwh_m2_p90?: number | null;
+  primary_kwh_m2: number | null; dh_re2020: number | null; hours_over_28?: number | null;
+  a_jour: boolean | null; run_id: number | null;
+}
+export interface LigneParc extends ParcRow {
+  niveaux?: Partial<Record<'N0' | 'N1' | 'N2', NiveauLigne>>;
+  calculs?: { statut: 'inactif' | 'planifie' | 'en_cours' | 'erreur'; restants: number };
 }

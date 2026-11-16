@@ -45,7 +45,11 @@ class BatimentTest(TestCase):
         j = r.json()
         self.assertTrue(j['peut_calculer'] and j['peut_calculer_n2'])
         self.assertEqual(j['reel'], {'niveau': 'N1', 'a_jour': False, 'indicateurs': None, 'run_id': None, 'calcule_le': None})
-        self.assertEqual(len(j['bouquets']), 2)
+        # bt-trois-niveaux (I3) : une entrée par bouquet et par niveau, « jamais calculé » partout.
+        self.assertEqual(len(j['bouquets']), 6)
+        self.assertEqual([x['niveau'] for x in j['bouquets'][:3]], ['N0', 'N1', 'N2'])
+        self.assertEqual(set(j['reels']), {'N0', 'N1', 'N2'})
+        self.assertEqual(j['reels']['N1'], j['reel'])
         e = j['bouquets'][0]
         self.assertEqual((e['statut'], e['a_jour'], e['indicateurs'], e['ecarts'], e['actions']), (None, False, None, {}, []))
 
@@ -55,7 +59,7 @@ class BatimentTest(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         j = r.json()
         self.assertTrue(j['reel']['a_jour'])
-        entry = next(x for x in j['bouquets'] if x['bouquet']['id'] == e.pk)
+        entry = next(x for x in j['bouquets'] if x['bouquet']['id'] == e.pk and x['niveau'] == 'N1')
         self.assertEqual(entry['statut'], 'fait')
         self.assertTrue(entry['a_jour'])
         self.assertLess(entry['ecarts']['heating_kwh_m2'], 0)
@@ -76,7 +80,7 @@ class BatimentTest(TestCase):
         self.assertEqual(Potentiel.objects.count(), 1)
         # La base n'a pas bougé ; une modification de la fiche rend le potentiel « à recalculer ».
         facts.record(self.b, 'mur.u', 1.2, 'declare', author_sub='u')
-        entry = next(x for x in self.c.get(self.url).json()['bouquets'] if x['bouquet']['id'] == e.pk)
+        entry = next(x for x in self.c.get(self.url).json()['bouquets'] if x['bouquet']['id'] == e.pk and x['niveau'] == 'N1')
         self.assertFalse(entry['a_jour'])
         self.assertEqual(entry['statut'], 'fait')
 
@@ -89,7 +93,8 @@ class BatimentTest(TestCase):
         self.assertEqual(self.c.post(self.url, {'bouquets': [mine.pk]}, format='json').status_code, 200)
         mine.elements = [{'action': 'combles', 'parametres': {'epaisseur_cm': 40}}]
         mine.save()
-        entry = next(x for x in self.c.get(self.url).json()['bouquets'] if x['bouquet']['id'] == mine.pk)
+        entry = next(x for x in self.c.get(self.url).json()['bouquets'] if x['bouquet']['id'] == mine.pk
+                     and x['niveau'] == 'N1')
         self.assertFalse(entry['a_jour'])
 
     def test_limits_and_n2(self):
@@ -114,11 +119,11 @@ class BatimentTest(TestCase):
             r = self.c.post(self.url, {'bouquets': [c_.pk], 'niveau': 'N2'}, format='json')
         self.assertEqual(r.status_code, 202, r.content)
         self.assertIsNotNone(start.call_args.kwargs['scenario'])
-        n2 = [x for x in r.json()['bouquets'] if x['niveau'] == 'N2']
+        n2 = [x for x in r.json()['bouquets'] if x['niveau'] == 'N2' and x['statut'] is not None]
         self.assertEqual([(x['bouquet']['id'], x['statut']) for x in n2], [(c_.pk, 'en_cours')])
         fake.status, fake.indicators = 'DONE', {'heating_kwh_m2': 50.0}
         fake.save()
-        n2 = [x for x in self.c.get(self.url).json()['bouquets'] if x['niveau'] == 'N2']
+        n2 = [x for x in self.c.get(self.url).json()['bouquets'] if x['niveau'] == 'N2' and x['bouquet']['id'] == c_.pk]
         self.assertEqual(n2[0]['statut'], 'fait')
         self.assertEqual(n2[0]['indicateurs'], {'heating_kwh_m2': 50.0})
         from .. import calc_service
@@ -200,13 +205,19 @@ class ParcTest(TestCase):
             self.assertEqual(g.post(self.url, {}, format='json').status_code, 202)
         queued.assert_not_called()
 
-    def test_rights_and_n2_refused(self):
+    def test_rights_and_n2_accepted(self):
+        # bt-trois-niveaux : D37 levée — un gestionnaire du parc met aussi le N2 en file « parc ».
         self.assertEqual(client_for(sub='l').post(self.url, {}, format='json').status_code, 403)
+        self.assertEqual(client_for(sub='l').post(self.url, {'niveau': 'N2'}, format='json').status_code, 403)
         self.assertEqual(client_for(sub='x').get(self.url).status_code, 404)
-        r = client_for(sub='g').post(self.url, {'niveau': 'N2'}, format='json')
-        self.assertEqual(r.status_code, 400)
-        self.assertIn('bâtiment par bâtiment', r.json()['detail'])
         self.assertEqual(Potentiel.objects.count(), 0)
+        with mock.patch.object(taches.potentiels_parc_suivant, 'apply_async') as queued:
+            r = client_for(sub='g').post(self.url, {'niveau': 'N2'}, format='json')
+        self.assertEqual(r.status_code, 202, r.content)
+        queued.assert_called_once()
+        self.assertEqual(r.json()['niveau'], 'N2')
+        self.assertEqual(r.json()['file'], {'en_attente': 6, 'en_cours': 0})
+        self.assertEqual(client_for(sub='g').post(self.url, {'niveau': 'N3'}, format='json').status_code, 400)
 
     def test_error_does_not_stop_queue(self):
         with mock.patch.object(taches.potentiels_parc_suivant, 'apply_async'):

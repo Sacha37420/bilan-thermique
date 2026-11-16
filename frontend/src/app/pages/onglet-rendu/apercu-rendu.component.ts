@@ -42,6 +42,7 @@ export class ApercuRenduComponent {
   constructor() {
     effect(() => {
       const src = this.etat.source(), c = this.etat.cible();
+      this.etat.actualisation();
       untracked(() => void this.charger(src, c));
     });
     void this.chargerExports();

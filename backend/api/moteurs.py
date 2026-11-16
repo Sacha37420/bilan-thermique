@@ -40,7 +40,8 @@ _FICHE_IN = ['Fiche effective du bâtiment (valeur retenue par clé, avec sa pro
              'Météo horaire (année type du site ou jeu choisi)']
 _DECLARE = ('Toute personne qui peut modifier la fiche : gestionnaire de parc, gestionnaire ou occupant du bâtiment ; '
             'un lecteur ne lance rien.')
-_MANAGE = 'Gestionnaire de parc ou du bâtiment (D2/D37 : jamais en lot).'
+_MANAGE = ('Automatique après la chaîne et après chaque affinage (file « parc », un calcul lourd à la fois, D49) ; '
+           'à la main : gestionnaire de parc ou du bâtiment (D2).')
 
 _a, _b, _shade = simulation.N2_SECONDS
 
@@ -175,7 +176,8 @@ CATALOGUE = [
                     'Résultats par triangle (pertes d’hiver, gains d’été, solaire absorbé, températures de surface), '
                     'enregistrés avec le calcul'],
         'duree': 'Mesuré à ~28 s pour 338 triangles sur une année horaire complète ; en tâche de fond.',
-        'qui': _MANAGE.split(' (')[0] + '.',
+        'qui': ('Gestionnaire de parc ou du bâtiment, à la main depuis la page Calcul 3D ; le même solveur tourne '
+                'automatiquement comme N2 depuis la fiche (D49).'),
         'limites': [f'Au plus {building_solver.MAX_TOTAL_DOF} degrés de liberté et {building_solver.MAX_WEATHER_POINTS} heures.',
                     'Réglages saisis dans le formulaire : on ne sait pas dire si le résultat est à jour de la fiche.'],
         'version': None, 'expert_route': '/calcul-3d',

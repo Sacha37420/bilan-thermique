@@ -22,10 +22,11 @@ export class PotentielsBouquetsComponent {
   private api = inject(RenduApiService);
   private i3 = signal<IndicateurCanon[]>([]);
   readonly OBJECTIFS = OBJECTIFS;
+  readonly mots: Record<string, string> = { N0: 'Mensuel', N1: 'Horaire simplifié', N2: 'Détaillé par paroi' };
 
   constructor() { void this.api.indicateursMemo().then(l => this.i3.set(l)); }
 
-  /** Une entrée par bouquet et par niveau ; N2 après N1. */
+  /** Une entrée par bouquet et par niveau ; N0, N1 puis N2. */
   readonly entrees = computed(() => [...this.potentiels().bouquets].sort((a, b) =>
     (a.bouquet.id - b.bouquet.id) || a.niveau.localeCompare(b.niveau)));
 

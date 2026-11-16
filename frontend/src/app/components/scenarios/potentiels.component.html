@@ -1,97 +1,155 @@
 <section class="rf-card" aria-labelledby="pot-title">
-  <div class="rf-card-head"><h2 id="pot-title">Potentiels du bâtiment</h2></div>
-  <p class="rf-hint">Un potentiel est ce que le bâtiment atteindrait avec toutes les actions applicables d'un bouquet.
-    Calcul horaire simplifié (N1) ; ce n'est pas un DPE.</p>
+  <div class="rf-card-head"><h2 id="pot-title">Potentiels par bouquet</h2></div>
+  <p class="rf-hint">Un potentiel est ce que le bâtiment atteindrait avec toutes les actions applicables d'un bouquet,
+    estimé aux trois niveaux de calcul. Ils se refont d'eux-mêmes quand le bâtiment ou un bouquet change ; ce n'est pas un DPE.</p>
   @if (erreur()) { <p class="rf-error" role="alert">{{ erreur() }}</p> }
 
   @if (data(); as d) {
-    @if (!colonnes().length) {
+    @if (!bouquets().length) {
       <p class="rf-hint">Aucun bouquet d'améliorations pour ce bâtiment (onglet Paramétrage).</p>
     } @else {
-      @if (indicateurs().length) {
-        <div class="rf-table-wrap">
-          <table class="rf-table pot">
-            <thead><tr>
-              <th scope="col">Indicateur</th>
-              <th scope="col" class="num">État actuel</th>
-              @for (b of colonnes(); track cle(b)) {
-                <th scope="col" class="num">{{ b.bouquet.nom }}@if (b.niveau === 'N2') { <span class="rf-badge m-document">détaillé</span> }</th>
-              }
-            </tr></thead>
-            <tbody>
-              @for (i of indicateurs(); track i.k) {
-                <tr>
-                  <th scope="row">{{ i.libelle }} <small>{{ i.unite }}</small></th>
-                  @let r = val(d.reel.indicateurs, i.k);
-                  <td class="num">@if (r !== null) { {{ r | number: '1.0-0' }} } @else { — }</td>
-                  @for (b of colonnes(); track cle(b)) {
-                    @let v = val(b.indicateurs, i.k);
-                    @let e = b.ecarts[i.k];
-                    <td class="num" [class]="rang(b, i.k)">
-                      @if (v !== null) {
-                        {{ v | number: '1.0-0' }}
-                        @if (e !== undefined && e !== null) {
-                          <small>{{ e > 0 ? '+' : '' }}{{ e | number: '1.0-0' }}@if (pct(b, i.k); as p) { ({{ p > 0 ? '+' : '' }}{{ p }} %) }</small>
-                        }
-                      } @else { — }
-                    </td>
-                  }
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-        <p class="rf-hint">Écarts par rapport à l'état actuel ; <span class="best">meilleur</span> et <span class="worst">moins bon</span> des bouquets.</p>
-      }
-
-      <ul class="liste">
-        @for (b of colonnes(); track cle(b)) {
-          <li>
-            <div class="tete">
-              @if (d.peut_calculer && b.niveau === 'N1') {
-                <label class="check"><input type="checkbox" [checked]="coche(b.bouquet.id)"
-                       (change)="basculer(b.bouquet.id, $any($event.target).checked)"> <strong>{{ b.bouquet.nom }}</strong></label>
-              } @else { <strong>{{ b.bouquet.nom }}</strong> }
-              @if (b.niveau === 'N2') { <span class="rf-badge m-document">détaillé (N2)</span> }
-              <span class="rf-badge" [class.m-mesure]="b.statut === 'fait'" [class.m-infere]="b.statut === 'en_attente' || b.statut === 'en_cours'">{{ statut(b) }}</span>
-              @if (b.statut === 'fait') {
-                <span class="rf-badge" [class.m-declare]="b.a_jour" [class.m-infere]="!b.a_jour">{{ b.a_jour ? 'à jour' : 'à recalculer' }}</span>
-              }
-              @if (b.calcule_le) { <small>{{ b.calcule_le | date: 'd MMM y, HH:mm' }}</small> }
-              @if (d.peut_calculer_n2 && b.niveau === 'N1') {
-                <button type="button" class="rf-btn small" (click)="calculerN2(b.bouquet.id)" [disabled]="busy() || n2EnCours()">Calcul détaillé (N2)</button>
-              }
-            </div>
-            @if (b.statut === 'erreur' && b.message) { <p class="rf-error">{{ b.message }}</p> }
-            @if (b.actions.length) {
-              <details>
-                <summary>Actions appliquées / écartées ({{ b.actions.length }})</summary>
-                <ul class="actions">
-                  @for (a of b.actions; track $index) {
-                    <li>
-                      <span class="rf-badge" [class.m-mesure]="a.appliquee" [class.m-defaut]="!a.appliquee">{{ a.appliquee ? 'appliquée' : 'écartée' }}</span>
-                      {{ a.libelle }}@if (!a.appliquee && a.raison) { — {{ a.raison }} }
-                      @if (a.effets.length) { <ul>@for (x of a.effets; track $index) { <li>{{ x }}</li> }</ul> }
-                      @if (a.avertissements?.length) {
-                        <ul>@for (x of a.avertissements; track $index) { <li><span class="rf-badge m-infere">à vérifier</span> {{ x }}</li> }</ul>
-                      }
-                    </li>
-                  }
-                </ul>
-              </details>
-            }
-          </li>
-        }
-      </ul>
-
-      @if (d.peut_calculer) {
+      @if (indicateurs().length > 1) {
         <div class="rf-row">
-          <button type="button" class="rf-btn primary" (click)="calculerN1()" [disabled]="busy() || !coches().length || trop()">
-            {{ busy() ? 'Calcul…' : 'Calculer les potentiels (N1)' }}</button>
-          @if (trop()) { <p class="rf-error">Au plus {{ MAX }} bouquets par calcul : décochez-en.</p> }
-          @else if (!coches().length) { <p class="rf-hint">Cochez les bouquets à calculer (au plus {{ MAX }}).</p> }
+          <label class="rf-field"><span>Indicateur comparé</span>
+            <select [value]="indicateur()" (change)="indicateur.set($any($event.target).value)">
+              @for (i of indicateurs(); track i.k) { <option [value]="i.k" [selected]="i.k === indicateur()">{{ i.libelle }} ({{ i.unite }})</option> }
+            </select></label>
         </div>
+      }
+      @let ic = indicCourant();
+      <div class="rf-table-wrap">
+        <table class="rf-table pot grille">
+          <caption class="rf-hint">{{ ic.libelle }} ({{ ic.unite }}) — état actuel et bouquets, niveau par niveau</caption>
+          <thead><tr>
+            <th scope="col">Situation</th>
+            @for (n of niveaux; track n) { <th scope="col" class="num">{{ mots[n] }} <small>({{ n }})</small></th> }
+          </tr></thead>
+          <tbody>
+            @for (l of lignes(); track l.cle) {
+              <tr [class.reel]="l.etat === 'reel'">
+                <th scope="row">{{ l.nom }}</th>
+                @for (n of niveaux; track n) {
+                  @let v = val(indicateursDe(l, n), ic.k);
+                  @let st = statut(l, n);
+                  <td class="num" [class]="'num ' + rang(l, n, ic.k)">
+                    @if (v !== null) {
+                      <strong>{{ v | number: '1.0-0' }}</strong>
+                      @if (ecart(l, n, ic.k); as e) {
+                        <small>{{ e > 0 ? '+' : '' }}{{ e | number: '1.0-0' }}@if (pct(l, n, ic.k); as p) { ({{ p > 0 ? '+' : '' }}{{ p }} %) }</small>
+                      }
+                    } @else if (n === 'N0' && (ic.k === 'dh_re2020' || ic.k === 'heures_inconfort' || ic.k === 'hours_over_28')) {
+                      <small>pas calculé par le bilan mensuel</small>
+                    } @else { — }
+                    @if (st && st !== 'a_jour') { <span [class]="'rf-badge st ' + classes[st]" [title]="aides[st]">{{ statutMots[st] }}</span> }
+                  </td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="rf-hint">Sous chaque potentiel, l'écart à l'état actuel au même niveau ; <span class="best">meilleur</span> et
+        <span class="worst">moins bon</span> des bouquets. Une case sans pastille est à jour.</p>
+
+      @if (!compact()) {
+        <h3>Tous les indicateurs d'un niveau</h3>
+        <div class="rf-tabs" role="radiogroup" aria-label="Niveau de calcul du détail">
+          @for (n of niveaux; track n) {
+            <button type="button" role="radio" [class.active]="niveauDetail() === n" [attr.aria-checked]="niveauDetail() === n"
+                    (click)="niveauDetail.set(n)">{{ mots[n] }} ({{ n }})</button>
+          }
+        </div>
+        @if (colonnesDetail().length) {
+          <div class="rf-table-wrap">
+            <table class="rf-table pot">
+              <thead><tr>
+                <th scope="col">Indicateur</th>
+                <th scope="col" class="num">État actuel</th>
+                @for (b of colonnesDetail(); track cle(b)) { <th scope="col" class="num">{{ b.bouquet.nom }}</th> }
+              </tr></thead>
+              <tbody>
+                @for (i of indicateurs(); track i.k) {
+                  <tr>
+                    <th scope="row">{{ i.libelle }} <small>{{ i.unite }}</small></th>
+                    @let r = val(reel(niveauDetail()), i.k);
+                    <td class="num">@if (r !== null) { {{ r | number: '1.0-0' }} } @else { — }</td>
+                    @for (b of colonnesDetail(); track cle(b)) {
+                      @let v = val(b.indicateurs, i.k);
+                      @let e = b.ecarts[i.k];
+                      <td class="num">
+                        @if (v !== null) {
+                          {{ v | number: '1.0-0' }}
+                          @if (e !== undefined && e !== null) {
+                            <small>{{ e > 0 ? '+' : '' }}{{ e | number: '1.0-0' }}@if (pctDe(b, i.k); as p) { ({{ p > 0 ? '+' : '' }}{{ p }} %) }</small>
+                          }
+                        } @else { — }
+                      </td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="rf-hint">Aucun potentiel {{ mots[niveauDetail()].toLowerCase() }} ({{ niveauDetail() }}) pour l'instant.</p>
+        }
+
+        <h3>Bouquets</h3>
+        <ul class="liste">
+          @for (l of bouquets(); track l.cle) {
+            @let id = $any(l.etat);
+            <li>
+              <div class="tete">
+                @if (d.peut_calculer) {
+                  <label class="check"><input type="checkbox" [checked]="coche(id)"
+                         (change)="basculer(id, $any($event.target).checked)"> <strong>{{ l.nom }}</strong></label>
+                } @else { <strong>{{ l.nom }}</strong> }
+                @for (n of niveaux; track n) {
+                  @let st = statut(l, n);
+                  @if (st) { <span [class]="'rf-badge st ' + classes[st]" [title]="aides[st]">{{ n }} : {{ statutMots[st] }}</span> }
+                }
+                @if (entree(id, 'N1')?.calcule_le; as c) { <small>horaire simplifié calculé le {{ c | date: 'd MMM y, HH:mm' }}</small> }
+                @if (d.peut_calculer_n2) {
+                  <button type="button" class="rf-btn small" (click)="calculerN2(id)" [disabled]="busy() || n2EnCours()"
+                          title="Lance tout de suite le calcul détaillé par paroi de ce bouquet (un calcul lourd à la fois)">Calcul détaillé maintenant (N2)</button>
+                }
+              </div>
+              @if (messageDe(id); as m) { <p class="rf-error">{{ m }}</p> }
+              @if (actionsDe(id); as acts) {
+                @if (acts.length) {
+                  <details>
+                    <summary>Actions appliquées / écartées ({{ acts.length }})</summary>
+                    <ul class="actions">
+                      @for (a of acts; track $index) {
+                        <li>
+                          <span class="rf-badge" [class.m-mesure]="a.appliquee" [class.m-defaut]="!a.appliquee">{{ a.appliquee ? 'appliquée' : 'écartée' }}</span>
+                          {{ a.libelle }}@if (!a.appliquee && a.raison) { — {{ a.raison }} }
+                          @if (a.effets.length) { <ul>@for (x of a.effets; track $index) { <li>{{ x }}</li> }</ul> }
+                          @if (a.avertissements?.length) {
+                            <ul>@for (x of a.avertissements; track $index) { <li><span class="rf-badge m-infere">à vérifier</span> {{ x }}</li> }</ul>
+                          }
+                        </li>
+                      }
+                    </ul>
+                  </details>
+                }
+              }
+            </li>
+          }
+        </ul>
+
+        @if (d.peut_calculer) {
+          <div class="rf-row">
+            <button type="button" class="rf-btn primary" (click)="calculer('N1')" [disabled]="busy() || !coches().length || trop()">
+              {{ busy() ? 'Calcul…' : 'Calculer maintenant (horaire simplifié, N1)' }}</button>
+            <button type="button" class="rf-btn" (click)="calculer('N0')" [disabled]="busy() || !coches().length || trop()">
+              Calculer maintenant (mensuel, N0)</button>
+            @if (trop()) { <p class="rf-error">Au plus {{ MAX }} bouquets par calcul : décochez-en.</p> }
+            @else if (!coches().length) { <p class="rf-hint">Cochez les bouquets à calculer tout de suite (au plus {{ MAX }}).</p> }
+          </div>
+          <p class="rf-hint">Inutile d'attendre : les potentiels se refont aussi d'eux-mêmes, en file d'attente, après chaque modification.</p>
+        }
       }
     }
-  } @else if (!erreur()) { <p class="rf-hint">Chargement…</p> }
+  } @else if (!erreur()) { <p class="rf-hint" role="status">Chargement…</p> }
 </section>

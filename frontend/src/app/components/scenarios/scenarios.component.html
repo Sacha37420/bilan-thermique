@@ -44,6 +44,7 @@
         <ul class="diffs">@for (d of c.differences; track $index) { <li>{{ d.label }} : <strong>{{ d.value }}</strong> {{ d.unit }}</li> }</ul>
       </details>
     }
+    <app-resultat-niveaux [buildingId]="buildingId" [scenarioId]="c.id" [titre]="'« ' + c.name + ' » aux trois niveaux'" />
     @if (rows()) {
       @for (w of weathers(); track w) {
         @let p = pair(w);

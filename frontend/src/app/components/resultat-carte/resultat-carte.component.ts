@@ -3,6 +3,8 @@ import { RouterLink } from '@angular/router';
 import { ContexteService } from '../../core/contexte.service';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RefonteApiService } from '../../core/refonte-api.service';
+import { EtatCalculsService } from './etat-calculs.service';
+import { NIVEAU_MOTS, STATUT_CALCUL_AIDE, STATUT_CALCUL_CLASSE, STATUT_CALCUL_MOTS, StatutCalcul, statutDe } from './etat-calculs.types';
 
 export interface RunCompact {
   id: number; level: 'N0' | 'N1' | 'N2'; status: string; created_at: string; up_to_date?: boolean | null;
@@ -24,10 +26,8 @@ const BALANCE: Record<string, string> = {
   solar_windows_kwh: 'Apports solaires (baies)', solar_opaque_kwh: 'Apports solaires (parois)', internal_kwh: 'Apports internes',
 };
 
-/** Libellés en mots des niveaux de calcul (contrat bt-navigation §2.1). */
-export const NIVEAU_MOTS: Record<'N0' | 'N1' | 'N2', string> = {
-  N0: 'Mensuel', N1: 'Horaire simplifié', N2: 'Détaillé par paroi',
-};
+/** Libellés en mots des niveaux de calcul (contrat bt-navigation §2.1), définis avec l'état des calculs. */
+export { NIVEAU_MOTS };
 
 /**
  * Résultat d'un bâtiment, en lecture seule (chantier bt-navigation) : on ne lance plus rien d'ici,
@@ -40,7 +40,7 @@ export const NIVEAU_MOTS: Record<'N0' | 'N1' | 'N2', string> = {
   standalone: true,
   imports: [DecimalPipe, DatePipe, RouterLink],
   templateUrl: './resultat-carte.component.html',
-  styleUrl: './resultat-carte.component.scss',
+  styleUrls: ['./resultat-carte.component.scss', './etat-badges.scss'],
 })
 export class ResultatCarteComponent implements OnChanges, OnDestroy {
   @Input({ required: true }) buildingId!: number;
@@ -50,7 +50,11 @@ export class ResultatCarteComponent implements OnChanges, OnDestroy {
   @Input() niveau: 'N0' | 'N1' | 'N2' | null = null;
   protected ctx = inject(ContexteService);
   private rf = inject(RefonteApiService);
+  private etats = inject(EtatCalculsService);
   readonly mots = NIVEAU_MOTS;
+  readonly statutMots = STATUT_CALCUL_MOTS;
+  readonly aides = STATUT_CALCUL_AIDE;
+  readonly classes = STATUT_CALCUL_CLASSE;
   readonly niveaux = ['N0', 'N1', 'N2'] as const;
   latest = signal<Latest | null>(null);
   months = MONTHS;
@@ -105,6 +109,12 @@ export class ResultatCarteComponent implements OnChanges, OnDestroy {
 
   private stopPoll(): void {
     if (this.poll) { clearTimeout(this.poll); this.poll = null; }
+  }
+
+  /** État du calcul de ce niveau d'après le suivi automatique (I2), pour l'état actuel seulement ; null sinon. */
+  suivi(n: 'N0' | 'N1' | 'N2' | null): StatutCalcul | null {
+    if (!n || this.scenarioId !== null) return null;
+    return statutDe(this.etats.batiments()[this.buildingId]?.etat ?? null, 'reel', n)?.statut ?? null;
   }
 
   num(r: RunCompact | null | undefined, k: string): number | null {

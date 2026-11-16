@@ -451,6 +451,9 @@ def init_building(self, job_id, building_id):
         job.set_state(status=Job.RUNNING, progress=1, message="Initialisation…")
         report = pipeline.initialize(building, progress=lambda m, p: job.set_state(progress=p, message=m))
         after_init(building, job)
+        # Chantier bt-trois-niveaux : N2 et potentiels lancés aussitôt la chaîne finie (sans attendre le regroupement).
+        from .recalcul import planifier
+        planifier(building, 'chaine', immediat=True)
         job.result = {'building_id': building.pk, 'pipeline_status': building.pipeline_status,
                       'steps': report['steps']}
         job.save(update_fields=['result'])
@@ -635,4 +638,4 @@ def extract_document(self, job_id, run_id):
 # Chantier bt-potentiels : tâches des secteurs « actions et bouquets » et « rendu », enregistrées avec celles-ci.
 from .ameliorations.taches import *  # noqa: E402,F401,F403
 from .rendu.taches import *  # noqa: E402,F401,F403
-
+from .recalcul.taches import *  # noqa: E402,F401,F403

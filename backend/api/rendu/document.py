@@ -10,7 +10,7 @@ import logging
 from .. import calc_service
 from ..models import CalcRun, Job
 from . import figures, spec as spec_mod, tableaux, texte
-from .donnees import filtrer
+from .donnees import AUTO, filtrer
 
 log = logging.getLogger(__name__)
 
@@ -74,9 +74,9 @@ def indicateurs(ctx, b):
     series = ctx.series(b['series'])
     if not series:
         return {'type': 'indicateurs', 'indisponible': 'Aucun des bouquets demandés n’est visible ici.'}
-    rows = ctx.lignes('batiment', b['series'], ['N1'], any(mes[k]['source'] == 'fait' for k in b['cles']))
+    rows = ctx.lignes('batiment', b['series'], [AUTO], any(mes[k]['source'] == 'fait' for k in b['cles']))
     if not rows:
-        return {'type': 'indicateurs', 'indisponible': 'Aucun calcul N1 terminé pour ces séries.'}
+        return {'type': 'indicateurs', 'indisponible': 'Aucun calcul terminé pour ces séries.'}
     parc = ctx.portee == 'parc'
     lignes = []
     for k in b['cles']:
@@ -88,8 +88,12 @@ def indicateurs(ctx, b):
         libelle = d['libelle'] + (' (somme)' if agg == 'somme' and parc else ' (moyenne)' if parc else '')
         lignes.append({'cle': k, 'libelle': libelle, 'unite': d['unite'],
                        'valeurs': [None if v is None else round(v, 3) for v in vals], 'ecarts': ecarts})
-    return {'type': 'indicateurs',
-            'colonnes': [{'serie': s, 'libelle': ctx.libelle_serie(s)} for s in series], 'lignes': lignes}
+    colonnes = []
+    for s in series:
+        nivs = [n for n in ('N2', 'N1', 'N0') if any(r['_serie'] == s and r['_niveau'] == n for r in rows)]
+        niv = ', '.join(nivs) or None
+        colonnes.append({'serie': s, 'libelle': ctx.libelle_serie(s) + (f' ({niv})' if niv else ''), 'niveau': niv})
+    return {'type': 'indicateurs', 'colonnes': colonnes, 'lignes': lignes}
 
 
 def vue3d(ctx, b):

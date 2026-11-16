@@ -87,7 +87,11 @@
             } @else { <p class="rf-hint" role="status">Chargement…</p> }
           </details>
         </section>
-        <app-resultat-carte [buildingId]="bid" [refresh]="version()" />
+        <app-etat-calculs [buildingId]="bid" [refresh]="version()" (avance)="onAvance()" />
+        <app-resultat-niveaux [buildingId]="bid" [refresh]="resultats()" />
+        <app-potentiels [buildingId]="bid" [refresh]="resultats()" [compact]="true" />
+        <p class="rf-hint">Détail des potentiels, actions de chaque bouquet et calculs à la demande :
+          <a routerLink="/calculs" [queryParams]="ctx.queryParams({ vue: 'ameliorations' })">Calculs › Améliorations</a>.</p>
         <app-questionnaire [buildingId]="bid" [refresh]="version()" (changed)="onChanged()" />
         <p class="rf-hint">Pour corriger n'importe quelle valeur une à une :
           <a routerLink="/batiment" [queryParams]="ctx.queryParams({ vue: 'donnees' })">Données et provenance</a>.</p>

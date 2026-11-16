@@ -277,11 +277,9 @@ def run_n1_with_range(building, scenario, eff, weather, nominal_params):
 
 # ── N2 depuis la fiche (Lot 23) ─────────────────────────────────────────────
 
-def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=False):
-    """Lance le N2 en tâche de fond (verrou du lab : un calcul lourd à la fois).
-
-    Rend `(run, False)` si un N2 terminé a exactement les mêmes entrées (rien n'est relancé), sinon
-    `(run, True)` avec un calcul en attente. Lève `Busy` si un calcul lourd tourne déjà."""
+def _prepare_n2(building, scenario, weather_spec, owner_sub, force):
+    """Entrées d'un N2 depuis la fiche : `{'done': run}` si un N2 terminé a exactement les mêmes entrées, sinon de
+    quoi créer le `CalcRun` (`on_created`). Lève `CalcError` (géométrie) avant toute prise de verrou."""
     if not weather_spec and scenario is not None and (scenario.weather or {}).get('dataset_id'):
         weather_spec = {'dataset_id': scenario.weather['dataset_id']}
     _weather, wdesc = resolve_weather(building, weather_spec)
@@ -294,7 +292,7 @@ def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=
         done = CalcRun.objects.filter(building=building, level='N2', scenario=scenario, status=Job.DONE,
                                       inputs_hash=inputs_hash).first()
         if done is not None:
-            return done, False
+            return {'done': done}
     try:
         built = n2_inputs.build(building, scenario, vals)   # erreurs de géométrie avant de prendre le verrou
     except n2_inputs.N2InputError as exc:
@@ -311,7 +309,7 @@ def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=
         # recalcule alors l'empreinte des entrées.
         settings['environnement'] = {'generer': True}
         inputs['obstacles'] = 'environnement observé, généré avant le calcul (réglage du parc)'
-    holder = {}
+    holder = {'done': None}
 
     def created(job):
         try:
@@ -321,14 +319,66 @@ def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=
                     owner_sub=owner_sub or '', inputs_hash=inputs_hash, weather=wdesc, settings=settings, inputs=inputs)
         except IntegrityError as exc:
             raise Busy('Un N2 est déjà en cours pour ce bâtiment.') from exc
+    holder['created'] = created
+    return holder
 
+
+BUSY_LAB = 'Un calcul lourd est déjà en cours sur le lab — réessayez dans quelques minutes.'
+
+
+def start_n2(building, *, scenario=None, weather_spec=None, owner_sub='', force=False):
+    """Lance le N2 en tâche de fond (verrou du lab : un calcul lourd à la fois).
+
+    Rend `(run, False)` si un N2 terminé a exactement les mêmes entrées (rien n'est relancé), sinon
+    `(run, True)` avec un calcul en attente. Lève `Busy` si un calcul lourd tourne déjà."""
+    prep = _prepare_n2(building, scenario, weather_spec, owner_sub, force)
+    if prep['done'] is not None:
+        return prep['done'], False
     from . import joblock, tasks
     job = joblock.launch_exclusive(
         'n2_fiche', {'building_id': building.pk, 'scenario_id': scenario.pk if scenario else None},
-        lambda j: tasks.run_n2_fiche.delay(j.id), owner_sub=owner_sub, on_created=created)
+        lambda j: tasks.run_n2_fiche.delay(j.id), owner_sub=owner_sub, on_created=prep['created'])
     if job is None:
-        raise Busy('Un calcul lourd est déjà en cours sur le lab — réessayez dans quelques minutes.')
-    return holder['run'], True
+        raise Busy(BUSY_LAB)
+    return prep['run'], True
+
+
+def run_n2_now(building, *, scenario=None, weather_spec=None, owner_sub='', force=False):
+    """N2 depuis la fiche **dans le processus appelant** (tâche de fond : recalcul automatique, chantier
+    bt-trois-niveaux), sous le verrou des calculs lourds : même `Job` `n2_fiche` et même `CalcRun` que `start_n2`
+    suivi de `tasks.run_n2_fiche`, sans seconde tâche Celery. Rend `(run, False)` si un N2 terminé a les mêmes
+    entrées, `(run, True)` une fois calculé. Lève `Busy` (un lourd tourne, rien n'est écrit) ou `CalcError`."""
+    prep = _prepare_n2(building, scenario, weather_spec, owner_sub, force)
+    if prep['done'] is not None:
+        return prep['done'], False
+    from . import joblock, net
+    job = joblock.launch_exclusive(
+        'n2_fiche', {'building_id': building.pk, 'scenario_id': scenario.pk if scenario else None, 'synchrone': True},
+        lambda j: None, owner_sub=owner_sub, on_created=prep['created'])
+    if job is None:
+        raise Busy(BUSY_LAB)
+    run = prep['run']
+    last = [0.0]
+
+    def say(pct, msg):
+        now = time.monotonic()
+        if pct >= 99 or now - last[0] > 2.0:
+            last[0] = now
+            job.set_state(progress=min(pct, 99), message=msg)
+    try:
+        calc_runs.mark_running(job.pk)
+        job.set_state(status=Job.RUNNING, progress=1, message='Préparation des entrées depuis la fiche…')
+        run.refresh_from_db()
+        run = run_n2(run, say)
+    except Exception as exc:  # noqa: BLE001 — le verrou est rendu (job terminé en erreur), message fixe
+        msg = net.public_message(exc)
+        job.set_state(status=Job.ERROR, message=msg)
+        calc_runs.fail(job.pk, msg)
+        raise CalcError(msg) from exc
+    job.result = {'calc_run_id': run.pk, 'heating_kwh': (run.results or {}).get('heating_kwh')}
+    job.save(update_fields=['result'])
+    job.set_state(status=Job.DONE, progress=100, message='N2 terminé.')
+    return run, True
 
 
 def shading_service_devices(building, scenario):

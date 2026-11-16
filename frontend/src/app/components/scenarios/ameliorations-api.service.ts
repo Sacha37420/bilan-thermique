@@ -27,7 +27,7 @@ export class AmeliorationsApiService {
   potentielsBatiment(id: number): Observable<PotentielsBatiment> {
     return this.rf.get<PotentielsBatiment>(`/batiments/${id}/potentiels/`);
   }
-  calculerBatiment(id: number, bouquets: number[], niveau: 'N1' | 'N2'): Observable<PotentielsBatiment> {
+  calculerBatiment(id: number, bouquets: number[], niveau: 'N0' | 'N1' | 'N2'): Observable<PotentielsBatiment> {
     return this.rf.post<PotentielsBatiment>(`/batiments/${id}/potentiels/`, { bouquets, niveau });
   }
   potentielsParc(id: number): Observable<PotentielsParc> { return this.rf.get<PotentielsParc>(`/parcs/${id}/potentiels/`); }

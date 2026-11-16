@@ -9,6 +9,8 @@ import { ResultatCarteComponent } from '../../components/resultat-carte/resultat
 import { ScenariosComponent } from '../../components/scenarios/scenarios.component';
 import { PotentielsComponent } from '../../components/scenarios/potentiels.component';
 import { CalculsComponent } from '../../components/calculs/calculs.component';
+import { EtatCalculsComponent } from '../../components/resultat-carte/etat-calculs.component';
+import { EtatCalculsService } from '../../components/resultat-carte/etat-calculs.service';
 import { MOTEURS_REPLI, Moteur, QUAND, TypeSimulation, VUES_CALCULS, VueCalculs } from './moteurs';
 
 const TYPES: TypeSimulation[] = ['N0', 'N1', 'N2', '1D', '3D'];
@@ -21,13 +23,14 @@ const TYPES: TypeSimulation[] = ['N0', 'N1', 'N2', '1D', '3D'];
 @Component({
   selector: 'app-onglet-calculs',
   standalone: true,
-  imports: [RouterLink, ContexteBarComponent, SimulationComponent, ResultatCarteComponent, ScenariosComponent, PotentielsComponent, CalculsComponent],
+  imports: [RouterLink, ContexteBarComponent, SimulationComponent, ResultatCarteComponent, ScenariosComponent, PotentielsComponent, CalculsComponent, EtatCalculsComponent],
   templateUrl: './onglet-calculs.component.html',
   styleUrl: './onglet-calculs.component.scss',
 })
 export class OngletCalculsComponent {
   protected ctx = inject(ContexteService);
   private rf = inject(RefonteApiService);
+  private etats = inject(EtatCalculsService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
 
@@ -84,6 +87,14 @@ export class OngletCalculsComponent {
 
   onLance(runId: number): void {
     this.dernierCalcul.set(runId);
+    this.version.update(v => v + 1);
+    void this.ctx.rafraichirBatiments();
+    const b = this.ctx.batimentId();
+    if (b !== null) this.etats.relireBatiment(b);
+  }
+
+  /** Un calcul automatique s'est terminé (I2) : résultat, potentiels et historique se relisent. */
+  onAvance(): void {
     this.version.update(v => v + 1);
     void this.ctx.rafraichirBatiments();
   }

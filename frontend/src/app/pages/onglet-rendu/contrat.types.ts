@@ -19,7 +19,7 @@ export interface ReelPotentiel {
 }
 export interface PotentielBatiment {
   bouquet: { id: number; nom: string; objectif: string };
-  niveau: 'N1' | 'N2'; statut: StatutPotentiel; a_jour: boolean; calcule_le: string | null; scenario_id: number | null;
+  niveau: 'N0' | 'N1' | 'N2'; statut: StatutPotentiel; a_jour: boolean; calcule_le: string | null; scenario_id: number | null;
   indicateurs: Indicateurs3 | null; ecarts: Record<string, number>; ecarts_pct?: Record<string, number>;
   actions: ActionRendue[]; message?: string; run_id?: number | null;
 }
@@ -33,6 +33,8 @@ export interface PotentielParcCellule {
   ecarts: Record<string, number>; ecarts_pct?: Record<string, number>; actions_appliquees: number; actions_ecartees: number;
 }
 export interface PotentielsParc {
+  /** bt-trois-niveaux I3 : niveau des potentiels et agrégats rendus (absent sur un serveur antérieur : N1). */
+  niveau?: 'N0' | 'N1' | 'N2';
   peut_calculer: boolean; file: { en_attente: number; en_cours: number };
   bouquets: { id: number; nom: string; objectif: string }[];
   batiments: { id: number; nom: string; reel: ReelPotentiel; potentiels: Record<string, PotentielParcCellule> }[];
@@ -62,7 +64,7 @@ export const FORMES: { cle: FormeGraphe; libelle: string }[] = [
 
 export interface Graphe {
   forme: FormeGraphe; x: string | null; y: string[]; couleur: string | null; taille: string | null; facettes: string | null;
-  series: Series; filtre: { usage?: string[]; periode?: [number | null, number | null]; [k: string]: unknown };
+  series: Series; filtre: { usage?: string[]; periode?: [number | null, number | null]; niveau?: ('N0' | 'N1' | 'N2')[]; [k: string]: unknown };
   agregation: 'somme' | 'moyenne' | 'mediane' | 'aucune'; titre: string; axe_y_log: boolean;
 }
 

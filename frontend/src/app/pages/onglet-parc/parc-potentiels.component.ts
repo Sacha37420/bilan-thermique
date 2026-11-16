@@ -1,6 +1,9 @@
 import { Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { EtatCalculsService } from '../../components/resultat-carte/etat-calculs.service';
+import { NIVEAUX, NIVEAU_MOTS, Niveau } from '../../components/resultat-carte/etat-calculs.types';
 import { ContexteService, HORS_PARC } from '../../core/contexte.service';
 import { GrapheComponent } from '../../components/graphe/graphe.component';
 import { FigureRendu } from '../../components/graphe/graphe.types';
@@ -49,8 +52,20 @@ const ECART_PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFrac
       <section class="rf-card" aria-labelledby="pp-h">
         <div class="rf-card-head"><h2 id="pp-h">Potentiels par bouquet</h2></div>
         <p>Un bouquet est un ensemble d’améliorations appliquées à chaque bâtiment là où elles sont possibles. Chaque bouquet
-          donne un potentiel atteignable, estimé par le calcul horaire simplifié (N1). C’est une aide à la décision : elle ne
-          remplace pas un DPE.</p>
+          donne un potentiel atteignable, estimé aux trois niveaux de calcul ; les potentiels se refont d’eux-mêmes quand un
+          bâtiment ou un bouquet change. C’est une aide à la décision : elle ne remplace pas un DPE.</p>
+        <div class="rf-tabs" role="radiogroup" aria-label="Niveau de calcul des potentiels">
+          @for (n of niveaux; track n) {
+            <button type="button" role="radio" [class.active]="niveau() === n" [attr.aria-checked]="niveau() === n"
+                    (click)="choisirNiveau(n)">{{ mots[n] }} ({{ n }})</button>
+          }
+        </div>
+        @if (niveauServeur(); as ns) {
+          @if (ns !== niveau()) {
+            <p class="rf-hint" role="status">Ce serveur ne sert encore que les potentiels {{ mots[ns].toLowerCase() }} ({{ ns }}) : ce sont eux qui sont montrés.</p>
+          }
+        }
+        @if (progression()) { <p class="rf-hint" role="status" aria-live="polite">{{ progression() }}</p> }
         @if (erreurP(); as e) {
           <p [class]="e.discret ? 'rf-hint' : 'rf-error'" [attr.role]="e.discret ? 'status' : 'alert'">{{ e.texte }}</p>
         } @else if (!donnees()) {
@@ -59,9 +74,10 @@ const ECART_PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFrac
         @if (donnees(); as d) {
           <div class="rf-row">
             @if (d.peut_calculer) {
-              <button type="button" class="rf-btn primary" (click)="calculer()" [disabled]="envoi() || fileActive()">Calculer les potentiels du parc</button>
+              <button type="button" class="rf-btn primary" (click)="calculer()" [disabled]="envoi() || fileActive()"
+                      title="Met tout de suite en file les potentiels du niveau choisi pour tous les bâtiments du parc">Calculer maintenant ({{ mots[niveau()].toLowerCase() }}, {{ niveau() }})</button>
             } @else {
-              <p class="rf-hint">Seul un gestionnaire du parc lance ce calcul.</p>
+              <p class="rf-hint">Les potentiels se calculent d’eux-mêmes ; seul un gestionnaire du parc peut en lancer un tout de suite.</p>
             }
           </div>
           @if (fileActive()) {
@@ -145,7 +161,7 @@ const ECART_PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFrac
               }
             </table>
           </div>
-          @if (cles().length) { <p class="rf-hint">Valeurs : {{ libelle(indicateur()) }}. Sous chaque potentiel, l’écart au réel du bâtiment.</p> }
+          @if (cles().length) { <p class="rf-hint">Valeurs : {{ libelle(indicateur()) }}, {{ mots[niveauAffiche()].toLowerCase() }} ({{ niveauAffiche() }}). Sous chaque potentiel, l’écart au réel du bâtiment au même niveau.</p> }
         </section>
       }
 
@@ -183,6 +199,7 @@ const ECART_PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFrac
             <p [class]="e.discret ? 'rf-hint' : 'rf-error'" [attr.role]="e.discret ? 'status' : 'alert'">{{ e.texte }}</p>
           } @else {
             <app-graphe [figure]="figureCarte()" [titre]="libelle(indicateur())" [chargement]="chargementCarte()" [hauteur]="420" />
+            <p class="rf-hint">La carte montre pour chaque bâtiment le calcul le plus fin disponible et à jour.</p>
           }
         </section>
       }
@@ -192,6 +209,24 @@ const ECART_PCT = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFrac
 export class ParcPotentielsComponent {
   protected ctx = inject(ContexteService);
   private api = inject(RenduApiService);
+  private etats = inject(EtatCalculsService);
+  private router = inject(Router);
+  private route = inject(ActivatedRoute);
+  readonly niveaux = NIVEAUX;
+  readonly mots = NIVEAU_MOTS;
+  private qp = toSignal(this.route.queryParamMap, { initialValue: this.route.snapshot.queryParamMap });
+  /** Niveau choisi (`?niveau=`, défaut horaire simplifié). */
+  readonly niveau = computed<Niveau>(() => { const n = this.qp().get('niveau'); return n === 'N0' || n === 'N2' ? n : 'N1'; });
+  /** Niveau effectivement rendu par le serveur (I3 : `niveau` en tête) ; null tant que rien n'est lu. */
+  readonly niveauServeur = computed<Niveau | null>(() => { const d = this.donnees(); return d ? ((d.niveau as Niveau | undefined) ?? 'N1') : null; });
+  readonly niveauAffiche = computed<Niveau>(() => this.niveauServeur() ?? this.niveau());
+  private suiviParc = computed(() => { const id = this.parcId(); return id === null ? null : this.etats.parcs()[id] ?? null; });
+  readonly progression = computed(() => {
+    const r = this.suiviParc()?.etat?.resume;
+    if (!r || !r.calculs_restants) return '';
+    return `Calculs automatiques du parc : ${r.calculs_restants} restant${r.calculs_restants > 1 ? 's' : ''}` +
+      `${r.en_cours ? `, ${r.en_cours} bâtiment${r.en_cours > 1 ? 's' : ''} en cours` : ''} — la page se met à jour toute seule.`;
+  });
 
   readonly parcId = computed(() => { const p = this.ctx.parcId(); return p !== null && p !== HORS_PARC ? p : null; });
 
@@ -240,7 +275,23 @@ export class ParcPotentielsComponent {
     this.api.indicateurs().then(l => this.canon.set(Array.isArray(l) ? l : []), () => this.canon.set([]));
     effect(() => {
       const id = this.parcId();
+      this.niveau();
       untracked(() => this.ouvrirParc(id));
+    });
+    // Recalcul automatique (I2 parc) : suivi tant que la vue est ouverte ; un calcul fini relit les potentiels.
+    effect(onCleanup => {
+      const id = this.parcId();
+      if (id === null) return;
+      onCleanup(untracked(() => this.etats.suivreParc(id)));
+    });
+    let avance = -1;
+    effect(() => {
+      const a = this.suiviParc()?.avance ?? -1;
+      untracked(() => {
+        const id = this.parcId();
+        if (avance >= 0 && a > avance && id !== null) void this.lire(id, false, true);
+        avance = a;
+      });
     });
   }
 
@@ -254,11 +305,13 @@ export class ParcPotentielsComponent {
   }
 
   // ── Potentiels (I5) ──
-  private async lire(id: number, premiere: boolean): Promise<void> {
+  private async lire(id: number, premiere: boolean, auto = false): Promise<void> {
+    const niveau = this.niveau();
     try {
-      const d = await this.api.potentielsParc(id);
-      if (this.parcId() !== id) return;
-      this.recevoir(d, premiere);
+      const d = await this.api.potentielsParc(id, niveau);
+      if (this.parcId() !== id || this.niveau() !== niveau) return;
+      this.recevoir(d, premiere || auto);
+      if (auto) this.chargerFigure();
     } catch (e) {
       if (this.parcId() !== id) return;
       this.erreurP.set(erreurDe(e, 'Potentiels du parc'));
@@ -286,7 +339,7 @@ export class ParcPotentielsComponent {
     if (id === null || this.envoi()) return;
     this.envoi.set(true); this.erreurCalcul.set(null);
     try {
-      const d = await this.api.calculerPotentielsParc(id);
+      const d = await this.api.calculerPotentielsParc(id, undefined, this.niveau());
       if (this.parcId() !== id) return;
       this.recevoir(d, false);
     } catch (e) {
@@ -304,6 +357,10 @@ export class ParcPotentielsComponent {
   }
   private arreterRelecture(): void {
     if (this.minuteur !== null) { clearTimeout(this.minuteur); this.minuteur = null; }
+  }
+
+  choisirNiveau(n: Niveau): void {
+    void this.router.navigate([], { queryParams: { niveau: n === 'N1' ? null : n }, queryParamsHandling: 'merge', replaceUrl: true });
   }
 
   choisirIndicateur(c: string): void { this.indicateur.set(c); this.chargerCarte(); }
@@ -378,7 +435,11 @@ export class ParcPotentielsComponent {
     this.erreurFig.set(null);
     if (id === null || !q) { this.figure.set(null); return; }
     this.chargementFig.set(true); this.figure.set(null);
-    this.api.figure('parc', { parc: id }, q.graphe).then(
+    // Graphe de la question au niveau choisi — sauf s'il compare lui-même les niveaux (dimension « niveau »).
+    const g = q.graphe;
+    const parNiveau = [g.x, g.couleur, g.facettes].includes('niveau');
+    const graphe = parNiveau ? g : { ...g, filtre: { ...(g.filtre ?? {}), niveau: [this.niveau()] } };
+    this.api.figure('parc', { parc: id }, graphe).then(
       f => { if (n === this.numFig) this.figure.set(f); },
       e => { if (n === this.numFig) this.erreurFig.set(erreurDe(e, 'Graphe')); },
     ).finally(() => { if (n === this.numFig) this.chargementFig.set(false); });

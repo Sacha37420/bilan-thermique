@@ -201,6 +201,9 @@ def process_one(building, owner_sub=''):
     building.pipeline = pipe
     building.pipeline_status = final_status if ok else 'incomplet'
     building.save(update_fields=['pipeline', 'pipeline_status'])
+    # Chantier bt-trois-niveaux : N2 et potentiels lancés aussitôt la chaîne finie (file `parc`, sans regroupement).
+    from .recalcul import planifier
+    planifier(building, 'chaine', immediat=True)
 
 
 LEVEL_LABELS = {'N0': 'Mensuel', 'N1': 'Horaire simplifié', 'N2': 'Détaillé par paroi'}
@@ -257,9 +260,10 @@ def latest_models(building, values=None):
     return out
 
 
-def modeles(building, values=None):
+def modeles(building, values=None, latest=None):
+    latest = latest_models(building, values) if latest is None else latest
     return [{'niveau': lvl, 'libelle': LEVEL_LABELS[lvl], 'computed_at': run.created_at, 'a_jour': a_jour}
-            for lvl, (run, a_jour) in latest_models(building, values).items()]
+            for lvl, (run, a_jour) in latest.items()]
 
 
 def latest_n1(building):
@@ -267,14 +271,52 @@ def latest_n1(building):
             .order_by('-created_at').first())
 
 
+# Chantier bt-trois-niveaux (I4) : résultats de l'état actuel par niveau, dans chaque ligne du tableau.
+NIVEAU_CLES = {'N0': ('heating_kwh_m2', 'primary_kwh_m2', 'dh_re2020'),
+               'N1': ('heating_kwh_m2', 'heating_kwh_m2_p10', 'heating_kwh_m2_p90', 'primary_kwh_m2', 'dh_re2020',
+                      'hours_over_28'),
+               'N2': ('heating_kwh_m2', 'primary_kwh_m2', 'dh_re2020', 'hours_over_28')}
+
+
+def niveaux(latest):
+    """{N0, N1, N2: {indicateurs du niveau, a_jour, run_id}} depuis `latest_models` ; tout à None sans calcul.
+    N0 n'a pas de série horaire : `dh_re2020` y vaut toujours None."""
+    out = {}
+    for lvl, keys in NIVEAU_CLES.items():
+        run, a_jour = latest.get(lvl, (None, None))
+        ind = (run.indicators or {}) if run is not None else {}
+        d = {k: (None if (lvl == 'N0' and k == 'dh_re2020') else ind.get(k)) for k in keys}
+        d['a_jour'] = a_jour if run is not None else None
+        d['run_id'] = run.pk if run is not None else None
+        out[lvl] = d
+    return out
+
+
+def calculs_parc(portfolio, buildings):
+    """{id: {statut, restants}} — état du recalcul automatique (I1, secteur C), lu en **un seul** appel
+    (`recalcul.lignes_parc`, trois requêtes) : le tableau et l'état du parc suivent la même règle."""
+    from django.db.models import QuerySet
+    from . import recalcul
+    from .models import Building as _B
+    qs = buildings if isinstance(buildings, QuerySet) else _B.objects.filter(pk__in=[b.pk for b in buildings])
+    try:
+        _resume, lignes = recalcul.lignes_parc(portfolio, qs)
+    except Exception:  # noqa: BLE001 — l'état des calculs ne doit jamais casser le tableau
+        lignes = []
+    return {r['id']: {'statut': r.get('statut') or 'inactif', 'restants': int(r.get('calculs_restants') or 0)}
+            for r in lignes}
+
+
 def table(portfolio, buildings):
     rows = []
+    etats = calculs_parc(portfolio, buildings)
     for b in buildings:
         run = latest_n1(b)
         ind = run.indicators if run else {}
         eff = facts.effective(b)
         vals = {k: f.value for k, f in eff.items()}
         heat = ind.get('heating_kwh')
+        latest = latest_models(b, vals)
         rows.append({
             'id': b.pk, 'name': b.name, 'address': b.address, 'rnb_id': b.rnb_id, 'status': b.pipeline_status,
             'lat': b.georef_lat, 'lon': b.georef_lon,
@@ -290,7 +332,9 @@ def table(portfolio, buildings):
             'priority': round(heat * (0.5 + 0.5 * b.confidence), 0) if heat else None,
             'errors': {k: v.get('error') for k, v in ((b.pipeline or {}).get('steps') or {}).items() if not v.get('ok')},
             'approfondissement': approfondissement(b, eff),
-            'modeles': modeles(b, vals),
+            'modeles': modeles(b, vals, latest),
+            'niveaux': niveaux(latest),
+            'calculs': etats.get(b.pk, {'statut': 'inactif', 'restants': 0}),
         })
     return rows
 
@@ -302,6 +346,22 @@ EXPORT_COLUMNS = [('id', 'id'), ('nom', 'name'), ('adresse', 'address'), ('rnb',
                   ('energie_finale_kwh_m2', 'final_kwh_m2'), ('energie_primaire_kwh_m2', 'primary_kwh_m2'),
                   ('etiquette_modele', 'model_label'), ('dpe', 'dpe'), ('dpe_ep_kwh_m2', 'dpe_ep_kwh_m2'),
                   ('confiance', 'confidence'), ('completude', 'completeness'), ('priorite', 'priority')]
+# Chantier bt-trois-niveaux (I4) : colonnes par niveau, ajoutées après les colonnes historiques (lues en N1).
+for _lvl in ('N0', 'N1', 'N2'):
+    _n = _lvl.lower()
+    EXPORT_COLUMNS += [(f'besoin_{_n}_kwh_m2', ('niveaux', _lvl, 'heating_kwh_m2')),
+                       (f'energie_primaire_{_n}_kwh_m2', ('niveaux', _lvl, 'primary_kwh_m2')),
+                       (f'dh_re2020_{_n}', ('niveaux', _lvl, 'dh_re2020')),
+                       (f'a_jour_{_n}', ('niveaux', _lvl, 'a_jour'))]
+EXPORT_COLUMNS += [('calculs', ('calculs', 'statut')), ('calculs_restants', ('calculs', 'restants'))]
+
+
+def _cell(r, k):
+    if isinstance(k, tuple):
+        for part in k:
+            r = r.get(part) if isinstance(r, dict) else None
+        return r
+    return r.get(k)
 
 
 def to_csv(rows):
@@ -311,14 +371,16 @@ def to_csv(rows):
     for r in rows:
         line = []
         for _c, k in EXPORT_COLUMNS:
-            v = r.get(k)
+            v = _cell(r, k)
+            if isinstance(v, bool):
+                v = 'oui' if v else 'non'
             if isinstance(v, str) and v[:1] in ('=', '+', '-', '@', '\t', '\r'):
                 v = "'" + v  # pas de formule exécutée à l'ouverture dans un tableur
             if isinstance(v, float):
                 v = f'{v:.3f}'.rstrip('0').rstrip('.').replace('.', ',')
             line.append('' if v is None else str(v))
         w.writerow(line)
-    return '﻿' + buf.getvalue()
+    return '\ufeff' + buf.getvalue()
 
 
 # ── Chantier bt-potentiels (I5, secteur A) : agrégats des potentiels d'un parc ──

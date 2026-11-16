@@ -12,8 +12,8 @@ _COMMUNES = {'batiment': ('Bâtiment', ''), 'usage': ('Usage', ''), 'periode_con
              'annee': ('Année de construction', ''), 'classe_dpe': ('DPE affiché', ''),
              'approfondissement': ('Approfondissement', ''), 'adresse': ('Adresse', '')}
 _PROPRES = {
-    'batiments': {'niveau_calcul': ('Dernier calcul', ''), 'etiquette_modele': ('Étiquette du modèle', '')},
-    'potentiels': {'bouquet': ('Bouquet', ''), 'statut': ('État', ''), 'actions_appliquees': ('Actions appliquées', ''),
+    'batiments': {'niveau_calcul': ('Niveau de calcul', ''), 'etiquette_modele': ('Étiquette du modèle', '')},
+    'potentiels': {'bouquet': ('Bouquet', ''), 'niveau': ('Niveau', ''), 'statut': ('État', ''), 'actions_appliquees': ('Actions appliquées', ''),
                    'actions_ecartees': ('Actions écartées', ''), 'calcule_le': ('Calculé le', '')},
     'actions': {'bouquet': ('Bouquet', ''), 'action': ('Action', ''), 'famille_action': ('Famille', ''),
                 'application': ('Appliquée', ''), 'raison': ('Raison', ''), 'effets': ('Effets', '')},
@@ -24,7 +24,7 @@ _PROPRES = {
 }
 _DEFAUT = {
     'batiments': ['batiment', 'usage', 'annee', 'heating_kwh_m2', 'dh_re2020', 'classe_dpe', 'approfondissement'],
-    'potentiels': ['batiment', 'bouquet', 'statut', 'heating_kwh_m2', 'ecart.heating_kwh_m2', 'dh_re2020',
+    'potentiels': ['batiment', 'bouquet', 'niveau', 'statut', 'heating_kwh_m2', 'ecart.heating_kwh_m2', 'dh_re2020',
                    'ecart.dh_re2020', 'actions_appliquees'],
     'actions': ['batiment', 'bouquet', 'action', 'famille_action', 'application', 'raison'],
     'faits': ['batiment', 'fait', 'valeur', 'methode', 'source'],
@@ -70,25 +70,26 @@ def resoudre(ctx, bloc):
         c = ctx.commun(b)
         base = {**c['dims'], 'annee': c['raw']['_annee'], 'adresse': b.address or None}
         if src == 'batiments':
-            run, niv = None, None
-            for lv in ('N1', 'N0', 'N2'):
-                run = ctx.run(b, 'reel', lv)
-                if run is not None:
-                    niv = lv
-                    break
+            # Niveau le plus fin disponible et à jour (I5, bt-trois-niveaux) ; sinon le dernier calcul (N1 d'abord).
+            choix = ctx.niveau_auto(b, 'reel')
+            niv = choix[0] if choix else None
+            run = ctx.run(b, 'reel', niv) if niv else None
             ind = (run.indicators or {}) if run else {}
             row = {**base, 'niveau_calcul': niv, 'etiquette_modele': ind.get('dpe_label_model')}
             for k, d in _mesures_i3(mes).items():
                 row[k] = c['vals'].get(k) if d['source'] == 'fait' else ind.get(k)
             lignes.append(row)
         elif src == 'potentiels':
-            r0 = ctx.run(b, 'reel', 'N1')
-            i0 = (r0.indicators or {}) if r0 else {}
-            for bq in ctx.bouquets:
-                p = ctx.potentiel(b, bq.pk, 'N1')
+            # Une ligne N1 par bouquet (calculé ou non, comme avant), plus une ligne N0 / N2 là où elle est calculée.
+            for bq, niv in [(bq, niv) for bq in ctx.bouquets for niv in ('N0', 'N1', 'N2')]:
+                p = ctx.potentiel(b, bq.pk, niv)
+                if p is None and niv != 'N1':
+                    continue
+                r0 = ctx.run(b, 'reel', niv)
+                i0 = (r0.indicators or {}) if r0 else {}
                 ind = (p.run.indicators or {}) if p is not None and p.run_id else {}
                 acts = (p.actions or []) if p else []
-                row = {**base, 'bouquet': bq.nom, 'statut': 'fait' if p else 'non calculé',
+                row = {**base, 'bouquet': bq.nom, 'niveau': niv, 'statut': 'fait' if p else 'non calculé',
                        'actions_appliquees': sum(1 for a in acts if isinstance(a, dict) and a.get('appliquee')),
                        'actions_ecartees': sum(1 for a in acts if isinstance(a, dict) and not a.get('appliquee')),
                        'calcule_le': _date(p.calcule_le) if p else None}
@@ -102,7 +103,8 @@ def resoudre(ctx, bloc):
         elif src == 'actions':
             fam_lib, actions = ctx.familles()
             for bq in ctx.bouquets:
-                p = ctx.potentiel(b, bq.pk, 'N1')
+                # Les actions d'un bouquet sont celles de son amélioration générée, commune aux trois niveaux.
+                p = next((x for x in (ctx.potentiel(b, bq.pk, n) for n in ('N1', 'N2', 'N0')) if x is not None), None)
                 for a in (p.actions or []) if p else []:
                     if not isinstance(a, dict):
                         continue

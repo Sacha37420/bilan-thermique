@@ -3,6 +3,7 @@ import { GrapheComponent } from '../../components/graphe/graphe.component';
 import { FigureRendu } from '../../components/graphe/graphe.types';
 import { USAGE_LABELS } from '../../core/refonte.types';
 import { ChoixSeriesComponent } from './choix-series.component';
+import { ChoixNiveauComponent } from './choix-niveau.component';
 import { Bouquet, Cible, Dimension, FORMES, FormeGraphe, Graphe, Mesure, Portee, Question, Series, grapheVide } from './contrat.types';
 import { RenduApiService, messageDe } from './rendu-api.service';
 
@@ -16,7 +17,7 @@ const AVEC_TAILLE = new Set<FormeGraphe>(['nuage', 'bulles']);
 @Component({
   selector: 'app-constructeur-graphe',
   standalone: true,
-  imports: [GrapheComponent, ChoixSeriesComponent],
+  imports: [GrapheComponent, ChoixSeriesComponent, ChoixNiveauComponent],
   templateUrl: './constructeur-graphe.component.html',
   styleUrl: './constructeur-graphe.component.scss',
 })
@@ -29,6 +30,8 @@ export class ConstructeurGrapheComponent {
   readonly mesures = input<Mesure[]>([]);
   readonly bouquets = input<Bouquet[]>([]);
   readonly catalogueErreur = input('');
+  /** Incrémenté quand les calculs du parc ou du bâtiment avancent (I2) : l'aperçu est redemandé. */
+  readonly actualisation = input(0);
   readonly grapheChange = output<Graphe>();
 
   private api = inject(RenduApiService);
@@ -51,6 +54,7 @@ export class ConstructeurGrapheComponent {
   constructor() {
     effect(() => {
       const g = this.graphe(), c = this.cible(), p = this.portee();
+      this.actualisation();
       untracked(() => this.planifier(g, c, p));
     });
     inject(DestroyRef).onDestroy(() => clearTimeout(this.minuteur));

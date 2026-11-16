@@ -39,7 +39,7 @@
   @case ('graphe') {
     <app-constructeur-graphe [graphe]="b('graphe').graphe" [portee]="etat.portee()" [cible]="etat.cible()" [questions]="etat.questions()"
       [dimensions]="etat.dimensionsPortee()" [mesures]="etat.mesuresPortee()" [bouquets]="etat.bouquets()"
-      [catalogueErreur]="etat.catalogueErreur()" (grapheChange)="graphe($event)" />
+      [catalogueErreur]="etat.catalogueErreur()" [actualisation]="etat.actualisation()" (grapheChange)="graphe($event)" />
   }
   @case ('carte') {
     <div class="rf-row">

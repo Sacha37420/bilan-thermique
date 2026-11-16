@@ -68,8 +68,8 @@ class DocumentTest(RenduMixin, TestCase):
         self.assertEqual(pot_bloc['potentiels']['reel']['run_id'], self.r1.pk)           # réponse I5 telle quelle
         pot = next(fs for f in fiches for fs in f['sections'] if fs['cle'] == 'potentiels')
         libs = [e['libelle'] for e in pot['elements']]
-        self.assertIn('Économiser l’énergie — Besoin de chauffage', libs)
-        e = next(e for e in pot['elements'] if e['libelle'] == 'Économiser l’énergie — Besoin de chauffage')
+        self.assertIn('Économiser l’énergie — Besoin de chauffage (N1)', libs)
+        e = next(e for e in pot['elements'] if e['libelle'] == 'Économiser l’énergie — Besoin de chauffage (N1)')
         self.assertEqual((e['valeur'], e['unite']), ('50 (−50 %)', 'kWh/m²·an'))
         for f in fiches:
             for fs in f['sections']:

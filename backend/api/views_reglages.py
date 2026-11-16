@@ -267,6 +267,8 @@ def fiche_bloc(request, b, sections):
                     continue
                 nom = (e.get('bouquet') or {}).get('nom') or 'Bouquet'
                 niv = e.get('niveau') or 'N1'
+                if e.get('statut') is None and niv != 'N1':
+                    continue      # N0/N2 jamais calculés : une seule ligne « non calculé » par bouquet (celle du N1)
                 if e.get('statut') != 'fait' or not e.get('indicateurs'):
                     els.append(_el(f'{nom} ({niv})', 'non calculé' if e.get('statut') is None else e.get('statut'),
                                    source=e.get('message') or ''))
@@ -279,10 +281,10 @@ def fiche_bloc(request, b, sections):
                     v = _num_txt(ind[k])
                     if isinstance(pct.get(k), (int, float)):
                         v += f" ({'+' if pct[k] > 0 else '−' if pct[k] < 0 else ''}{facts._fr_number(round(abs(pct[k]) * 100, 0))} %)"
-                    els.append(_el(f'{nom} — {lib}', v, u, src))
+                    els.append(_el(f'{nom} — {lib} ({niv})', v, u, src))
                 acts = e.get('actions') or []
                 n_ok = sum(1 for a in acts if isinstance(a, dict) and a.get('appliquee'))
-                els.append(_el(f'{nom} — actions appliquées', f'{n_ok} sur {len(acts)}', source=src))
+                els.append(_el(f'{nom} — actions appliquées ({niv})', f'{n_ok} sur {len(acts)}', source=src))
         elif cle == 'ameliorations':
             for a in f['ameliorations']:
                 d = a.get('dernier') or {}

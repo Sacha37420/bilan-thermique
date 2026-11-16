@@ -46,12 +46,14 @@ temps réel, vent), paroi 1D (`/calcul-1d`), modèles de paroi (`/parois`), thé
 
 1. **Parc** : créer un parc, importer un CSV d'adresses (ou ajouter des bâtiments un par un). La chaîne A1→A6 tourne
    en file `parc` : adresse, bâtiment RNB, DPE, emprise BD TOPO, archétype, puis environnement relevé (LiDAR HD ou
-   MNS) qui recale la géométrie ; N0 et N1 suivent.
-2. **Bâtiment** : relire la synthèse, corriger ce qui est faux (une correction déclarée prime), ajouter des
-   protections solaires, choisir la météo.
-3. **Calculs** : lancer un N1 (ou un N2 si l'on est gestionnaire), lire ses entrées figées ; dans « Améliorations »,
-   calculer les potentiels des bouquets.
-4. **Parc › Potentiels par bouquet** : calculer les potentiels de tout le parc (N1, en file) et les comparer au réel.
+   MNS) qui recale la géométrie ; **N0, N1, N2 et les potentiels des bouquets suivent sans geste** (D49).
+2. **Bâtiment** : relire la synthèse et les trois niveaux côte à côte, corriger ce qui est faux (une correction
+   déclarée prime), ajouter des protections solaires, choisir la météo. Chaque affinage relance les calculs devenus
+   périmés après un court regroupement (30 s par défaut) ; l'état des calculs se met à jour à l'écran.
+3. **Calculs** : lire les résultats et leurs entrées figées ; un gestionnaire peut encore lancer un calcul à la main
+   (« Recalculer », ou un N2 sur une enveloppe experte) ; « Améliorations » montre les potentiels par bouquet en N0,
+   N1 et N2.
+4. **Parc › Potentiels par bouquet** : comparer le réel du parc à chaque bouquet, au niveau choisi (N0, N1 ou N2).
 5. **Rendu** : partir d'un gabarit (« Fiche d'identité », « Synthèse de parc ») ou d'une question du constructeur
    guidé, ajuster, enregistrer pour le parc, exporter.
 
@@ -82,11 +84,21 @@ temps réel, vent), paroi 1D (`/calcul-1d`), modèles de paroi (`/parois`), thé
 | --- | --- | --- | --- |
 | **N0** | bilan mensuel ISO 13790 (proche 3CL) | < 0,1 s | qui peut modifier la fiche |
 | **N1** | 5R1C horaire (ISO 13790 annexe C / ISO 52016-1), fourchette P10–P90 par tirages vectorisés | ~1 s | idem |
-| **N2** | éléments finis par triangle de l'enveloppe (une paroi 1D par triangle, un nœud d'air), enveloppe reconstruite en mémoire depuis la fiche, ou enveloppe experte | secondes à minutes, en tâche de fond | gestionnaires, un calcul lourd à la fois, **jamais en lot** (D37) |
+| **N2** | éléments finis par triangle de l'enveloppe (une paroi 1D par triangle, un nœud d'air), enveloppe reconstruite en mémoire depuis la fiche, ou enveloppe experte | secondes à minutes, en tâche de fond | **automatique** après la chaîne et après chaque affinage (file `parc`, sous le verrou des calculs lourds, D49) ; à la main : gestionnaires (D2) |
 
 Les trois niveaux lisent la même fiche. Chaque calcul enregistre ses **entrées figées** (`CalcRun.inputs` : faits
 utilisés et leur provenance, sol, géométrie, améliorations appliquées et leurs hypothèses) et une **empreinte** : un
-calcul dont les entrées ont changé devient « périmé ». Versions des moteurs au 2026-11-16 : `n0-5`, `n1-6`, `n2-5`
+calcul dont les entrées ont changé devient « périmé ».
+
+**Calculs automatiques** (`api/recalcul/`, D49–D51) : un signal (fait, protection, géométrie, enveloppe,
+environnement, météo, position, fin de chaîne, amélioration, bouquet, réglages du parc) ne fait que **planifier** le
+bâtiment ; après le délai de regroupement (`calcul.recalcul_delai_s`, 30 s), une tâche recalcule ce qui est périmé :
+réel N0 et N1 (file `celery`), puis réel N2 et potentiels N0, N1, N2 de chaque bouquet visible (file `parc`, N2 sous
+`joblock` ; s'il est occupé, la tâche se replanifie). Rien de ce qui est à jour n'est recalculé. Réglages par parc
+(Paramétrage › orchestration) : `calcul.recalcul_auto`, `calcul.n2`, `calcul.potentiels`. État :
+`GET /api/batiments/<id>/calculs/etat/`, `GET /api/parcs/<id>/calculs/etat/` ; « Recalculer » (gestionnaire) :
+`POST /api/batiments/<id>/calculs/recalculer/`. Un `QuerySet.update()` n'émet aucun signal : toute écriture d'une
+entrée de calcul doit passer par `save()`. Versions des moteurs au 2026-11-16 : `n0-5`, `n1-6`, `n2-5`
 (`calc_service.ENGINE_VERSION`).
 
 Indicateurs (I3) : besoins de chauffage et de refroidissement, puissance maximale, énergie finale, primaire, CO₂,
@@ -131,9 +143,10 @@ actuel ou à une amélioration.
   toiture végétalisée ou claire, combles, murs clairs, deux arbres au sud et à l'ouest). Un gestionnaire de parc les
   copie et les modifie, ou crée les siens.
 - **Potentiels** (`api/ameliorations/potentiels.py`) : appliquer un bouquet crée une amélioration générée (unique par
-  bâtiment et bouquet, vidée et réécrite à chaque calcul) et la calcule. N1 d'un bâtiment : synchrone, au plus
-  4 bouquets par appel ; N1 de tout un parc : file `parc`, un potentiel à la fois ; N2 : un bâtiment et un bouquet à la
-  fois, à la demande d'un gestionnaire, jamais en lot. « À jour » par empreinte (fiche, protections, géométrie, météo,
+  bâtiment et bouquet, **commune aux trois niveaux**, vidée et réécrite à chaque calcul) et la calcule en N0, N1 et
+  N2. Calculés automatiquement (voir Moteurs) ; à la main : N0/N1 d'un bâtiment synchrones (4 bouquets au plus par
+  appel), N2 d'un bâtiment par un gestionnaire, tout un parc à un niveau donné en file `parc`. Chaque entrée de
+  `GET …/potentiels/` porte son `niveau` : un consommateur filtre par bouquet **et** par niveau. « À jour » par empreinte (fiche, protections, géométrie, météo,
   bouquet, réglages du parc, versions des moteurs et des actions). Écarts au réel par indicateur ; agrégats de parc
   (somme, moyenne, médiane, effectif).
 
@@ -181,7 +194,7 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
 
 ## Tests
 
-- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **663 tests**
+- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **742 tests**
   au 2026-11-16. Aucun appel réseau : tout service externe (open data, IA, service de rendu) est simulé. Depuis le lab :
   `bash chantiers/tests/essai.sh bilan-thermique` (PostgreSQL jetable, réseau fermé).
 - Service de rendu : `npm test` (unitaires) et `npm run test:integration` dans `rendu-service/` (dans son image).
@@ -200,6 +213,9 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
   rafraîchissement de l'air n'est **pas calculé**, c'est une hypothèse recopiée telle quelle.
 - By-pass de la double flux et ouverture des fenêtres : seuils choisis par l'app (réglages usuels), à confirmer.
 - Une enveloppe experte (N2, D35) ignore les améliorations d'enveloppe : le calcul le dit.
+- Calculs automatiques : sur 2 vCPU, le N2 et les potentiels N2 d'un grand parc prennent des heures (un calcul lourd
+  à la fois) ; `calcul.n2` coupe le N2 automatique par parc. Les rendus prennent par défaut le niveau le plus fin à
+  jour, et le disent dans le résumé de chaque figure.
 
 ## Dépendances
 

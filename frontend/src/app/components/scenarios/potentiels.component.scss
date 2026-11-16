@@ -15,3 +15,9 @@ details summary { cursor: pointer; min-height: 44px; display: flex; align-items:
 .actions { font-size: var(--text-sm); padding-left: var(--space-4); display: grid; gap: var(--space-2); }
 .actions ul { padding-left: var(--space-4); color: var(--text-mute); }
 @media (max-width: 899px) { .tete .rf-btn { margin-left: 0; flex: 1 1 100%; } }
+.grille caption { caption-side: top; text-align: left; padding-bottom: var(--space-2); }
+.grille td .rf-badge { margin: var(--space-1) 0 0; }
+.grille tr.reel th, .grille tr.reel td { background: var(--bg); }
+.grille th small { display: inline; }
+h3 { font-size: var(--text-base); margin: var(--space-4) 0 var(--space-2); }
+.tete .rf-badge { text-transform: none; }
