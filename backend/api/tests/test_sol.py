@@ -159,3 +159,15 @@ def setUpModule():
 
 def tearDownModule():
     _NO_AUTO_ENV.stop()
+
+
+class DisplayValueTest(SimpleTestCase):
+    def test_values_read_in_words(self):
+        self.assertEqual(facts.display_value('plancher.type', 'sous_sol'), 'Sous-sol non chauffé')
+        self.assertEqual(facts.display_value('toiture.type', '2pans'), 'Deux pans')
+        self.assertEqual(facts.display_value('identite.annee_construction', 1990), '1990')
+        self.assertEqual(facts.display_value('identite.mitoyennete', 0.207), '20,7 %')
+        self.assertEqual(facts.display_value('baies.ratio_S', 0.15), '15 %')
+        self.assertEqual(facts.display_value('mur.u', 0.35), '0,35 W/m²·K')
+        self.assertEqual(facts.display_value('identite.surface_m2', 1650.0), '1 650 m²')
+        self.assertEqual(facts.display_value('baies.occultations', True), 'oui')

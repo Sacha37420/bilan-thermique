@@ -362,6 +362,7 @@ export class OngletRenduComponent {
   readonly systemes = computed(() => this.groupesDe(this.fiche()?.systemes));
 
   valeurFait(f: FaitIdentite): string {
+    if (f.texte) return f.texte;            // Lot 34 : rendu en mots par le serveur (libellés des choix, %, unités)
     const v = f.valeur;
     if (v === null || v === undefined || v === '') return '—';
     if (typeof v === 'boolean') return v ? 'oui' : 'non';
@@ -371,6 +372,12 @@ export class OngletRenduComponent {
     return `${v}${f.unite ? ' ' + f.unite : ''}`;
   }
   methodeLib(m: string): string { return this.METHOD_LABELS[m] ?? m; }
+  readonly TOITS: Record<string, string> = { terrasse: 'terrasse', '2pans': 'deux pans', '4pans': 'quatre pans' };
+  /** Horizon par façade en mots : « N 12° · E 0° … ». */
+  horizonTxt(h: Record<string, number> | null | undefined): string {
+    if (!h) return '';
+    return ['N', 'E', 'S', 'O'].filter(o => h[o] !== undefined).map(o => `${o} ${this.fmt(h[o])}°`).join(' · ');
+  }
 
   /** Niveaux dans l'ordre d'affichage : le modèle préféré d'abord. */
   readonly niveauxOrdonnes = computed(() => {
@@ -378,6 +385,7 @@ export class OngletRenduComponent {
     return [p, ...this.niveauxListe.filter(n => n !== p)];
   });
   res(n: Niveau): Indicateurs | null { return this.fiche()?.resultats?.[n] ?? null; }
+  limitesDe(i: Indicateurs): string[] { const l = i['limites']; return Array.isArray(l) ? (l as string[]) : []; }
   nb(i: Indicateurs | null, k: string): number | null {
     const x = i?.[k];
     return typeof x === 'number' && Number.isFinite(x) ? x : null;

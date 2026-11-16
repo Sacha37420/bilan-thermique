@@ -245,6 +245,9 @@
                       @for (p of phrases(r); track p.lib) { <div [class.fort]="p.fort"><dt>{{ p.lib }}</dt><dd>{{ p.txt }}</dd></div> }
                     </dl>
                     @if (r.computed_at) { <p class="rf-hint">Calculé le {{ dateFr(r.computed_at) }}.</p> }
+                    @if (limitesDe(r).length) {
+                      <ul class="rf-hint limites">@for (l of limitesDe(r); track $index) { <li>{{ l }}</li> }</ul>
+                    }
                   } @else {
                     <p class="rf-hint">Pas encore calculé.</p>
                   }
@@ -268,6 +271,19 @@
         @if (sectionsVues().has('geometrie') && faitsGeometrie().length) {
           <section class="bloc">
             <h3>Géométrie</h3>
+            @if (f.geometrie; as g) {
+              @if (g.source !== 'bdtopo') {
+                <p>Géométrie <strong>croisée {{ g.libelle || 'LiDAR HD × BD TOPO (IGN)' }}</strong>@if (g.hauteur_egout_m) {&#32;: hauteur à
+                  l’égout mesurée {{ fmt(g.hauteur_egout_m, 1) }} m, faîtage {{ fmt(g.hauteur_faitage_m || 0, 1) }} m@if (g.bdtopo?.hauteur_m) {&#32;(la BD TOPO
+                  indiquait {{ fmt(g.bdtopo!.hauteur_m!, 1) }} m)}@if (g.toiture) {, toiture {{ TOITS[g.toiture] || g.toiture }}@if (g.pente_deg) {&#32;à {{ fmt(g.pente_deg) }}°}}}@if (g.decalage_m) {, emprise recalée de {{ fmt(g.decalage_m, 1) }} m}.</p>
+                @if (g.note) { <p class="rf-hint">{{ g.note }}</p> }
+              } @else {
+                <p class="rf-hint">Géométrie de la BD TOPO seule, non recalée sur un relevé@if (g.note) {&#32;— {{ g.note }}}.</p>
+              }
+              @if (horizonTxt(g.horizon_deg)) {
+                <p>Masques face aux façades ({{ g.horizon_source }}) : {{ horizonTxt(g.horizon_deg) }}.</p>
+              }
+            }
             <table class="rf-table faits"><tbody>
               @for (x of faitsGeometrie(); track x[0]) {
                 <tr><th scope="row">{{ x[1].libelle }}</th><td>{{ valeurFait(x[1]) }}</td><td class="prov"><span [class]="'rf-badge m-' + x[1].methode">{{ methodeLib(x[1].methode) }}</span></td></tr>
@@ -289,6 +305,12 @@
                 </tbody>
               }
             </table>
+            @if (f.plancher; as pl) {
+              <p>Plancher bas : {{ pl.modele }} — température vue par le plancher {{ fmt(pl.t_moyenne_c, 1) }} °C en moyenne
+                ({{ fmt(pl.t_min_c, 1) }} à {{ fmt(pl.t_max_c, 1) }} °C), d’après le sol simulé sur la météo du calcul@if (pl.u_propre && pl.u_equivalent && pl.u_propre !== pl.u_equivalent) {&#32;;
+                U du plancher lui-même {{ fmt(pl.u_propre, 2) }} W/m²·K pour un U équivalent de {{ fmt(pl.u_equivalent, 2) }}}.</p>
+              @if (pl.note) { <p class="rf-hint">{{ pl.note }}</p> }
+            }
             <p class="rf-hint">Provenance : mesuré, document, déclaré, inféré (déduit d’autres données) ou défaut (valeur typique de l’époque).</p>
           </section>
         }
@@ -321,8 +343,13 @@
             @if (sectionsVues().has('environnement')) {
               <section class="bloc">
                 <h3>Environnement</h3>
-                @if (f.environnement; as e) { <p>Environnement observé : {{ e.objets }} objet{{ e.objets > 1 ? 's' : '' }} (bâtiments voisins, arbres, relief).</p> }
-                @else { <p class="rf-hint">Pas d’environnement observé (LiDAR HD × BD TOPO) pour ce bâtiment.</p> }
+                @if (f.environnement; as e) {
+                  <p>Environnement observé@if (e.source) {&#32;({{ e.source }})}@if (e.rayon_m) {&#32;sur {{ fmt(e.rayon_m) }} m}&#32;:
+                    @if (e.batiments !== undefined) { {{ e.batiments }} bâtiment{{ e.batiments! > 1 ? 's' : '' }} voisin{{ e.batiments! > 1 ? 's' : '' }},
+                      {{ e.arbres }} arbre{{ e.arbres! > 1 ? 's' : '' }} ou massif{{ e.arbres! > 1 ? 's' : '' }}, relief. }
+                    @else { {{ e.objets }} objet{{ e.objets > 1 ? 's' : '' }}. }</p>
+                }
+                @else { <p class="rf-hint">Pas d’environnement observé pour ce bâtiment : géométrie et masques de la BD TOPO seule.</p> }
               </section>
             }
           </div>
@@ -358,8 +385,8 @@
               <thead><tr><th>Étape</th><th>Source</th><th>Date</th><th></th></tr></thead>
               <tbody>
                 @for (s of f.sources; track $index) {
-                  <tr><td>{{ s.etape }}</td><td>{{ s.source || '—' }}</td><td>{{ dateFr(s.date) || '—' }}</td>
-                    <td>@if (s.ok) { <span class="rf-badge m-mesure">réussie</span> } @else { <span class="rf-badge m-infere">échec ou sautée</span> }</td></tr>
+                  <tr><td>{{ s.libelle || s.etape }}</td><td>{{ s.source || '—' }}</td><td>{{ dateFr(s.date) || '—' }}</td>
+                    <td>@if (s.saute) { <span class="rf-badge m-defaut">désactivée</span> } @else if (s.ok) { <span class="rf-badge m-mesure">réussie</span> } @else { <span class="rf-badge m-infere">échec</span> }</td></tr>
                 }
               </tbody>
             </table>

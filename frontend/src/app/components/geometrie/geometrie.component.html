@@ -5,12 +5,10 @@
   @if (data()?.origine; as o) {
     @if (o.source !== 'bdtopo') {
       <p class="rf-hint origine">Géométrie automatique <strong>croisée {{ o.libelle || 'LiDAR HD × BD TOPO (IGN)' }}</strong> :
-        @if (o.decalage_m) { emprise recalée de {{ o.decalage_m | number: '1.0-1' }} m, } @else { emprise confirmée, }
-        @if (o.hauteur_egout_m) { hauteur à l'égout mesurée {{ o.hauteur_egout_m | number: '1.0-1' }} m
-          (faîtage {{ o.hauteur_faitage_m | number: '1.0-1' }} m@if (o.bdtopo?.hauteur_m) {, BD TOPO {{ o.bdtopo?.hauteur_m | number: '1.0-1' }} m }),
-        } @else { hauteur de la BD TOPO (toit non relevé), }
-        @if (o.toiture) { toiture {{ roofLabels[o.toiture] || o.toiture }}@if (o.pente_deg) { à {{ o.pente_deg | number: '1.0-0' }}° }, }
-        voisins et masques relevés.@if (o.note) { <strong>{{ o.note }}</strong> }</p>
+        {{ o.decalage_m ? 'emprise recalée de ' + (o.decalage_m | number: '1.0-1') + ' m' : 'emprise confirmée' }},
+        @if (o.hauteur_egout_m) {hauteur à l'égout mesurée {{ o.hauteur_egout_m | number: '1.0-1' }} m (faîtage {{ o.hauteur_faitage_m | number: '1.0-1' }} m@if (o.bdtopo?.hauteur_m) {, BD TOPO {{ o.bdtopo?.hauteur_m | number: '1.0-1' }} m}),} @else {hauteur de la BD TOPO (toit non relevé),}
+        @if (o.toiture) {toiture {{ roofLabels[o.toiture] || o.toiture }}@if (o.pente_deg) {&#32;à {{ o.pente_deg | number: '1.0-0' }}°},}
+        voisins et masques relevés.@if (o.note) {&#32;<strong>{{ o.note }}</strong>}</p>
     } @else {
       <p class="rf-hint origine">Géométrie automatique : <strong>BD TOPO seule</strong>@if (o.note) { — {{ o.note }} }.
         Relier un environnement relevé (LiDAR HD, ou à défaut un modèle numérique de surface) la recale et mesure la hauteur.</p>

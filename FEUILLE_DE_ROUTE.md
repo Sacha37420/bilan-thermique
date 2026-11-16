@@ -747,6 +747,28 @@ comme minces (biseau pan de toit / mur), d'où la condition de faces opposées.
 **Limites :** une annexe non chauffée épaisse (garage accolé) n'est pas un élément mince : elle reste dans le volume
 tant qu'elle n'est pas retirée de l'enveloppe ; la face arrière d'une ailette n'est pas ensoleillée.
 
+## Lot 34 — Lisibilité du parcours et des bilans   ·   statut : livré
+**Objectif :** relire le parcours et les bilans produits après les lots 30 à 33 (propriétaire, 2026-11-16), sur un
+parcours réel : parc créé, bâtiment ajouté par son adresse, chaîne complète, six onglets, fiche d'identité imprimée.
+**Constats (navigateur réel, compte de test, 2026-11-16) :** aucune erreur ; la carte Géométrie et les entrées de
+Calculs disent la géométrie croisée ; mais la **fiche d'identité imprimable** affichait les choix sous leur code
+(`sous_sol`, `2pans`, `iti`, `vmc_sf_auto`, `joule`…), l'année « 1 990 », mitoyenneté et vitrages en fraction, ne
+disait ni l'origine de la géométrie, ni les masques, ni la source de l'environnement, ni le sol vu par le plancher,
+et ses sources parlaient en codes d'étape (A1, A3…) avec une source A6 figée ; le texte de l'outil Environnement
+annonçait un repli BD TOPO direct hors LiDAR.
+**Tâches :**
+- [x] `facts.display_value` : valeur d'un fait en mots (libellé du choix, %, année, unité), rendue par le serveur
+- [x] Fiche d'identité : origine de la géométrie (croisée : égout, faîtage, écart à la BD TOPO, toiture, recalage ;
+  ou BD TOPO seule), masques face aux façades, environnement (source, voisins, arbres, rayon), plancher bas (modèle,
+  température vue, U propre / équivalent, note), limites des calculs, sources nommées dans l'ordre de la chaîne
+  (source réelle de A3 et A6, étape désactivée distinguée d'un échec)
+- [x] Calculs : sol vu par le plancher et origine de la géométrie dans les entrées figées (N0, N1, N2)
+- [x] Carte Géométrie (ponctuation) ; texte de l'outil Environnement (MNS, génération automatique)
+**Tests à passer avant de clore le lot :**
+- [x] `IdentiteTest` (`test_navigation.py`) : texte, plancher, géométrie, limites ; `DisplayValueTest` (`test_sol.py`)
+- [x] Suite backend complète verte ; `ng build` sans erreur
+**Vérifié le :** 2026-11-16 — backend : **553 tests OK**. `ng build` OK. Parcours réel rejoué après déploiement.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

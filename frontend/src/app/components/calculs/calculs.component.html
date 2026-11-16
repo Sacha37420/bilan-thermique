@@ -138,10 +138,17 @@
       <dl class="kv">
         <dt>Toiture</dt><dd>{{ scalar(inp(d, 'params.toiture.surface_m2')) }} m², U {{ scalar(inp(d, 'params.toiture.u')) }}</dd>
         <dt>Plancher bas</dt><dd>{{ scalar(inp(d, 'params.plancher.surface_m2')) }} m², U {{ scalar(inp(d, 'params.plancher.u')) }}</dd>
+        @if (inp(d, 'sol.modele') !== undefined) {
+          <dt>Sol vu par le plancher</dt><dd>{{ scalar(inp(d, 'sol.modele')) }} — {{ scalar(inp(d, 'sol.t_moyenne_c')) }} °C en moyenne
+            ({{ scalar(inp(d, 'sol.t_min_c')) }} à {{ scalar(inp(d, 'sol.t_max_c')) }} °C)@if (inp(d, 'sol.note')) { — {{ scalar(inp(d, 'sol.note')) }} }</dd>
+        }
+        @if (inp(d, 'geometrie_origine.source') !== undefined) {
+          <dt>Origine de la géométrie</dt><dd>{{ inp(d, 'geometrie_origine.source') === 'bdtopo' ? 'BD TOPO seule' : scalar(inp(d, 'geometrie_origine.libelle')) }}</dd>
+        }
         <dt>Renouvellement d’air effectif</dt><dd>{{ scalar(inp(d, 'params.renouvellement_vol_h')) }} vol/h</dd>
         <dt>Inertie</dt><dd>{{ scalar(inp(d, 'params.inertie.c_m_j_k_m2')) }} J/K par m²</dd>
         <dt>Occupation</dt><dd>{{ scalar(inp(d, 'params.occupation')) }}</dd>
-        <dt>Horizon (°)</dt><dd>@for (o of orientations; track o) { {{ o }} {{ scalar(inp(d, 'params.horizon_deg.' + o)) }} }</dd>
+        <dt>Masques face aux façades (°)</dt><dd>@for (o of orientations; track o) { {{ o }} {{ scalar(inp(d, 'params.horizon_deg.' + o)) }} }</dd>
       </dl>
     }
 
@@ -156,6 +163,10 @@
         }
         <dt>Maillage</dt><dd>{{ scalar(inp(d, 'geometry.n_triangles')) }} triangles</dd>
         <dt>Obstacles</dt><dd>{{ scalar(inp(d, 'obstacles')) }}</dd>
+        @if (inp(d, 'sol.modele') !== undefined) {
+          <dt>Sol vu par le plancher</dt><dd>{{ scalar(inp(d, 'sol.modele')) }} — {{ scalar(inp(d, 'sol.t_moyenne_c')) }} °C en moyenne
+            ({{ scalar(inp(d, 'sol.t_min_c')) }} à {{ scalar(inp(d, 'sol.t_max_c')) }} °C)</dd>
+        }
         <dt>Occupation</dt><dd>{{ scalar(inp(d, 'occupation')) }}</dd>
       </dl>
       @if (inp(d, 'geometry.baies')) {
