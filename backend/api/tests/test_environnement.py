@@ -374,7 +374,10 @@ class EnvironmentServiceTest(TestCase):
         from .. import environment_service as svc
         from .. import lidar_source
         footprint = [[47.00000, 0.70000], [47.00000, 0.70010], [47.00007, 0.70010], [47.00007, 0.70000]]
+        from .. import mns_source
+        no_mns = lidar_source.LidarUnavailable('aucun modèle numérique de surface sur cette zone')
         with mock.patch.object(lidar_source, 'fetch_lidar_tiles', return_value=[]), \
+                mock.patch.object(mns_source, 'synthetic_points', side_effect=no_mns), \
                 mock.patch.object(elevation, 'ground_altitude', return_value=(90.0, 'ign')), \
                 mock.patch.object(geodata, 'fetch_ign_buildings', return_value=[
                     {'footprint_latlon': footprint, 'height_m': 9.0, 'approx_height': False,

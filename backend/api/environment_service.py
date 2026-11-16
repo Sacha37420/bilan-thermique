@@ -397,8 +397,9 @@ def generate(params, building=None, progress_cb=None, self_polygon=None):
             lat0, lon0, half, north, ground_z, include_veg, include_terrain,
             params.get('terrain_spacing_m') or 10.0, self_polygon, report,
         )
-        warnings.insert(0, f"LiDAR HD indisponible ({net.reason(exc)}) : repli sur la BD TOPO / OpenStreetMap — "
-                           "hauteurs issues des attributs, toits plats, arbres à hauteur forfaitaire.")
+        warnings.insert(0, f"LiDAR HD indisponible, ni nuage ni modèle numérique de surface ({net.reason(exc)}) : "
+                           "repli sur la BD TOPO / OpenStreetMap — hauteurs issues des attributs, toits plats, "
+                           "arbres à hauteur forfaitaire.")
 
     if ground_z is not None:
         ground_z = round(float(ground_z), 2)
