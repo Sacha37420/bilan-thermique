@@ -34,7 +34,8 @@ import shapely.ops
 
 from .inputs import CEILING_H, GROUND_T_DEFAULT, ORIENTATIONS, RESIDENTIAL, _v, effective_ventilation, u_from_layers
 
-ENGINE_VERSION = 'n2-1'
+ENGINE_VERSION = 'n2-2'   # -2 : réflexion du sol relevée (albédo de l'environnement relié)
+FICHE_ENGINES = ('n2-1', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
 H_I, H_E, R_GROUND = 7.7, 25.0, 0.5
 DX_MAX = 0.05
 FRAME_FRACTION = 0.2          # part de cadre d'une baie : même valeur que N1 (frame_factor 0,8)

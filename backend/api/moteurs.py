@@ -84,8 +84,10 @@ CATALOGUE = [
              'prise telle quelle avec ses parois du catalogue ; seuls les réglages et la météo viennent de la fiche.'),
         ],
         'entrees': ['Fiche effective du bâtiment', 'Géométrie (emprise, hauteur, niveaux, toiture) ou enveloppe experte',
-                    'Obstacles : environnement relié (LiDAR × BD TOPO) s’il existe, sinon les voisins de la chaîne, '
-                    'extrudés ; protections solaires géométriques (Lot 14)', 'Météo horaire'],
+                    'Obstacles : environnement relié (LiDAR × BD TOPO) s’il existe — généré au début du calcul si '
+                    'l’orchestrateur du parc le demande —, sinon les voisins de la chaîne, extrudés ; protections '
+                    'solaires géométriques (Lot 14)',
+                    'Réflexion par le sol : albédo relevé sur les orthophotos, avec un environnement relié', 'Météo horaire'],
         'sorties': ['Besoins de chauffage et de refroidissement, puissance maximale', 'Températures d’air et opérative',
                     'Bilan, besoins mensuels', 'Énergie finale, primaire, CO₂, coût, étiquette du modèle'],
         'duree': (f'Par année simulée : {_num(_a)} s + {_num(_b)} s par triangle, + {_num(_shade)} s pour l’ombrage '

@@ -179,7 +179,9 @@ def process_one(building, owner_sub=''):
     final_status = building.pipeline_status
     # « en cours » jusqu'à la fin des calculs : le tableau ne montre pas un bâtiment fini sans résultat.
     Building.objects.filter(pk=building.pk).update(pipeline_status='en_cours')
-    # Réglages du parc (orchestration) : météo par défaut (A7) et calculs automatiques (A8).
+    # Réglages du parc (orchestration) : environnement observé (A6, avant N0/N1 qui en tirent
+    # l'horizon), météo par défaut (A7) et calculs automatiques (A8).
+    a6 = pipeline.apply_environment(building)
     a7 = pipeline.apply_default_weather(building, owner_sub)
     levels = pipeline.auto_levels(building)
     try:
@@ -190,6 +192,8 @@ def process_one(building, owner_sub=''):
     except calc_service.CalcError as exc:
         ok, err = False, str(exc)[:300]
     pipe = dict(building.pipeline or {})
+    if a6 is not None:
+        pipe.setdefault('steps', {})['A6'] = a6
     if a7 is not None:
         pipe.setdefault('steps', {})['A7'] = a7
     pipe.setdefault('steps', {})['A8'] = {'ok': ok, **({'error': err} if err else {}),

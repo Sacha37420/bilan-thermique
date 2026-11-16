@@ -27,4 +27,5 @@ export interface ParoiModelSummary { id: number; name: string; is_glazing: boole
 export const STEP_LABELS: Record<string, string> = {
   A1: 'Identification (BAN, RNB)', A2: 'Fiche nationale BDNB et DPE existant',
   A3: 'Géométrie, mitoyenneté, masques (BD TOPO)', A5: 'Compositions par archétype (TABULA)',
+  A6: 'Environnement observé (LiDAR HD × BD TOPO)', A7: 'Météo par défaut', A8: 'Calculs automatiques N0 / N1',
 };

@@ -285,11 +285,13 @@ def mark_previous_replaced(new_env, building):
     return ids
 
 
-def generate(params, building=None, progress_cb=None):
+def generate(params, building=None, progress_cb=None, self_polygon=None):
     """Génère et ENREGISTRE un environnement. Retourne (env, summary).
 
     Repère : celui du bâtiment de référence s'il y en a un (son origine, son
-    cap, son altitude), sinon le point demandé, nord vrai, z = 0 au sol."""
+    cap, son altitude), sinon le point demandé, nord vrai, z = 0 au sol.
+    `self_polygon` : empreinte du bâtiment étudié (repère local) quand son
+    enveloppe ne la donne pas — sans elle, il serait son propre obstacle."""
     def report(stage, pct):
         if progress_cb:
             progress_cb(stage, pct)
@@ -298,7 +300,7 @@ def generate(params, building=None, progress_cb=None):
         lat0, lon0 = building.georef_lat, building.georef_lon
         north = building.georef_north_offset_deg or 0.0
         ground_z = building.georef_ground_z
-        self_polygon = geodata.envelope_footprint_polygon(building.envelope)
+        self_polygon = self_polygon or geodata.envelope_footprint_polygon(building.envelope)
     else:
         lat0, lon0 = params['lat'], params['lon']
         north, ground_z, self_polygon = 0.0, None, None
@@ -416,6 +418,68 @@ def generate(params, building=None, progress_cb=None):
         'n_objects': len(objects), 'n_triangles': len(env.envelope['triangles']),
     }
     return env, summary
+
+
+# ── Environnement automatique (orchestrateur du parc, réglage `environnement.mode`) ──
+
+ENV_MODES_N2 = ('avant_n2', 'chaine')     # modes qui génèrent l'environnement manquant avant un N2
+ENV_MODES_CHAIN = ('chaine',)             # modes qui le génèrent pendant la chaîne automatique (A6)
+ENV_ESTIMATE_S = 180                      # ordre de grandeur d'une génération LiDAR à 150 m (2 vCPU)
+
+
+def auto_mode(building):
+    """Mode d'environnement du parc du bâtiment ('manuel' hors parc)."""
+    from . import reglages
+    return reglages.for_building(building, 'orchestration').get('environnement.mode', 'manuel')
+
+
+def wanted(building, when):
+    """Vrai si le parc demande un environnement pour ce bâtiment à ce moment ('n2' ou 'chaine') et
+    qu'aucun n'est relié. Un environnement déjà relié n'est jamais remplacé (il a pu être retouché)."""
+    modes = ENV_MODES_N2 if when == 'n2' else ENV_MODES_CHAIN
+    return (auto_mode(building) in modes and building.environment_id is None
+            and building.georef_lat is not None and building.georef_lon is not None)
+
+
+def _self_polygon(building):
+    """Empreinte du bâtiment (repère local) : géométrie corrigée, sinon emprise de la chaîne, sinon
+    enveloppe. Même ordre que le N2 depuis la fiche (`n2_inputs._footprint`)."""
+    import shapely.geometry
+    from . import geometry_service
+    edit = geometry_service.active_edit(building)
+    fp = edit.footprint_xy if edit is not None else (building.pipeline or {}).get('footprint_xy')
+    if fp and len(fp) >= 3:
+        poly = shapely.geometry.Polygon(fp)
+        if poly.is_valid and poly.area > 1:
+            return poly
+    return geodata.envelope_footprint_polygon(building.envelope)
+
+
+def ensure_for_building(building, progress_cb=None):
+    """Génère l'environnement observé d'un bâtiment de parc selon ses réglages, et le relie.
+
+    Rend le compte rendu de l'étape (`{'ok': True, 'environment_id', 'source', 'warnings', 'duree_s'}`
+    ou `{'ok': False, 'error'}`). **Ne lève jamais** : un échec laisse le bâtiment sans environnement,
+    et les calculs reprennent les voisins BD TOPO de la chaîne."""
+    import time
+    from . import reglages
+    orch = reglages.for_building(building, 'orchestration')
+    params = {'radius_m': float(orch.get('environnement.rayon_m', 150)),
+              'include_vegetation': bool(orch.get('environnement.vegetation', True)),
+              'include_terrain': bool(orch.get('environnement.terrain', True)),
+              'name': f'Environnement — {building.name or building.address or f"bâtiment {building.pk}"}'[:140]}
+    t0 = time.monotonic()
+    try:
+        env, summary = generate(params, building=building, progress_cb=progress_cb,
+                                self_polygon=_self_polygon(building))
+    except Exception as exc:  # noqa: BLE001 — l'environnement n'est qu'un complément
+        return {'ok': False, 'error': net.reason(exc) if not isinstance(exc, EnvironmentServiceError) else str(exc)[:300]}
+    building.environment = env
+    building.sun_visibility_stale = True
+    Building.objects.filter(pk=building.pk).update(environment=env, sun_visibility_stale=True)
+    return {'ok': True, 'environment_id': env.pk, 'source': summary['source'],
+            'n_triangles': summary['n_triangles'], 'warnings': summary['warnings'][:5],
+            'rayon_m': params['radius_m'], 'duree_s': round(time.monotonic() - t0, 1)}
 
 
 def legacy_objects(lat0, lon0, half, north, ground_z, include_veg, include_terrain,

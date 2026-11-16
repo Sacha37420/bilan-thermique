@@ -51,7 +51,7 @@ export const SOURCE_DU_GROUPE: Record<string, string> = {
   'Compositions': 'Archétypes TABULA-FR',
   'Météo': 'PVGIS (année type) ou Open-Meteo (année réelle)',
   'Calcul automatique': 'Moteurs de calcul de l’app',
-  'Environnement': 'LiDAR HD et BD TOPO (IGN)',
+  'Environnement': 'LiDAR HD, BD TOPO, orthophotos et CoSIA (IGN)',
   'Façades': 'Photos de rue Panoramax',
 };
 
@@ -60,7 +60,8 @@ export const MODELE_MOTS: Record<string, string> = { N0: 'Mensuel', N1: 'Horaire
 /** Étapes de la chaîne automatique (compte rendu `Building.pipeline.steps`). */
 export const ETAPES: Record<string, string> = {
   A1: 'Identification (adresse, RNB)', A2: 'Fiche nationale BDNB et DPE', A3: 'Géométrie, mitoyenneté, masques (BD TOPO)',
-  A5: 'Compositions par archétype',
+  A5: 'Compositions par archétype', A6: 'Environnement observé (LiDAR HD)', A7: 'Météo par défaut',
+  A8: 'Calculs automatiques N0 / N1',
 };
 
 export interface BatimentPipeline {

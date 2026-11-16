@@ -39,6 +39,11 @@
     @if (p.level === 'N2' && !p.can_launch && !p.blockers.length) {
       <p class="rf-hint">Le calcul détaillé par paroi est réservé aux gestionnaires du bâtiment, et se lance bâtiment par bâtiment.</p>
     }
+    @if (p.level === 'N2' && p.environment; as envPlan) {
+      <p class="rf-hint">L’orchestrateur du parc génère d’abord l’environnement observé (LiDAR HD × BD TOPO,
+        {{ envPlan.rayon_m }} m autour du bâtiment, {{ duration(envPlan.estimate_s) }} comprises dans la durée estimée) :
+        il restera relié au bâtiment et servira aussi à N0/N1. En cas d’échec, le calcul se fait avec les voisins BD TOPO.</p>
+    }
     @if (p.busy && p.can_launch) { <p class="rf-hint">Un calcul lourd tourne déjà sur le lab : le vôtre sera refusé tant qu'il n'est pas fini.</p> }
     @if (job(); as j) {
       <div class="progress" role="status">

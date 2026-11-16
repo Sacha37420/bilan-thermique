@@ -65,7 +65,7 @@ class ParcDocumentsView(APIView):
 IDENTITY_BLOCKS = ('identite',)
 ENVELOPE_BLOCKS = ('enveloppe', 'menuiseries')
 SYSTEM_BLOCKS = ('ventilation', 'systemes', 'usage')
-STEP_SOURCES = {'A1': 'BAN, RNB', 'A2': 'BDNB (CSTB)', 'A3': 'BD TOPO (IGN)', 'A5': 'Archétypes TABULA-FR',
+STEP_SOURCES = {'A1': 'BAN, RNB', 'A2': 'BDNB (CSTB)', 'A3': 'BD TOPO (IGN)', 'A6': 'LiDAR HD × BD TOPO (IGN)', 'A5': 'Archétypes TABULA-FR',
                 'A7': 'Météo (Open-Meteo)', 'A8': 'Calculs automatiques N0 / N1'}
 
 

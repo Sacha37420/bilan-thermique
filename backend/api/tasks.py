@@ -451,7 +451,14 @@ def after_init(building, job):
     from . import calc_service, pipeline
     if building.georef_lat is None:
         return None
-    # Bâtiment de parc : météo par défaut et calculs automatiques selon les réglages du parc.
+    # Bâtiment de parc : environnement observé (A6), météo par défaut (A7) et calculs automatiques,
+    # selon les réglages du parc.
+    a6 = pipeline.apply_environment(building, progress=lambda m, p: job.set_state(progress=p, message=m))
+    if a6 is not None:
+        pipe = dict(building.pipeline or {})
+        pipe.setdefault('steps', {})['A6'] = a6
+        building.pipeline = pipe
+        building.save(update_fields=['pipeline'])
     a7 = pipeline.apply_default_weather(building, job.owner_sub)
     if a7 is not None:
         pipe = dict(building.pipeline or {})

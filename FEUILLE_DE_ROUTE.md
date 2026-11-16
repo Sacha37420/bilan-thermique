@@ -608,6 +608,35 @@ Réglages pris en compte (chacun prouvé par un test) : toute l'orchestration sa
 (chaîne relancée, réponse au questionnaire, nouvelle amélioration), sans rien réécrire de ce qui est déjà posé.
 Corrigés au passage : SystemesComponent (NG0100 sans zone), visionneuse 3D d'un bâtiment sans maillage.
 
+## Lot 29 — Environnement observé dans l'orchestrateur   ·   statut : livré
+**Objectif :** que l'orchestrateur du parc récupère aussi, automatiquement, l'environnement observé (LiDAR HD ×
+BD TOPO, albédo des orthophotos, essences CoSIA) — opération lourde, mais objectif du propriétaire (2026-11-16) —
+au lieu de le laisser à la seule génération à la main.
+**Tâches :**
+- [x] Réglage `environnement.mode` branché : « à la demande », « avant chaque calcul détaillé, s'il manque »,
+  « pendant la récupération automatique » (étape **A6** de la chaîne, avant N0/N1 qui en tirent l'horizon par
+  façade ; couvre aussi le N2) ; réglages `environnement.rayon_m` (150 m), `.vegetation`, `.terrain`
+- [x] `environment_service.ensure_for_building` : génère, relie, périme l'ombrage ; ne lève jamais (échec ⇒ voisins
+  BD TOPO, cause fixe au compte rendu) ; un environnement déjà relié (éventuellement retouché) n'est jamais remplacé ;
+  empreinte du bâtiment étudié prise sur la géométrie corrigée ou l'emprise de la chaîne
+- [x] N2 : environnement généré au début du calcul (même tâche, donc sous le verrou des calculs lourds), empreinte
+  des entrées refaite ensuite (le calcul reste « à jour ») ; un N2 terminé sans environnement n'est pas repris ;
+  durée estimée et annonce sur la page Simulation
+- [x] N2 depuis la fiche : réflexion par le sol (albédo relevé) passée au solveur, comme dans l'outil Calcul 3D —
+  moteur `n2-2` (les N2 `n2-1` restent reconnus comme lancés depuis la fiche, et deviennent périmés)
+**Tests à passer avant de clore le lot :**
+- [x] `api/tests/test_environnement_orchestre.py` : modes, chaîne (file du parc et initialisation seule), ordre A6 →
+  N0/N1, réglages transmis, échec sans arrêt et message fixe, N2 généré et à jour, ancien N2 non repris, albédo
+  transmis, hors parc inchangé
+- [x] Suite backend complète verte ; `ng build` sans erreur
+**Vérifié le :** 2026-11-16 — backend : **510 tests OK** (12 nouveaux, `api/tests/test_environnement_orchestre.py` ; base
+jetable, image de l'app). `ng build` (production) OK. Essai réel (base jetable, réseau ouvert, hôtel de ville de
+Tours, parc en mode « pendant la récupération automatique », rayon 80 m) : chaîne complète en 24 s, dont **A6 en
+18 s** (LiDAR HD : 20 bâtiments, 7 arbres, terrain, albédo du sol), N0 et N1 calculés ensuite avec l'horizon
+« environnement relevé » ; N2 en 11 s sur l'environnement relié, « à jour », relance sans nouveau calcul.
+Limite relevée, antérieure au lot : l'horizon par façade (chaîne comme environnement) prend l'obstacle le plus haut
+du cône ±45° et l'applique à toute la façade — 71° au sud (BD TOPO) et 79° (environnement) sur ce cas, à revoir.
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports
