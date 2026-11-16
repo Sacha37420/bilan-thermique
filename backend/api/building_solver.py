@@ -562,6 +562,7 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
 
     t_ground (payload, Lot K) : température de sol constante — utilisée à la place de
     weather[h]['t_ext'] pour tout triangle dont envelope.triangles[i]['boundary'] == 'ground'.
+    Lot 32 : un point météo qui porte `t_ground` (série du sol simulé, `engines.sol`) prime sur la constante.
     Sans effet sur les triangles 'exterior_air' (comportement historique, défaut).
 
     r_ground (payload, Lot AB3, défaut DEFAULT_R_GROUND) : résistance du SOL
@@ -969,7 +970,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             sky_view_factor=sky_view_factor, sun_visibility_grid=sun_visibility_grid,
             occluder_intersector=occluder_intersector, centroids=centroids,
             vegetation_scene=vegetation_scene,
-            air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w, t_ground=t_ground,
+            air_idx=air_idx, g_vent=g_vent, apports_internes_w=apports_internes_w,
+            t_ground=point.get('t_ground', t_ground),   # Lot 32 : série horaire (sol simulé) si la météo la porte
             frame_g=frame_g, shading_fs_dir=shading_fs_dir, shading_fs_dif=shading_fs_dif,
             volet_closed=volet_closed, diagnostics=hour_diagnostics,
             ground_reflect_factor=ground_reflect_factor,

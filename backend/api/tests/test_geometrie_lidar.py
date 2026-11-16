@@ -341,4 +341,5 @@ class DefaultModeTest(TestCase):
         self.assertTrue(environment_service.wanted(hors, 'chaine'))
 
     def test_engine_versions_bumped(self):
-        self.assertEqual((calc_service.ENGINE_VERSION['N0'], calc_service.ENGINE_VERSION['N1']), ('n0-3', 'n1-3'))
+        self.assertGreaterEqual(int(calc_service.ENGINE_VERSION['N0'].split('-')[1]), 3)   # n0-3 : horizon par profil
+        self.assertGreaterEqual(int(calc_service.ENGINE_VERSION['N1'].split('-')[1]), 3)

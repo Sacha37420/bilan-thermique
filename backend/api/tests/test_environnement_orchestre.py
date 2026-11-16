@@ -9,6 +9,7 @@ import shapely.geometry as sg
 from django.test import TestCase
 
 from .. import calc_service, environment_service, geodata, observed_env as oe, parc, reglages, simulation, tasks
+from ..engines import n2_inputs
 from ..models import Building, CalcRun, Environment, Job, Portfolio, PortfolioMember
 from .test_n2_fiche import SQUARE, fiche, make_building, tmy
 from .test_navigation import set_reglages
@@ -238,7 +239,7 @@ class N2Test(Base):
         with tmy(), generating(), mock.patch('api.building_solver.run_building_simulation', side_effect=spy):
             run = calc_service.run_n2(run)
         self.assertEqual(seen['albedo'], ALBEDO)
-        self.assertEqual(run.inputs['engine'], 'n2-2')
+        self.assertEqual(run.inputs['engine'], n2_inputs.ENGINE_VERSION)
         # Un N2 de l'ancienne version reste reconnu comme lancé depuis la fiche (simplement périmé).
         CalcRun.objects.filter(pk=run0.pk).update(settings={**run0.settings, 'engine': 'n2-1'})
         run0.refresh_from_db()

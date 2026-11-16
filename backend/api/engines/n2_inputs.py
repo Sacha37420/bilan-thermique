@@ -34,8 +34,8 @@ import shapely.ops
 
 from .inputs import CEILING_H, GROUND_T_DEFAULT, ORIENTATIONS, RESIDENTIAL, _v, effective_ventilation, u_from_layers
 
-ENGINE_VERSION = 'n2-2'   # -2 : réflexion du sol relevée (albédo de l'environnement relié)
-FICHE_ENGINES = ('n2-1', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
+ENGINE_VERSION = 'n2-3'   # -2 : réflexion du sol relevée (albédo de l'environnement relié) ; -3 : sol simulé (Lot 32)
+FICHE_ENGINES = ('n2-1', 'n2-2', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
 H_I, H_E, R_GROUND = 7.7, 25.0, 0.5
 DX_MAX = 0.05
 FRAME_FRACTION = 0.2          # part de cadre d'une baie : même valeur que N1 (frame_factor 0,8)
@@ -371,12 +371,15 @@ def payload_from_fiche(values, a_floor):
     return payload, residential
 
 
-def weather_for_n2(series, north, residential):
-    """Série météo du N2 : azimut solaire dans le repère local du bâtiment ; jours ouvrés marqués."""
+def weather_for_n2(series, north, residential, ground=None):
+    """Série météo du N2 : azimut solaire dans le repère local du bâtiment ; jours ouvrés marqués ; température
+    vue par le plancher bas heure par heure (`ground`, Lot 32 — sol simulé, vide sanitaire, sous-sol)."""
     from ..weather_source import to_local_azimuth
     out = []
     for i, w in enumerate(series):
         p = dict(w)
+        if ground is not None:
+            p['t_ground'] = round(float(ground[i]), 3)
         p['sun_azimuth'] = round(to_local_azimuth(float(w['sun_azimuth']), north), 3) if north else w['sun_azimuth']
         if not residential:
             p['occupied'] = (i // 24) % 7 < 5
@@ -400,7 +403,13 @@ def build(building, scenario=None, values=None):
     else:
         mode = 'fiche'
         envelope, geom = envelope_from_fiche(building, scenario, vals)
-        layers, frames, described = paroi_layers_from_fiche(vals)
+        # Lot 32 : au-dessus d'un vide sanitaire ou d'un sous-sol, le plancher a son U propre (le local tampon et le
+        # sol sont simulés à part) ; `plancher.u` est le U équivalent vers l'extérieur (`engines.sol.floor_u_node`).
+        gp = _ground_params(building, scenario, vals)
+        from .sol import floor_u_node
+        u_node, _note = floor_u_node(gp.floor_type, gp.floor_area or gp.a_floor, gp.floor_perimeter, gp.u_floor,
+                                     gp.basement_depth)
+        layers, frames, described = paroi_layers_from_fiche({**vals, 'plancher.u': u_node} if gp.floor_area else vals)
     env, env_source = occluders(building, envelope, scenario)
     limits = ['Un seul nœud d’air : planchers intermédiaires et refends non modélisés (D9).']
     if not residential:
@@ -415,6 +424,23 @@ def build(building, scenario=None, values=None):
         'occupation': 'logement (constante)' if residential else 'tertiaire : 8 h–19 h, lundi–vendredi',
         'limites': limits,
     }
+    ground_params = _ground_params(building, scenario, vals)
     return {'envelope': envelope, 'layers': layers, 'frames': frames, 'payload': payload,
             'environment': env, 'residential': residential, 'a_floor': a_floor, 'values': vals,
-            'snapshot': snapshot}
+            'snapshot': snapshot, 'ground_params': ground_params}
+
+
+def _ground_params(building, scenario, vals):
+    """Mêmes paramètres de plancher bas que N0/N1 (type, emprise, périmètre exposé, U, profondeur du sous-sol)."""
+    from .. import geometry_service
+    from .inputs import from_fiche
+    return from_fiche(vals, geometry_service.effective_summary(building, scenario))
+
+
+def ground_for(built, series):
+    """Température vue par le plancher bas du N2, heure par heure, et sa description (Lot 32, `engines.sol`) ;
+    intérieur pris à la consigne de chauffage (couplage non itéré, comme N0/N1)."""
+    from .inputs import ground_series
+    t_e = np.array([float(w['t_ext']) for w in series])
+    t, _u, desc = ground_series(built['ground_params'], t_e, float(built['payload']['interior']['t_min']))
+    return t, desc
