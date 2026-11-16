@@ -310,6 +310,37 @@ def fact_dict(f, viewer_sub=''):
     }
 
 
+PERCENT_KEYS = {'identite.mitoyennete', *(f'baies.ratio_{o}' for o in ('N', 'E', 'S', 'O'))}
+PLAIN_INT_KEYS = {'identite.annee_construction'}
+
+
+def _fr_number(x, digits=2):
+    s = f'{x:,.{digits}f}'.rstrip('0').rstrip('.') if isinstance(x, float) else f'{x:,}'
+    return s.replace(',', '\u202f').replace('.', ',')
+
+
+def display_value(key, value):
+    """Valeur d'un fait en mots, pour un rendu lu par d'autres (Lot 34) : libellé d'un choix au lieu de son code
+    (« Sous-sol non chauffé », pas `sous_sol`), part en pourcentage, année sans séparateur de milliers, unité."""
+    spec = BY_KEY.get(key)
+    if value is None or value == '':
+        return '—'
+    if isinstance(value, bool):
+        return 'oui' if value else 'non'
+    if spec is not None and spec.kind == 'enum' and spec.choices:
+        return spec.choices.get(value, str(value))
+    if isinstance(value, (int, float)):
+        if key in PLAIN_INT_KEYS:
+            return str(int(value))
+        if key in PERCENT_KEYS:
+            return f'{_fr_number(round(100 * float(value), 1), 1)} %'
+        txt = _fr_number(float(value) if isinstance(value, float) else value)
+        return f'{txt} {spec.unit}'.strip() if spec is not None and spec.unit else txt
+    if isinstance(value, (list, tuple)):
+        return ', '.join(str(v) for v in value)
+    return str(value)
+
+
 def catalogue_json():
     return [{'key': k.key, 'label': k.label, 'block': k.block, 'kind': k.kind, 'unit': k.unit, 'min': k.min,
              'max': k.max, 'choices': k.choices, 'weight': k.weight, 'help': k.help} for k in CATALOGUE]

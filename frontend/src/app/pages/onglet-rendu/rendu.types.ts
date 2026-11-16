@@ -1,7 +1,7 @@
 /** Onglet Rendu : fiche d'identité (contrat bt-navigation §2.6) et libellés du rendu de parc (§2.3). */
 import { Approfondissement, Method } from '../../core/refonte.types';
 
-export interface FaitIdentite { valeur: unknown; methode: Method | string; libelle: string; unite: string; }
+export interface FaitIdentite { valeur: unknown; methode: Method | string; libelle: string; unite: string; texte?: string; source?: string; }
 export type BlocFaits = Record<string, FaitIdentite>;
 export type Indicateurs = Record<string, unknown> & { computed_at?: string; a_jour?: boolean };
 
@@ -11,12 +11,20 @@ export interface FicheIdentite {
   enveloppe: BlocFaits | Record<string, BlocFaits>;
   systemes: BlocFaits | Record<string, BlocFaits>;
   meteo: { jeu: string; type: string } | null;
-  environnement: { id: number; objets: number } | null;
+  environnement: { id: number; objets: number; source?: string; batiments?: number; arbres?: number; rayon_m?: number | null } | null;
+  /** Lot 34 : origine de la géométrie (BD TOPO seule ou croisée) et horizon par façade. */
+  geometrie?: { source: string; libelle?: string; note?: string; decalage_m?: number | null; hauteur_egout_m?: number | null;
+                hauteur_faitage_m?: number | null; toiture?: string | null; pente_deg?: number | null;
+                bdtopo?: { hauteur_m: number | null } | null;
+                horizon_deg?: Record<string, number> | null; horizon_source?: string };
+  /** Lot 34 : sol vu par le plancher bas (modèle de sol 1D, Lot 32), d'après le dernier N1 / N0. */
+  plancher?: { modele: string; t_moyenne_c: number; t_min_c: number; t_max_c: number; u_equivalent?: number;
+               u_propre?: number; note?: string; profondeur_m?: number } | null;
   resultats: Partial<Record<'N0' | 'N1' | 'N2', Indicateurs | null>>;
   ameliorations: { id: number; name: string; bouquets: unknown[]; dernier: Indicateurs | null }[];
   confiance: number; completude: number;
   approfondissement?: Approfondissement;
-  sources: { etape: string; ok: boolean; source: string; date: string | null }[];
+  sources: { etape: string; libelle?: string; ok: boolean; saute?: boolean; source: string; date: string | null }[];
 }
 
 /** Repli si les réglages de rendu ne sont pas lisibles (hors parc, route absente) — mêmes défauts que le serveur. */

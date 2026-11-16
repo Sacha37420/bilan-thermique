@@ -181,6 +181,11 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
                              'n_vent_vol_h': round(p.n_vent, 3)}
     run.status = Job.DONE
     run.results = res
+    # Lot 34 : entrées figées lisibles — sol vu par le plancher et origine de la géométrie (sans entrer dans
+    # l'empreinte des entrées, qui ne dépend que des données).
+    run.inputs = {**(run.inputs or {}), 'sol': res.get('sol'),
+                  'geometrie_origine': {k: v for k, v in ((building.pipeline or {}).get('geometrie') or {'source': 'bdtopo'}).items()
+                                        if k in ('source', 'libelle', 'note', 'hauteur_egout_m', 'decalage_m')}}
     run.indicators = calc_runs.indicators_from(res, p.a_floor, level)
     e = res['energy']
     run.indicators.update({k: e[k] for k in ('final_kwh_m2', 'primary_kwh_m2', 'co2_kg_m2', 'cost_eur', 'final_kwh',
@@ -191,7 +196,7 @@ def run_level(building, level, *, scenario=None, weather_spec=None, owner_sub=''
     run.indicators['confidence'] = settings['confidence']
     run.indicators['completeness'] = settings['completeness']
     run.duration_s = round(time.monotonic() - t0, 3)
-    run.save(update_fields=['status', 'results', 'indicators', 'duration_s'])
+    run.save(update_fields=['status', 'results', 'indicators', 'duration_s', 'inputs'])
     return run, True
 
 

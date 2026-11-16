@@ -413,10 +413,16 @@ class IdentiteTest(ParcCase):
         self.assertEqual(r.status_code, 200, r.content)
         d = r.json()
         self.assertEqual(set(d), {'batiment', 'identite', 'enveloppe', 'systemes', 'meteo', 'environnement', 'resultats',
-                                  'ameliorations', 'confiance', 'completude', 'approfondissement', 'sources'})
+                                  'ameliorations', 'confiance', 'completude', 'approfondissement', 'sources',
+                                  'geometrie', 'plancher'})
         self.assertEqual(d['batiment']['portfolio'], self.p.pk)
         self.assertEqual(d['identite']['identite.usage'], {'valeur': 'maison', 'methode': 'declare', 'libelle': 'Usage',
-                                                           'unite': ''})
+                                                           'unite': '', 'texte': 'Maison individuelle', 'source': ''})
+        # Lot 34 : valeurs en mots, sol vu par le plancher, origine de la géométrie.
+        self.assertEqual(d['systemes']['systeme.generateur']['texte'], facts.BY_KEY['systeme.generateur'].choices['chaudiere_gaz'])
+        self.assertIn('t_moyenne_c', d['plancher'])
+        self.assertEqual(d['geometrie']['source'], 'bdtopo')
+        self.assertEqual(d['resultats']['N1']['limites'], [])
         self.assertIn('mur.u', d['enveloppe'])
         self.assertIn('systeme.generateur', d['systemes'])
         self.assertIsNone(d['resultats']['N0'])

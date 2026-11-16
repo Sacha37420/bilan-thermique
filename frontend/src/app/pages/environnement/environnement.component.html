@@ -23,7 +23,7 @@
       <strong>recalées</strong>, puis chaque bâtiment reçoit sa toiture relevée (pans, faîtages,
       ressauts). Les bâtiments absents de la BD TOPO sont ajoutés, ceux que le LiDAR ne voit plus
       sont retirés d'office (restaurables). Chaque arbre a sa hauteur et sa transparence mesurées.
-      Hors couverture LiDAR, repli sur la BD TOPO / OpenStreetMap (hauteurs forfaitaires, toits plats).
+      Sans nuage LiDAR, la surface est prise sur un modèle numérique de surface (MNS LiDAR HD, sinon MNS Correl) ; sans aucun relevé, repli sur la BD TOPO / OpenStreetMap (hauteurs forfaitaires, toits plats). La récupération automatique génère cet environnement d'elle-même (réglage du parc « Environnement observé »).
     </p>
 
     @if (!embedBuildingId) {
