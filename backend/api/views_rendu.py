@@ -87,7 +87,7 @@ class _Doc(APIView):
         except CibleError:
             return None, Response(CIBLE_INTROUVABLE, status=status.HTTP_404_NOT_FOUND)
         try:
-            spec = spec_mod.valider(brut, ctx.mesures())
+            spec = spec_mod.valider(brut, ctx.mesures(), tolerant=True)
         except spec_mod.SpecError as exc:
             return None, _bad(str(exc))
         if spec['portee'] != portee:

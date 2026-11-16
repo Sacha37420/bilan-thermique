@@ -981,7 +981,8 @@ comparer ; dans le paramétrage des rendus, choisir la ou les simulations dont o
 - [x] Rendu : champ `niveaux` des blocs chiffres clés, tableau (bâtiments éclatés par simulation ; potentiels et calculs
   filtrés) et carte (une seule) ; graphe à cases à cocher ; réglage « Simulations affichées » du document
 - [x] Corrigé au passage : bouquet de la carte et numéro de calcul de la vue 3D envoyés en texte, refusés par le serveur ;
-  un bloc tout juste ajouté (tableau sans colonnes ni tri, chiffres clés sans chiffre) faisait refuser tout le document
+  un bloc tout juste ajouté ou mal réglé faisait refuser tout le document : à l’aperçu et dans les exports il est
+  désormais « à régler » (avec la raison), un modèle enregistré reste validé strictement
 **Tests à passer avant de clore le lot :**
 - [x] `api.tests.test_rendu_simulations` (validation, chiffres clés par simulation et écart au réel de la même
   simulation, tableau éclaté et trié sur la plus fine, simulation imposée, potentiels et calculs filtrés, carte)

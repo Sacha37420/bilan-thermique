@@ -169,6 +169,8 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
   de chacune côte à côte — une colonne par série et par simulation (chiffres clés), une colonne par simulation pour
   chaque résultat (tableau des bâtiments), une couleur ou un petit graphe par simulation (graphe). Une carte n'en
   montre qu'une. Le paramétrage du document a un réglage « Simulations affichées » qui s'applique à tous les blocs.
+- À l'aperçu et dans les exports, un bloc mal réglé (tout juste ajouté, mal placé) s'affiche « à régler » avec la
+  raison, sans faire refuser le document ; l'enregistrement d'un modèle, lui, refuse un bloc invalide.
 - **15 formes de graphes** Plotly (barres, empilées, groupées, courbes, aires, nuage, bulles, boîte, violon,
   histogramme, camembert, radar, carte de chaleur, cascade, coordonnées parallèles) ; séries réel / bouquets, couleur,
   taille, facettes, filtres, agrégations ; aucune couleur écrite par le serveur (palette posée au rendu).
@@ -202,7 +204,7 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
 
 ## Tests
 
-- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **750 tests**
+- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **751 tests**
   au 2026-11-16. Aucun appel réseau : tout service externe (open data, IA, service de rendu) est simulé. Depuis le lab :
   `bash chantiers/tests/essai.sh bilan-thermique` (PostgreSQL jetable, réseau fermé).
 - Service de rendu : `npm test` (unitaires) et `npm run test:integration` dans `rendu-service/` (dans son image).

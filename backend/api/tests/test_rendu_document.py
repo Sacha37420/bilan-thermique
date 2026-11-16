@@ -151,7 +151,10 @@ class DocumentTest(RenduMixin, TestCase):
         self.assertEqual(self.doc(self.g, {'batiment': self.b1.pk}, spec).status_code, 400)       # portée ≠ cible
         r = self.doc(self.g, {'parc': self.p.pk}, {'version': 1, 'portee': 'parc', 'sections': [
             {'titre': 't', 'blocs': [{'type': 'fiche'}]}]})
-        self.assertEqual(r.json(), {'detail': 'La fiche d’identité appartient à un rendu de bâtiment.'})
+        # Lot 45 : un bloc mal placé ou mal réglé s'affiche « à régler » au lieu de faire refuser tout le document.
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()['sections'][0]['blocs'][0],
+                         {'type': 'fiche', 'indisponible': 'Bloc à régler : La fiche d’identité appartient à un rendu de bâtiment.'})
         r = self.doc(self.g, {'parc': self.p.pk}, {'version': 2, 'portee': 'parc', 'sections': []})
         self.assertEqual(r.json(), {'detail': 'Version de spécification inconnue.'})
         self.assertEqual(self.doc(self.g, {'parc': self.p.pk}, modele_id=987654).status_code, 404)
