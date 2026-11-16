@@ -13,6 +13,9 @@ from . import views_reglages as vrg
 from . import mcp as mcp_views
 from .views_questionnaire import QuestionsView, QuestionnaireView
 from .views_fiche import CatalogueView, FicheView, FactsView, FactDetailView
+# Chantier bt-potentiels (contrat chantiers/bt-potentiels, I1-I7) — routes déclarées par la fondation.
+from . import views_indicateurs as vind, views_triangles as vtri, views_potentiels as vpot, views_rendu as vrd
+from .ameliorations import views as vam
 from .views import (
     MeView, Calcul1DView,
     ParoiModelListCreateView, ParoiModelDetailView,
@@ -123,4 +126,23 @@ urlpatterns = [
     path('parcs/<int:pk>/documents/', vrg.ParcDocumentsView.as_view()),
     path('calculs/moteurs/', vrg.MoteursView.as_view()),
     path('batiments/<int:pk>/identite/', vrg.IdentiteView.as_view()),
+    # ── Chantier bt-potentiels ──
+    path('indicateurs/', vind.IndicateursView.as_view()),                                   # I3 (P)
+    path('calculs/<int:pk>/triangles/', vtri.TrianglesView.as_view()),                      # I4 (P)
+    path('batiments/<int:pk>/potentiels/', vpot.PotentielsBatimentView.as_view()),          # I5 (A)
+    path('parcs/<int:pk>/potentiels/', vpot.PotentielsParcView.as_view()),                  # I5 (A)
+    path('ameliorations/actions/', vam.ActionsView.as_view()),                              # I7 (A)
+    path('parcs/<int:pk>/bouquets/', vam.BouquetsParcView.as_view()),                       # I7 (A)
+    path('bouquets/<int:pk>/', vam.BouquetDetailView.as_view()),                            # I7 (A)
+    path('rendu/schema/', vrd.SchemaView.as_view()),                                        # I6 (R)
+    path('rendu/dimensions/', vrd.DimensionsView.as_view()),
+    path('rendu/mesures/', vrd.MesuresView.as_view()),
+    path('rendu/figure/', vrd.FigureView.as_view()),
+    path('rendu/document/', vrd.DocumentView.as_view()),
+    path('rendu/exports/', vrd.ExportsView.as_view()),
+    path('rendu/exports/<int:pk>/', vrd.ExportDetailView.as_view()),
+    path('rendu/exports/<int:pk>/fichier', vrd.ExportFichierView.as_view()),
+    path('rendu/gabarits/', vrd.GabaritsView.as_view()),
+    path('parcs/<int:pk>/rapports/', vrd.RapportsParcView.as_view()),
+    path('rapports/<int:pk>/', vrd.RapportDetailView.as_view()),
 ]

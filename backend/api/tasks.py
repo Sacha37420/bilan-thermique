@@ -617,3 +617,9 @@ def extract_document(self, job_id, run_id):
         run.status, run.message = 'ERROR', msg[:500]
         run.save(update_fields=['status', 'message'])
         job.set_state(status=Job.ERROR, message=msg[:500])
+
+
+# Chantier bt-potentiels : tâches des secteurs « actions et bouquets » et « rendu », enregistrées avec celles-ci.
+from .ameliorations.taches import *  # noqa: E402,F401,F403
+from .rendu.taches import *  # noqa: E402,F401,F403
+

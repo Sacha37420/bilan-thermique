@@ -101,6 +101,13 @@ CATALOGUE = [
     _k('plancher.u', 'U du plancher bas', 'enveloppe', 'number', 'W/m²·K', 0.08, 4.0, weight=2),
     # Lot 32 : profondeur du sous-sol non chauffé (murs enterrés, radier) — couplage au sol simulé.
     _k('sous_sol.profondeur_m', 'Profondeur du sous-sol', 'enveloppe', 'number', 'm', 0.5, 8.0, weight=0),
+    # Chantier bt-potentiels (I0) : leviers des améliorations — poids 0, ne changent ni confiance ni complétude.
+    _k('toiture.absorptance', 'Absorptance solaire de la toiture', 'enveloppe', 'number', '', 0.1, 0.98, weight=0,
+       help='Par défaut, celle des murs (`enveloppe.couleur_absorptance`). Une toiture claire (cool roof) la baisse.'),
+    _k('abords.albedo', 'Albédo des abords', 'enveloppe', 'number', '', 0.05, 0.9, weight=0,
+       help='Part du soleil renvoyée par le sol autour du bâtiment (enrobé 0,1 ; pelouse 0,2 ; dallage clair 0,4).'),
+    _k('toiture.vegetalisee', 'Toiture végétalisée', 'enveloppe', 'bool', weight=0),
+    _k('murs.vegetalises', 'Murs végétalisés', 'enveloppe', 'bool', weight=0),
     _k('enveloppe.inertie', 'Inertie', 'enveloppe', 'enum', choices=INERTIA, weight=1),
     _k('enveloppe.couleur_absorptance', 'Absorptance solaire des murs', 'enveloppe', 'number', '', 0.1, 0.98, weight=0.3),
     # Menuiseries
@@ -115,6 +122,10 @@ CATALOGUE = [
     _k('ventilation.debit_vol_h', 'Renouvellement d’air hygiénique', 'ventilation', 'number', 'vol/h', 0.05, 5, weight=2),
     _k('ventilation.rendement_recup', 'Rendement de récupération (double flux)', 'ventilation', 'number', '', 0, 0.95, weight=1),
     _k('ventilation.n50', 'Perméabilité à l’air n50', 'ventilation', 'number', 'vol/h', 0.3, 20, weight=1.5),
+    _k('ventilation.nocturne_vol_h', 'Surventilation nocturne', 'ventilation', 'number', 'vol/h', 0, 10, weight=0,
+       help='Renouvellement d’air ajouté la nuit en été quand l’air extérieur est plus frais que le seuil.'),
+    _k('ventilation.nocturne_seuil_c', 'Seuil de la surventilation nocturne', 'ventilation', 'number', '°C', 15, 28,
+       weight=0, help='La surventilation ne joue que si l’air extérieur est sous ce seuil.'),
     # Usage
     _k('usage.consigne_chauffage_c', 'Consigne de chauffage', 'usage', 'number', '°C', 12, 25, weight=2),
     _k('usage.consigne_froid_c', 'Consigne de refroidissement (vide = pas de climatisation)', 'usage', 'number', '°C', 22, 30, weight=0.5),

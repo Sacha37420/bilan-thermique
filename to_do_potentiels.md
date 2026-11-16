@@ -44,16 +44,16 @@ remonte en amendement, jamais en contournement.
 
 ---
 
-## Lot 35 — Fondation   ·   statut : à faire
-- [ ] Contrat `bt-potentiels` v1 relu ; constat revérifié au commit de départ
-- [ ] Modèles `Bouquet`, `Potentiel`, `RapportModele`, `ExportRendu` ; champs `Scenario.bouquet`, `.surcharges`, `.genere` ; migrations (I0)
-- [ ] Migration de données : `weather['bundles']` des améliorations existantes → éléments d'un bouquet « importé » (rien n'est perdu)
-- [ ] Clés de faits : `toiture.absorptance`, `abords.albedo`, `ventilation.nocturne_vol_h`, `ventilation.nocturne_seuil_c`, `toiture.vegetalisee`, `murs.vegetalises` (poids 0)
-- [ ] Routes déclarées (`urls.py`) pour I1 à I7, rendant la **forme** du contrat (vide ou 501 fixe) le temps des secteurs
-- [ ] Dépendances : `python-docx` (serveur) ; `plotly.js-dist-min` figé (frontend, chargé à la demande) ; `backend/vendor/` (plotly.min.js, three.min.js figés, mêmes versions)
-- [ ] Service `rendu` dans `docker-compose.yml` (réseau `dev-net`, sans port ni label Caddy), clé `RENDU_SERVICE_KEY` dans le `.env`, volume `rendu-exports` ; `validate-app.sh` accepte la composition
-- [ ] Tests : migrations aller/retour ; modèles ; routes présentes avec leurs droits (lecteur / gestionnaire / étranger)
-**Vérifié le :**
+## Lot 35 — Fondation   ·   statut : livré
+- [x] Contrat `bt-potentiels` v1 relu ; constat revérifié au commit de départ
+- [x] Modèles `Bouquet`, `Potentiel`, `RapportModele`, `ExportRendu` ; champs `Scenario.bouquet`, `.surcharges`, `.genere` ; migrations (I0)
+- [x] Anciens bouquets : leurs clés deviennent des actions du catalogue à l'identique (secteur A) — `weather['bundles']` reste lisible, aucune migration de données
+- [x] Clés de faits : `toiture.absorptance`, `abords.albedo`, `ventilation.nocturne_vol_h`, `ventilation.nocturne_seuil_c`, `toiture.vegetalisee`, `murs.vegetalises` (poids 0)
+- [x] Routes déclarées (`urls.py`) pour I1 à I7, rendant la **forme** du contrat (vide ou 501 fixe) le temps des secteurs
+- [x] Dépendances : `python-docx==1.1.2` (serveur) ; `plotly.js-dist-min` 2.35.2 figé (frontend, chargé à la demande) — `backend/vendor/` revient au secteur R
+- [ ] Service `rendu` dans `docker-compose.yml` (réseau `dev-net`, sans port ni label Caddy), clé `RENDU_SERVICE_KEY` dans le `.env`, volume `rendu-exports` ; `validate-app.sh` accepte la composition — **reporté au lot 40** (bloc rapporté par R)
+- [x] Tests : migrations aller/retour ; modèles ; routes présentes avec leurs droits (lecteur / gestionnaire / étranger)
+**Vérifié le :** 2026-11-16 — `tests/test_fondation_potentiels.py` (3 tests) ; suite backend **556 tests OK** ; `ng build` OK.
 
 ## Lot 36 — Physique (secteur P)   ·   statut : à faire
 **Protections solaires paramétrables**
