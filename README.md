@@ -53,7 +53,10 @@ temps réel, vent), paroi 1D (`/calcul-1d`), modèles de paroi (`/parois`), thé
 3. **Calculs** : lire les résultats et leurs entrées figées ; un gestionnaire peut encore lancer un calcul à la main
    (« Recalculer », ou un N2 sur une enveloppe experte) ; « Améliorations » montre les potentiels par bouquet en N0,
    N1 et N2.
-4. **Parc › Potentiels par bouquet** : comparer le réel du parc à chaque bouquet, au niveau choisi (N0, N1 ou N2).
+4. **Parc** : le tableau « Bâtiments » donne, pour chaque grandeur (besoin, DH, énergie primaire, heures > 28 °C),
+   une colonne par simulation cochée (N0, N1, N2 ; les trois par défaut) — on lit côte à côte ce que chacune donne
+   pour le même bâtiment. **Potentiels par bouquet** : comparer le réel du parc à chaque bouquet, à la simulation
+   choisie, et cocher d'autres simulations pour les mettre côte à côte dans le tableau (D53).
 5. **Rendu** : partir d'un gabarit (« Fiche d'identité », « Synthèse de parc ») ou d'une question du constructeur
    guidé, ajuster, enregistrer pour le parc, exporter.
 
@@ -161,6 +164,11 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
   le serveur construit, les exports reprennent le même document résolu.
 - Spécification d'un document (`GET /api/rendu/schema/`) : sections de blocs — texte (markdown restreint, assaini),
   indicateurs, tableau, graphe, carte (sans fond de carte en ligne), vue 3D, fiche, saut de page.
+- **Simulations affichées** (D53) : chiffres clés, tableau, carte et graphe ont un champ `niveaux` (graphe : filtre et
+  dimension `niveau`). Aucune cochée = la plus fine à jour (D52) ; une = cette simulation ; plusieurs = les valeurs
+  de chacune côte à côte — une colonne par série et par simulation (chiffres clés), une colonne par simulation pour
+  chaque résultat (tableau des bâtiments), une couleur ou un petit graphe par simulation (graphe). Une carte n'en
+  montre qu'une. Le paramétrage du document a un réglage « Simulations affichées » qui s'applique à tous les blocs.
 - **15 formes de graphes** Plotly (barres, empilées, groupées, courbes, aires, nuage, bulles, boîte, violon,
   histogramme, camembert, radar, carte de chaleur, cascade, coordonnées parallèles) ; séries réel / bouquets, couleur,
   taille, facettes, filtres, agrégations ; aucune couleur écrite par le serveur (palette posée au rendu).
@@ -194,7 +202,7 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
 
 ## Tests
 
-- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **743 tests**
+- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **749 tests**
   au 2026-11-16. Aucun appel réseau : tout service externe (open data, IA, service de rendu) est simulé. Depuis le lab :
   `bash chantiers/tests/essai.sh bilan-thermique` (PostgreSQL jetable, réseau fermé).
 - Service de rendu : `npm test` (unitaires) et `npm run test:integration` dans `rendu-service/` (dans son image).

@@ -507,7 +507,7 @@ def _niveau_commun(ctx, b, s):
     return 'N1'
 
 
-def carte(ctx, indicateur, serie):
+def carte(ctx, indicateur, serie, niveaux=None):
     """Bloc « carte » : bâtiments placés en longitude / latitude, **sans fond de carte** (aucune tuile, aucune
     topologie téléchargée : le service de rendu n'a pas de réseau, l'export HTML marche hors ligne)."""
     mes = ctx.mesures()
@@ -515,7 +515,8 @@ def carte(ctx, indicateur, serie):
         return vide('Indicateur de carte inconnu.')
     if serie != 'reel' and serie not in ctx._bq:
         return vide('Aucune donnée : ce bouquet n’est pas visible ici.')
-    rows = [r for r in ctx.lignes('batiment', [serie] if serie != 'reel' else 'reel', [AUTO],
+    niv = list(niveaux or [])[:1]
+    rows = [r for r in ctx.lignes('batiment', [serie] if serie != 'reel' else 'reel', niv or [AUTO],
                                   mes[indicateur]['source'] == 'fait')
             if r.get('lat') is not None and r.get('lon') is not None]
     sans = [r for r in rows if r.get(indicateur) is None]
@@ -536,7 +537,8 @@ def carte(ctx, indicateur, serie):
            'coloraxis': {'colorbar': {'title': {'text': t(u)}}}, 'showlegend': False,
            'meta': {'palette': 'sequentielle', 'resume': ''}}
     hi = max(rows, key=lambda r: r[indicateur])
-    lay['meta']['resume'] = (f"{_titre_mesure(mes, indicateur)} ({ctx.libelle_serie(serie)}) de {len(rows)} bâtiment"
+    lay['meta']['resume'] = (f"{_titre_mesure(mes, indicateur)} ({ctx.libelle_serie(serie)}"
+                             f"{', ' + catalogue.NIVEAUX[niv[0]] if niv else ''}) de {len(rows)} bâtiment"
                              f"{'s' if len(rows) > 1 else ''} situé{'s' if len(rows) > 1 else ''} ; le plus élevé : "
                              f"{hi['batiment']} ({_fmt(hi[indicateur], u)})."
                              + (f" {len(sans)} sans valeur." if sans else '')

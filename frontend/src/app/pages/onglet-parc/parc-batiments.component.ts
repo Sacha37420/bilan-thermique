@@ -12,10 +12,20 @@ import { EtatCalculsService } from '../../components/resultat-carte/etat-calculs
 import { NIVEAUX, NIVEAU_MOTS, Niveau, StatutRecalcul } from '../../components/resultat-carte/etat-calculs.types';
 import { LigneParc, NiveauLigne } from './parc.types';
 
-type SortKey = 'name' | 'usage' | 'surface_m2' | 'confidence' | 'priority' | 'dpe' | 'appro' | 'calculs'
-  | 'besoin' | 'dh' | 'ep' | 'h28' | 'besoin_N0' | 'besoin_N1' | 'besoin_N2' | 'dh_N1' | 'dh_N2';
-/** Niveau affiché dans le tableau : un niveau, ou les trois côte à côte. */
-type Affichage = Niveau | 'trois';
+/** Grandeurs de résultat du tableau ; chacune a une colonne par simulation affichée. */
+type Grandeur = 'besoin' | 'dh' | 'ep' | 'h28';
+type SortKey = 'name' | 'usage' | 'surface_m2' | 'confidence' | 'priority' | 'dpe' | 'appro' | 'calculs' | `${Grandeur}_${Niveau}`;
+interface GrandeurDef { cle: Grandeur; nom: string; unite: string; aide: string; champ: keyof NiveauLigne; niveaux: Niveau[] }
+const GRANDEURS: GrandeurDef[] = [
+  { cle: 'besoin', nom: 'Besoin de chauffage', unite: 'kWh/m²·an', champ: 'heating_kwh_m2', niveaux: ['N0', 'N1', 'N2'],
+    aide: 'Besoin de chauffage par m² et par an (avec sa fourchette probable pour le N1)' },
+  { cle: 'dh', nom: 'Inconfort d’été (DH)', unite: '°C·h', champ: 'dh_re2020', niveaux: ['N1', 'N2'],
+    aide: 'Degrés-heures d’inconfort d’été (RE2020) ; le bilan mensuel (N0) ne le calcule pas' },
+  { cle: 'ep', nom: 'Énergie primaire', unite: 'kWh/m²·an', champ: 'primary_kwh_m2', niveaux: ['N0', 'N1', 'N2'],
+    aide: 'Énergie primaire estimée par le modèle (pas un DPE)' },
+  { cle: 'h28', nom: 'Heures > 28 °C', unite: 'h/an', champ: 'hours_over_28', niveaux: ['N1', 'N2'],
+    aide: 'Heures par an où l’intérieur dépasse 28 °C sans climatisation ; le bilan mensuel (N0) ne le calcule pas' },
+];
 const CALCUL_MOTS: Record<StatutRecalcul, string> = { inactif: 'à jour', planifie: 'recalcul prévu', en_cours: 'en cours', erreur: 'erreur' };
 const CALCUL_CLASSE: Record<StatutRecalcul, string> = { inactif: 'm-mesure', planifie: 'm-declare', en_cours: 'm-document', erreur: 'm-erreur' };
 const CALCUL_RANG: Record<StatutRecalcul, number> = { erreur: 3, en_cours: 2, planifie: 1, inactif: 0 };
@@ -32,7 +42,17 @@ export const STATUT_MOTS: Record<string, string> = {
   imports: [FormsModule, DecimalPipe, KeyValuePipe, CarteComponent],
   styleUrls: ['./parc-commun.scss', '../../components/resultat-carte/etat-badges.scss'],
   styles: [`
-    .niv-sel { margin-bottom: var(--space-3); }
+    .niv-sel { margin-bottom: var(--space-2); align-items: flex-start; }
+    .choix { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-3);
+             display: flex; flex-wrap: wrap; column-gap: var(--space-4); margin: 0; }
+    .choix legend { color: var(--text-mute); font-size: var(--text-xs); padding: 0 var(--space-1); }
+    .check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; cursor: pointer; font-size: var(--text-sm); }
+    .check input { width: 20px; height: 20px; accent-color: var(--accent); }
+    th.grp { text-align: center; border-left: 1px solid var(--border); }
+    th.grp small { color: var(--text-mute); font-weight: normal; }
+    th.sous button { font-size: var(--text-xs); }
+    td.debut { border-left: 1px solid var(--border); }
+    td small { display: block; }
     .calc { display: grid; gap: var(--space-1); justify-items: start; }
     th.num button { text-align: right; }
     .prog.calculs i { background: var(--accent); }
@@ -86,12 +106,23 @@ export const STATUT_MOTS: Record<string, string> = {
             @for (s of statutMots | keyvalue; track s.key) { <option [value]="s.key">{{ s.value }}</option> }</select></label>
       </div>
 
-      <div class="rf-tabs niv-sel" role="radiogroup" aria-label="Niveau de calcul affiché">
-        @for (a of affichages; track a[0]) {
-          <button type="button" role="radio" [class.active]="affichage() === a[0]" [attr.aria-checked]="affichage() === a[0]"
-                  (click)="choisirAffichage(a[0])">{{ a[1] }}</button>
-        }
+      <div class="rf-row niv-sel">
+        <fieldset class="choix"><legend>Simulations affichées</legend>
+          @for (n of niveaux; track n) {
+            <label class="check"><input type="checkbox" [checked]="sims().includes(n)" [disabled]="sims().length === 1 && sims().includes(n)"
+              (change)="basculerSim(n, $any($event.target).checked)" />{{ mots[n] }} ({{ n }})</label>
+          }
+        </fieldset>
+        <fieldset class="choix"><legend>Grandeurs</legend>
+          @for (g of grandeursDef; track g.cle) {
+            <label class="check"><input type="checkbox" [checked]="grandeurs().includes(g.cle)" (change)="basculerGrandeur(g.cle, $any($event.target).checked)" />{{ g.nom }}</label>
+          }
+        </fieldset>
       </div>
+      @if (sims().length > 1) {
+        <p class="rf-hint">Chaque grandeur a une colonne par simulation : on lit côte à côte ce que chacune donne pour le même bâtiment.
+          « non calculé » : la simulation ne produit pas cette grandeur.</p>
+      }
       @if (mode() === 'carte') {
         <div class="rf-row">
           <label class="rf-field"><span>Couleur selon</span>
@@ -106,28 +137,24 @@ export const STATUT_MOTS: Record<string, string> = {
         <div class="rf-table-wrap">
           <table class="rf-table sortable">
             <thead><tr>
-              <th><button type="button" (click)="sort('name')">Bâtiment {{ arrow('name') }}</button></th>
-              <th><button type="button" (click)="sort('confidence')" title="Ce que vaut le chiffre : part des données connues et leur provenance">Confiance {{ arrow('confidence') }}</button></th>
-              <th><button type="button" (click)="sort('appro')" title="Jusqu'où le bâtiment a été décrit : données ouvertes seules, valeurs déclarées, documents lus, mesures, enveloppe experte">Approfondissement {{ arrow('appro') }}</button></th>
-              <th><button type="button" (click)="sort('calculs')" title="État des calculs automatiques du bâtiment, et niveaux déjà calculés">Calculs {{ arrow('calculs') }}</button></th>
-              @if (affichage() === 'trois') {
-                @for (n of niveaux; track n) {
-                  <th class="num"><button type="button" (click)="sort($any('besoin_' + n))" [title]="'Besoin de chauffage par m² et par an — ' + mots[n].toLowerCase()">Besoin {{ mots[n].toLowerCase() }} ({{ n }}) {{ arrow($any('besoin_' + n)) }}</button></th>
-                }
-                <th class="num"><button type="button" (click)="sort('dh_N1')" title="Degrés-heures d'inconfort d'été (RE2020), horaire simplifié">DH horaire simplifié (N1) {{ arrow('dh_N1') }}</button></th>
-                <th class="num"><button type="button" (click)="sort('dh_N2')" title="Degrés-heures d'inconfort d'été (RE2020), détaillé par paroi">DH détaillé par paroi (N2) {{ arrow('dh_N2') }}</button></th>
-              } @else {
-                <th class="num"><button type="button" (click)="sort('besoin')" [title]="'Besoin de chauffage par m² et par an — ' + motsNiveau() + (affichage() === 'N1' ? ', avec sa fourchette probable' : '')">Besoin de chauffage {{ arrow('besoin') }}</button></th>
-                <th class="num"><button type="button" (click)="sort('dh')" title="Degrés-heures d'inconfort d'été (RE2020) ; le bilan mensuel ne le calcule pas">Inconfort d’été (DH) {{ arrow('dh') }}</button></th>
-                <th class="num"><button type="button" (click)="sort('ep')" title="Énergie primaire estimée par le modèle (pas un DPE)">Énergie primaire {{ arrow('ep') }}</button></th>
-                <th class="num"><button type="button" (click)="sort('h28')" title="Heures par an où l'intérieur dépasse 28 °C sans climatisation">Heures &gt; 28 °C {{ arrow('h28') }}</button></th>
+              <th [attr.rowspan]="2"><button type="button" (click)="sort('name')">Bâtiment {{ arrow('name') }}</button></th>
+              <th [attr.rowspan]="2"><button type="button" (click)="sort('confidence')" title="Ce que vaut le chiffre : part des données connues et leur provenance">Confiance {{ arrow('confidence') }}</button></th>
+              <th [attr.rowspan]="2"><button type="button" (click)="sort('appro')" title="Jusqu'où le bâtiment a été décrit : données ouvertes seules, valeurs déclarées, documents lus, mesures, enveloppe experte">Approfondissement {{ arrow('appro') }}</button></th>
+              <th [attr.rowspan]="2"><button type="button" (click)="sort('calculs')" title="État des calculs automatiques du bâtiment, et niveaux déjà calculés">Calculs {{ arrow('calculs') }}</button></th>
+              @for (g of colonnes(); track g.cle) {
+                <th class="num grp" [attr.colspan]="sims().length" scope="colgroup" [title]="g.aide">{{ g.nom }} <small>{{ g.unite }}</small></th>
               }
-              <th><button type="button" (click)="sort('dpe')" title="Étiquette du DPE officiel s'il existe (ce n'est pas un DPE calculé par l'app)">DPE {{ arrow('dpe') }}</button></th>
-              <th class="num"><button type="button" (click)="sort('priority')" title="Priorité = besoin × (0,5 + 0,5 × confiance) : un bâtiment gourmand et bien connu passe devant">Priorité {{ arrow('priority') }}</button></th>
+              <th [attr.rowspan]="2"><button type="button" (click)="sort('dpe')" title="Étiquette du DPE officiel s'il existe (ce n'est pas un DPE calculé par l'app)">DPE {{ arrow('dpe') }}</button></th>
+              <th class="num" [attr.rowspan]="2"><button type="button" (click)="sort('priority')" title="Priorité = besoin × (0,5 + 0,5 × confiance) : un bâtiment gourmand et bien connu passe devant">Priorité {{ arrow('priority') }}</button></th>
+            </tr><tr>
+              @for (g of colonnes(); track g.cle) {
+                @for (n of sims(); track n) {
+                  <th class="num sous"><button type="button" (click)="sort(cleTri(g.cle, n))" [title]="g.aide + ' — ' + mots[n].toLowerCase() + ' (' + n + ')'">{{ n }} {{ arrow(cleTri(g.cle, n)) }}</button></th>
+                }
+              }
             </tr></thead>
             <tbody>
               @for (r of view(); track r.id) {
-                @let nv = niv(r, niveauCourant());
                 <tr class="clic" [class.courant]="r.id === ctx.batimentId()" tabindex="0" (click)="ouvrir(r.id)" (keydown.enter)="ouvrir(r.id)">
                   <td><button type="button" class="link" (click)="$event.stopPropagation(); ouvrir(r.id)">{{ r.name || r.address || ('Bâtiment ' + r.id) }}</button>
                     <small>{{ r.address }}@if (usageLabels[r.usage ?? '']) { · {{ usageLabels[r.usage ?? ''] }} }@if (r.surface_m2) { · {{ r.surface_m2 | number: '1.0-0' }} m² }
@@ -147,26 +174,22 @@ export const STATUT_MOTS: Record<string, string> = {
                         <span class="pastille" [class.ok]="m.a_jour" [class.perime]="!m.a_jour" [title]="titreModele(m)"><b>{{ m.niveau }}</b> {{ m.libelle }}{{ m.a_jour ? '' : ' · ancien' }}</span>
                       }</span>
                     } @else { <span class="rf-hint">aucun</span> }</div></td>
-                  @if (affichage() === 'trois') {
-                    @for (n of niveaux; track n) {
+                  @for (g of colonnes(); track g.cle) {
+                    @for (n of sims(); track n) {
                       @let x = niv(r, n);
-                      <td class="num">@if (x?.heating_kwh_m2 != null) { <strong>{{ x!.heating_kwh_m2 | number: '1.0-0' }}</strong>
-                        @if (x!.a_jour === false) { <small class="ko">à refaire</small> } } @else { — }</td>
+                      @let v = valeur(x, g);
+                      <td class="num" [class.debut]="$first">
+                        @if (!g.niveaux.includes(n)) { <small>non calculé</small> }
+                        @else if (v !== null) { <strong>{{ fmt(v) }}</strong>
+                          @if (g.cle === 'besoin' && x!.heating_kwh_m2_p10 != null) { <small>entre {{ x!.heating_kwh_m2_p10 | number: '1.0-0' }} et {{ x!.heating_kwh_m2_p90 | number: '1.0-0' }}</small> }
+                          @if (x!.a_jour === false) { <small class="ko">à refaire</small> } }
+                        @else { — }</td>
                     }
-                    <td class="num">{{ fmt(niv(r, 'N1')?.dh_re2020) }}</td>
-                    <td class="num">{{ fmt(niv(r, 'N2')?.dh_re2020) }}</td>
-                  } @else {
-                    <td class="num">@if (nv?.heating_kwh_m2 != null) { <strong>{{ nv!.heating_kwh_m2 | number: '1.0-0' }}</strong> kWh/m²
-                      @if (nv!.heating_kwh_m2_p10 != null) { <small>entre {{ nv!.heating_kwh_m2_p10 | number: '1.0-0' }} et {{ nv!.heating_kwh_m2_p90 | number: '1.0-0' }}</small> }
-                      @if (nv!.a_jour === false) { <small class="ko">à refaire</small> } } @else { — }</td>
-                    <td class="num">@if (affichage() === 'N0') { <small>non calculé</small> } @else { {{ fmt(nv?.dh_re2020) }} }</td>
-                    <td class="num">{{ fmt(nv?.primary_kwh_m2) }}</td>
-                    <td class="num">{{ fmt(nv?.hours_over_28) }}</td>
                   }
                   <td>@if (r.dpe) { <span class="dpe" [attr.data-l]="r.dpe">{{ r.dpe }}</span> } @else { — }</td>
                   <td class="num">{{ r.priority === null ? '—' : (r.priority | number: '1.0-0') }}</td>
                 </tr>
-              } @empty { <tr><td [attr.colspan]="affichage() === 'trois' ? 11 : 10" class="rf-hint">{{ ctx.chargement() ? 'Chargement…' : 'Aucun bâtiment. Ajoutez-en depuis « Ajouter des bâtiments ».' }}</td></tr> }
+              } @empty { <tr><td [attr.colspan]="6 + colonnes().length * sims().length" class="rf-hint">{{ ctx.chargement() ? 'Chargement…' : 'Aucun bâtiment. Ajoutez-en depuis « Ajouter des bâtiments ».' }}</td></tr> }
             </tbody>
           </table>
         </div>
@@ -194,19 +217,20 @@ export class ParcBatimentsComponent implements OnInit, OnDestroy {
   filterUsage = signal('');
   filterStatus = signal('');
   search = signal('');
-  affichage = signal<Affichage>('N1');
+  /** Simulations affichées (au moins une) et grandeurs ; par défaut les trois simulations, pour comparer. */
+  sims = signal<Niveau[]>([...NIVEAUX]);
+  grandeurs = signal<Grandeur[]>(['besoin', 'dh', 'ep', 'h28']);
+  readonly grandeursDef = GRANDEURS;
+  readonly colonnes = computed(() => GRANDEURS.filter(g => this.grandeurs().includes(g.cle)));
   readonly niveaux = NIVEAUX;
   readonly mots = NIVEAU_MOTS;
   readonly calculMots = CALCUL_MOTS;
   readonly calculClasse = CALCUL_CLASSE;
-  readonly affichages: [Affichage, string][] = [
-    ['N0', 'Mensuel (N0)'], ['N1', 'Horaire simplifié (N1)'], ['N2', 'Détaillé par paroi (N2)'], ['trois', 'Les trois côte à côte'],
-  ];
   private etats = inject(EtatCalculsService);
   private timer?: ReturnType<typeof setInterval>;
 
-  /** Niveau utilisé pour la carte, le tri par défaut et les colonnes « un niveau » (N1 en mode « les trois »). */
-  readonly niveauCourant = computed<Niveau>(() => { const a = this.affichage(); return a === 'trois' ? 'N1' : a; });
+  /** Simulation de la carte : la plus fine des simulations affichées. */
+  readonly niveauCourant = computed<Niveau>(() => { const s = this.sims(); return s[s.length - 1] ?? 'N1'; });
   readonly motsNiveau = computed(() => NIVEAU_MOTS[this.niveauCourant()].toLowerCase());
   readonly suiviParc = computed(() => { const id = this.ctx.parcId(); return id !== null && !this.ctx.horsParc() ? this.etats.parcs()[id] ?? null : null; });
   readonly phraseCalculs = computed(() => {
@@ -279,11 +303,17 @@ export class ParcBatimentsComponent implements OnInit, OnDestroy {
     });
   }
 
-  choisirAffichage(a: Affichage): void {
-    this.affichage.set(a);
-    const k = this.sortKey();
-    if (a === 'trois' && ['besoin', 'dh', 'ep', 'h28'].includes(k)) this.sortKey.set(k === 'dh' ? 'dh_N1' : 'besoin_N1');
-    else if (a !== 'trois' && k.includes('_N')) this.sortKey.set(k.startsWith('dh') ? 'dh' : 'besoin');
+  basculerSim(n: Niveau, oui: boolean): void {
+    const suite = NIVEAUX.filter(x => (x === n ? oui : this.sims().includes(x)));
+    if (suite.length) this.sims.set(suite);
+  }
+  basculerGrandeur(g: Grandeur, oui: boolean): void {
+    this.grandeurs.set(GRANDEURS.map(d => d.cle).filter(x => (x === g ? oui : this.grandeurs().includes(x))));
+  }
+  cleTri(g: Grandeur, n: Niveau): SortKey { return `${g}_${n}`; }
+  valeur(x: NiveauLigne | null, g: GrandeurDef): number | null {
+    const v = x?.[g.champ];
+    return typeof v === 'number' ? v : null;
   }
 
   /** Valeurs d'un niveau pour une ligne (I4 `niveaux`) ; sans `niveaux` (serveur antérieur), N1 depuis les champs actuels. */
@@ -320,13 +350,11 @@ export class ParcBatimentsComponent implements OnInit, OnDestroy {
     switch (k) {
       case 'appro': return r.approfondissement ? APPRO_RANG[r.approfondissement.niveau] ?? 0 : null;
       case 'calculs': { const c = this.statutCalcul(r); return c ? CALCUL_RANG[c.statut] * 1000 + c.restants : null; }
-      case 'besoin': return this.niv(r, n)?.heating_kwh_m2 ?? null;
-      case 'dh': return this.niv(r, n)?.dh_re2020 ?? null;
-      case 'ep': return this.niv(r, n)?.primary_kwh_m2 ?? null;
-      case 'h28': return this.niv(r, n)?.hours_over_28 ?? null;
-      case 'besoin_N0': case 'besoin_N1': case 'besoin_N2': return this.niv(r, k.slice(-2) as Niveau)?.heating_kwh_m2 ?? null;
-      case 'dh_N1': case 'dh_N2': return this.niv(r, k.slice(-2) as Niveau)?.dh_re2020 ?? null;
-      default: return r[k] as number | string | null;
+      default: {
+        const g = GRANDEURS.find(d => k.startsWith(d.cle + '_'));
+        if (g) return this.valeur(this.niv(r, k.slice(-2) as Niveau), g);
+        return r[k as keyof ParcRow] as number | string | null;
+      }
     }
   }
 

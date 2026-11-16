@@ -10,6 +10,8 @@
       } @empty { <p class="rf-hint">Liste des grandeurs indisponible.</p> }
     </fieldset>
     <app-choix-series [valeur]="b('indicateurs').series" [bouquets]="etat.bouquets()" [nom]="id() + '-s'" (seriesChange)="series($event)" />
+    <app-choix-simulations [niveaux]="b('indicateurs').niveaux" [nom]="id() + '-n'" comparaison="une colonne par série et par simulation"
+      (niveauxChange)="niveaux($event)" />
   }
   @case ('tableau') {
     <div class="rf-row">
@@ -35,6 +37,10 @@
         <label class="check"><input type="checkbox" [checked]="coche('colonnes', c.cle)" (change)="liste('colonnes', c.cle, $any($event.target).checked)" />{{ c.libelle }}</label>
       } @empty { <p class="rf-hint">Liste des colonnes indisponible.</p> }
     </fieldset>
+    @if (b('tableau').source === 'batiments' || b('tableau').source === 'potentiels' || b('tableau').source === 'calculs') {
+      <app-choix-simulations [niveaux]="b('tableau').niveaux" [nom]="id() + '-n'" (niveauxChange)="niveaux($event)"
+        [comparaison]="b('tableau').source === 'batiments' ? 'chaque colonne de résultat devient une colonne par simulation' : 'une ligne par simulation'" />
+    }
   }
   @case ('graphe') {
     <app-constructeur-graphe [graphe]="b('graphe').graphe" [portee]="etat.portee()" [cible]="etat.cible()" [questions]="etat.questions()"
@@ -49,11 +55,12 @@
           @for (m of etat.mesuresPortee(); track m.cle) { <option [value]="m.cle" [selected]="b('carte').indicateur === m.cle">{{ m.libelle }}</option> }
         </select></label>
       <label class="rf-field"><span>Valeurs</span>
-        <select (change)="poser('series', $any($event.target).value)">
+        <select (change)="serieCarte($any($event.target).value)">
           <option value="reel" [selected]="b('carte').series === 'reel'">État réel</option>
-          @for (bq of etat.bouquets(); track bq.id) { <option [value]="bq.id" [selected]="b('carte').series === '' + bq.id">{{ bq.nom }}</option> }
+          @for (bq of etat.bouquets(); track bq.id) { <option [value]="bq.id" [selected]="'' + b('carte').series === '' + bq.id">{{ bq.nom }}</option> }
         </select></label>
     </div>
+    <app-choix-simulations [niveaux]="b('carte').niveaux" [unique]="true" [nom]="id() + '-n'" (niveauxChange)="niveaux($event)" />
     <p class="rf-hint">Carte sans fond en ligne : elle reste lisible dans un export ouvert hors connexion.</p>
   }
   @case ('vue3d') {
