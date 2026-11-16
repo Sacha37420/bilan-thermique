@@ -671,8 +671,28 @@ réseau ouvert, bâtiments hors parc, réglages par défaut, rayon 150 m) : cha�
 **Limites :** le diffus du ciel n'est pas masqué ; l'enveloppe 3D d'un bâtiment créé avant ce lot n'est pas
 remplacée (elle ne sert qu'à l'affichage et au mode expert) ; hors couverture LiDAR la BD TOPO reste seule (lot 31).
 
-## Lot 31 — Repli MNS hors LiDAR   ·   statut : à faire
-**Objectif :** sans nuage LiDAR HD, recaler l'emprise et mesurer la hauteur sur un modèle numérique de surface.
+## Lot 31 — Repli MNS hors LiDAR   ·   statut : livré
+**Objectif :** la BD TOPO ne sert jamais seule à placer le bâtiment (propriétaire, 2026-11-16) : sans nuage LiDAR
+HD, recaler l'emprise et mesurer la hauteur sur un modèle numérique de surface (MNS).
+**Tâches :**
+- [x] `api/mns_source.py` : MNS LiDAR HD raster (50 cm) et son MNT, sinon MNS Correl (photogrammétrie, couverture
+  nationale) et RGE ALTI, en valeurs brutes (WMS-R `image/x-bil;bits=32`) ; nuage synthétique classé **sans la BD
+  TOPO** (sursol, NDVI de l'orthophoto infrarouge, à défaut rugosité locale à la médiane) ; même chaîne que le
+  LiDAR (`observed_env.build_objects` : recalage, toits, arbres, terrain)
+- [x] Génération : nuage LiDAR → MNS LiDAR → MNS Correl → repli historique BD TOPO / OSM (en dernier recours)
+- [x] Croisement : sources `mns_lidar` / `mns_correl`, libellés et confiances propres (0,75 / 0,6) ; toit non vu
+  ⇒ note « hauteur de la BD TOPO gardée — à vérifier » (carte Géométrie)
+- [x] Défauts corrigés au passage : les arbres (`vegetation`) n'étaient jamais des obstacles de l'horizon (le code
+  cherchait `tree`, Lot 26 compris) ; sans bâtiment étudié de référence, un obstacle compte pour sa hauteur propre
+**Tests à passer avant de clore le lot :**
+- [x] `api/tests/test_mns.py` : classification (toit, arbre, sol, haie au NDVI), ordre des sources, absence de
+  toute source, génération complète sur un MNS synthétique et géométrie croisée recalée qui en sort
+- [x] Suite backend complète verte ; `ng build` sans erreur
+**Vérifié le :** 2026-11-16 — essai réel (base jetable, nuage LiDAR forcé absent), hôtel de ville de Tours :
+égout 13,4 m (MNS LiDAR) et 14,2 m (Correl) pour 14,8 m au nuage ; 84 et 78 arbres pour 83 ; horizon nord / sud
+49° / 68,5° et 47,5° / 74,7° pour 47,8° / 68,1°. Langeais : MNS LiDAR, égout 5,4 m pour 6,0 m ; **le MNS Correl
+ne voit pas la maison** (sursol médian 1,2 m pour 6 m : donnée photogrammétrique antérieure ou trop lisse) — la
+note le dit, la hauteur BD TOPO reste à vérifier.
 
 ## Lot 32 — Sol simulé en 1D, couplé au sous-sol et au plancher bas   ·   statut : à faire
 **Objectif :** température du sol par profondeur et dans le temps, d'après la météo, à la place d'une température

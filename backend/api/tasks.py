@@ -210,6 +210,7 @@ def generate_environment(self, job_id, params):
     stage_messages = {
         'lidar-index': "Recherche des dalles LiDAR HD…",
         'lidar-read': "Lecture du nuage de points LiDAR HD…",
+        'mns': "Nuage LiDAR absent : modèle numérique de surface (MNS) de l'IGN…",
         'bdtopo': "Emprises des bâtiments (BD TOPO)…",
         'rasters': "Terrain et hauteurs (MNT, toits, végétation)…",
         'registration': "Recalage des emprises BD TOPO sur le LiDAR…",
@@ -240,7 +241,7 @@ def generate_environment(self, job_id, params):
         job.result = summary
         job.save(update_fields=['result'])
         stats = summary['stats']
-        if summary['source'] == 'lidar':
+        if summary['source'] in ('lidar', 'mns_lidar', 'mns_correl'):
             n_buildings = sum(stats.get(k, 0) for k in (
                 'buildings_confirmed', 'buildings_lidar_only', 'buildings_masked', 'buildings_uncovered'))
             detail = f"{n_buildings} bâtiment(s), {stats.get('trees', 0)} arbre(s)"
@@ -249,7 +250,8 @@ def generate_environment(self, job_id, params):
         job.set_state(
             status=Job.DONE, progress=100,
             message=f"« {env.name} » : {detail}, {summary['n_triangles']} triangles"
-                    + (" (LiDAR HD)." if summary['source'] == 'lidar' else " (repli BD TOPO / OSM)."),
+                    + {'lidar': " (LiDAR HD).", 'mns_lidar': " (MNS LiDAR HD).",
+                       'mns_correl': " (MNS Correl)."}.get(summary['source'], " (repli BD TOPO / OSM)."),
         )
     except (geodata.GeodataError, environment_service.EnvironmentServiceError) as exc:
         job.set_state(status=Job.ERROR, message=net.public_message(exc))

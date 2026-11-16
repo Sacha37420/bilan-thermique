@@ -17,7 +17,7 @@ interface GeoPayload {
 }
 /** Lot 30 : origine de la géométrie automatique — BD TOPO seule, ou croisée avec le LiDAR HD. */
 export interface GeoOrigin {
-  source: string; note?: string; decalage_m?: number | null; couverture_lidar?: number | null;
+  source: string; libelle?: string; note?: string; decalage_m?: number | null; couverture_lidar?: number | null;
   hauteur_egout_m?: number | null; hauteur_faitage_m?: number | null; toiture?: string | null; pente_deg?: number | null;
   bdtopo?: { hauteur_m: number | null; emprise_m2: number | null; recouvrement: number | null };
 }

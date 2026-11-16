@@ -317,19 +317,32 @@ def generate(params, building=None, progress_cb=None, self_polygon=None):
         frame = observed_env.LocalFrame(lat0, lon0, north, ground_z)
         report('lidar-index', 5)
         margin = half + observed_env.RASTER_MARGIN_M
-        tiles = lidar_source.fetch_lidar_tiles(frame.wgs84_bbox(margin + 5))
-        if not tiles:
-            raise lidar_source.LidarUnavailable("zone pas encore couverte par le LiDAR HD")
-        lidar_meta = lidar_source.describe_tiles(tiles)
-        report('lidar-read', 10)
-        points, read_stats = lidar_source.read_points(
-            tiles, frame.l93_bbox(margin + 5),
-            progress_cb=lambda done, total: report('lidar-read', 10 + int(20 * done / total)),
-        )
-        if len(points[0]) < 1000:
-            raise lidar_source.LidarUnavailable("nuage vide sur cette zone")
-        report('bdtopo', 32)
         warnings_pre = []
+        try:
+            tiles = lidar_source.fetch_lidar_tiles(frame.wgs84_bbox(margin + 5))
+            if not tiles:
+                raise lidar_source.LidarUnavailable("zone pas encore couverte par le LiDAR HD")
+            lidar_meta = lidar_source.describe_tiles(tiles)
+            report('lidar-read', 10)
+            points, read_stats = lidar_source.read_points(
+                tiles, frame.l93_bbox(margin + 5),
+                progress_cb=lambda done, total: report('lidar-read', 10 + int(20 * done / total)),
+            )
+            if len(points[0]) < 1000:
+                raise lidar_source.LidarUnavailable("nuage vide sur cette zone")
+        except lidar_source.LidarUnavailable as no_lidar:
+            # Lot 31 : sans nuage LiDAR, la surface vient d'un modèle numérique de surface (MNS LiDAR HD, sinon
+            # MNS Correl) — jamais de la BD TOPO seule. Sans MNS non plus : repli historique (plus bas).
+            from . import mns_source
+            report('mns', 12)
+            points, mns_desc = mns_source.synthetic_points(frame.l93_bbox(margin + 5))
+            tiles, read_stats, source = [], {'requests': 0, 'bytes': 0}, mns_desc['source']
+            lidar_meta = {'mns': mns_desc, 'lidar_absent': net.reason(no_lidar)}
+            warnings_pre.append(
+                f"Nuage LiDAR HD indisponible ({net.reason(no_lidar)}) : surface prise sur le {mns_desc['libelle']} — "
+                "houppiers opaques (pas de trouée)"
+                + (", arêtes de toits moins nettes (photogrammétrie)." if source == 'mns_correl' else "."))
+        report('bdtopo', 32)
         try:
             bdtopo = lidar_source.fetch_bdtopo_buildings_l93(frame.l93_bbox(half + 10))
         except geodata.GeodataError as exc:
@@ -356,6 +369,10 @@ def generate(params, building=None, progress_cb=None, self_polygon=None):
             include_terrain=include_terrain, self_polygon=self_polygon, progress_cb=report,
             return_rasters=True, cosia=cosia,
         )
+        if source != 'lidar':
+            # Pas de nuage, donc pas de transparence mesurée ni de saison d'acquisition : l'avertissement de saison
+            # du LiDAR n'a pas de sens ici (celui du MNS dit déjà « houppiers opaques »).
+            warnings = [w for w in warnings if not w.startswith('LiDAR acquis hors saison')]
         warnings = warnings_pre + warnings
         # Lot AI : orthophotos RVB + infrarouge → albédo du sol (réflexion vers
         # les parois) et albédo de chaque toiture (absorptance pour le calcul).
