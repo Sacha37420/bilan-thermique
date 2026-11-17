@@ -989,6 +989,23 @@ comparer ; dans le paramétrage des rendus, choisir la ou les simulations dont o
 - [x] Suite complète verte, cloisonnement 3/3, parcours réel en navigateur
 **Vérifié le :** 2026-11-16
 
+## Lot 46 — Validation physique   ·   statut : livré
+**Objectif :** valider la physique des trois moteurs canal par canal, contre des valeurs calculées à la main et des
+références publiées, corriger ce qui est faux et expliquer ce qui reste (chantier du lab `bt-validation-physique`).
+**Tâches :**
+- [x] Inventaire des hypothèses de N0, N1 et N2, cellule par cellule (`chantiers/bt-validation-physique/HYPOTHESES.md`)
+- [x] Cas analytiques : régime permanent, boîte adiabatique, constante de temps, soleil seul (baie, paroi opaque),
+  angle d'incidence, indicateurs d'été recalculés depuis la série
+- [x] Invariants : monotonie dans chaque sens, rotation, échange est/ouest ; trois niveaux sur trois bâtiments types
+- [x] Corrigé (`n2-6`) : albédo 0,20 par défaut dans le N2 sans environnement relevé ; mur mitoyen sans réfléchi ;
+  réduit tertiaire de −3 °C reproduit dans le N2, calendrier sur l'indice horaire
+- [x] Option d'essai `solaire_transmis: 'plancher'` du solveur N2 (désactivée par défaut), pour chiffrer la décision P1
+**Tests à passer avant de clore le lot :**
+- [x] `api.tests.test_validation_analytique`, `api.tests.test_validation_corrections`,
+  `api.tests.test_validation_invariants` ; `api.tests.test_validation_niveaux` avec `BT_VALIDATION_LOURDE=1`
+- [x] Suite complète verte, cloisonnement 3/3
+**Vérifié le :** 2026-11-17 — écarts restants et décisions en attente : `chantiers/bt-validation-physique/RAPPORT.md`
+
 ## Mise en service — chantier « failles » (2026-11-01)
 Les mentions « non déployé » ci-dessus datent d'avant cette mise en service. Image construite pendant
 que l'ancienne tournait, `scripts/app-test.sh` : 244 tests OK, puis `up -d --no-build` ; ports

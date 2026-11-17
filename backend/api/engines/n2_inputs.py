@@ -21,8 +21,8 @@ Mode « géométrie experte » (D35) : si l'enveloppe du bâtiment est **entièr
 météo viennent de la fiche.
 
 Limites assumées (écrites dans les entrées figées de chaque calcul) : un seul nœud d'air (pas de
-planchers intermédiaires ni de refends, D9) ; la consigne réduite hors occupation du tertiaire n'est pas
-reproduite (le planning du N2 ne porte pas de consigne).
+planchers intermédiaires ni de refends, D9). Depuis `n2-6`, la consigne réduite hors occupation du tertiaire est
+reproduite heure par heure (`weather_for_n2`, validation physique C3).
 
 Lot 36 (chantier bt-potentiels) : protections fixes à débord ou à joues construites en obstacles géométriques quel que
 soit leur mode ; mobiles, lames, vitrages et végétation appliqués par triangle de baie (`mobile_factors`) ; toiture et
@@ -38,8 +38,8 @@ import shapely.ops
 
 from .inputs import HYPOTHESE_BYPASS, CEILING_H, GROUND_T_DEFAULT, ORIENTATIONS, RESIDENTIAL, _v, effective_ventilation, u_from_layers
 
-ENGINE_VERSION = 'n2-5'   # -2 : réflexion du sol relevée (albédo de l'environnement relié) ; -3 : sol simulé (Lot 32) ; -4 : protections v2, améliorations, sorties par triangle (lot 36)
-FICHE_ENGINES = ('n2-1', 'n2-2', 'n2-3', 'n2-4', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
+ENGINE_VERSION = 'n2-6'   # -2 : réflexion du sol relevée (albédo de l'environnement relié) ; -3 : sol simulé (Lot 32) ; -4 : protections v2, améliorations, sorties par triangle (lot 36) ; -6 : albédo 0,20 par défaut sans environnement relevé, mitoyens sans réfléchi (validation physique C1, C2)
+FICHE_ENGINES = ('n2-1', 'n2-2', 'n2-3', 'n2-4', 'n2-5', ENGINE_VERSION)   # N2 lancés depuis la fiche, toutes versions
 H_I, H_E, R_GROUND = 7.7, 25.0, 0.5
 DX_MAX = 0.05
 FRAME_FRACTION = 0.2          # part de cadre d'une baie : même valeur que N1 (frame_factor 0,8)
@@ -412,10 +412,18 @@ def payload_from_fiche(values, a_floor):
     return payload, residential
 
 
-def weather_for_n2(series, north, residential, ground=None):
+def weather_for_n2(series, north, residential, ground=None, t_heat=None):
     """Série météo du N2 : azimut solaire dans le repère local du bâtiment ; jours ouvrés marqués ; température
-    vue par le plancher bas heure par heure (`ground`, Lot 32 — sol simulé, vide sanitaire, sous-sol)."""
+    vue par le plancher bas heure par heure (`ground`, Lot 32 — sol simulé, vide sanitaire, sous-sol).
+
+    Validation physique (C3) : hors logement, consigne de chauffage de chaque heure (`t_min`) celle de N1 —
+    réduite de 3 °C hors occupation (`engines.n1.schedules`) — si `t_heat` est donné ; calendrier lu sur l'indice
+    horaire de la météo, comme N1 (et non sur la position dans la liste)."""
     from ..weather_source import to_local_azimuth
+    from .n1 import schedules
+    hidx = np.array([w.get('hour_index') if w.get('hour_index') is not None else i for i, w in enumerate(series)],
+                    dtype=int)
+    setpoint = schedules(hidx, residential, float(t_heat))[1] if (t_heat is not None and not residential) else None
     out = []
     for i, w in enumerate(series):
         p = dict(w)
@@ -423,7 +431,9 @@ def weather_for_n2(series, north, residential, ground=None):
             p['t_ground'] = round(float(ground[i]), 3)
         p['sun_azimuth'] = round(to_local_azimuth(float(w['sun_azimuth']), north), 3) if north else w['sun_azimuth']
         if not residential:
-            p['occupied'] = (i // 24) % 7 < 5
+            p['occupied'] = bool((hidx[i] // 24) % 7 < 5)
+            if setpoint is not None:
+                p['t_min'] = float(setpoint[i])
         out.append(p)
     return out
 
@@ -518,8 +528,6 @@ def build(building, scenario=None, values=None):
                                                             green_roof, green_walls)
         envelope = _mark_green(envelope, vals, green_roof, green_walls, north, mode)
     env, env_source = occluders(building, envelope, scenario, all_fixed=True)
-    if not residential:
-        limits.append('Consigne réduite hors occupation non reproduite (N1 la baisse de 3 °C).')
     from .. import shading_service
     devices = shading_service.devices_of(building, scenario)
     per_triangle = [d for d in devices if d['kind'] not in sh.GEOMETRIC]
@@ -534,7 +542,8 @@ def build(building, scenario=None, values=None):
         'engine': ENGINE_VERSION, 'mode': mode, 'surface_m2': a_floor, 'volume_m3': round(a_floor * CEILING_H, 1),
         'geometry': geom, 'parois': described, 'obstacles': env_source,
         'reglages': {k: v for k, v in payload.items() if k not in ('planning', 'planning_ferme')},
-        'occupation': 'logement (constante)' if residential else 'tertiaire : 8 h–19 h, lundi–vendredi',
+        'occupation': 'logement (constante)' if residential else
+        'tertiaire : 8 h–19 h, lundi–vendredi ; consigne réduite de 3 °C hors occupation (comme N1)',
         'limites': limits,
         'protections': {'geometriques': [d['id'] for d in devices if d['kind'] in sh.GEOMETRIC],
                         'par_triangle': [d['id'] for d in per_triangle],
@@ -589,8 +598,13 @@ def _ground_params(building, scenario, vals):
 
 def ground_for(built, series):
     """Température vue par le plancher bas du N2, heure par heure, et sa description (Lot 32, `engines.sol`) ;
-    intérieur pris à la consigne de chauffage (couplage non itéré, comme N0/N1)."""
+    intérieur pris à la consigne de chauffage de chaque heure, réduit du tertiaire compris (comme N0/N1, C3 ;
+    couplage non itéré)."""
     from .inputs import ground_series
+    from .n1 import schedules
     t_e = np.array([float(w['t_ext']) for w in series])
-    t, _u, desc = ground_series(built['ground_params'], t_e, float(built['payload']['interior']['t_min']))
+    hidx = np.array([w.get('hour_index') if w.get('hour_index') is not None else i for i, w in enumerate(series)],
+                    dtype=int)
+    t_in = schedules(hidx, built['residential'], float(built['payload']['interior']['t_min']))[1]
+    t, _u, desc = ground_series(built['ground_params'], t_e, t_in)
     return t, desc
