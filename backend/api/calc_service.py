@@ -386,6 +386,16 @@ def shading_service_devices(building, scenario):
     return shading_service.devices_of(building, scenario)
 
 
+def _n2_albedo_constant(built, albedo_grid):
+    """Albédo uniforme passé au N2 : celui des abords (amélioration, `abords.albedo`) s'il est donné ; sinon, sans grille
+    d'albédo relevée, l'albédo par défaut de N0/N1 (0,20, `engines.solar.DEFAULT_ALBEDO`) — validation physique C1,
+    `refonte.md` § 6.3 point 5 ; avant `n2-6`, aucune réflexion par le sol dans ce cas. None : la grille relevée."""
+    from .engines import solar
+    if built.get('albedo_abords') is not None:
+        return built['albedo_abords']
+    return None if albedo_grid else solar.DEFAULT_ALBEDO
+
+
 def run_n2(run, progress_cb=None):
     """Exécute un N2 préparé par `start_n2` (appelé par la tâche Celery). Termine le `CalcRun`."""
     from . import shadow
@@ -425,7 +435,8 @@ def run_n2(run, progress_cb=None):
                 'obstacles réduits aux voisins BD TOPO.']
         run.save(update_fields=['inputs_hash', 'inputs', 'settings'])
     t_g, ground_desc = n2_inputs.ground_for(built, weather)                 # Lot 32 : sol simulé
-    w = n2_inputs.weather_for_n2(weather, building.georef_north_offset_deg or 0.0, built['residential'], t_g)
+    w = n2_inputs.weather_for_n2(weather, building.georef_north_offset_deg or 0.0, built['residential'], t_g,
+                                 t_heat=built['payload']['interior']['t_min'])
     # Lot 36 : mois de chaque point (périodes des cumuls par triangle, saison des arbres) et heures où la
     # surventilation nocturne peut jouer (`engines.surcharges.night_static_mask`).
     from .engines import shading as eng_shading, surcharges as eng_surcharges, vegetation as eng_vegetation
@@ -484,7 +495,7 @@ def run_n2(run, progress_cb=None):
     res = run_building_simulation(envelope, built['layers'], sunvis, payload, environment_envelope=env,
                                   progress_cb=cb, paroi_frame_by_id=built['frames'],
                                   ground_albedo=albedo, ground_obj_ids=ground_ids, sun_visibility_winter=sunvis_winter,
-                                  ground_albedo_constant=built.get('albedo_abords'))
+                                  ground_albedo_constant=_n2_albedo_constant(built, albedo))
     a_floor = built['a_floor']
     phi = res.get('phi_hc_w') or []
     heat = [max(x, 0.0) for x in phi]

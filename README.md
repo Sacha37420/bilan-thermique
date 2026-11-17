@@ -101,7 +101,7 @@ réel N0 et N1 (file `celery`), puis réel N2 et potentiels N0, N1, N2 de chaque
 (Paramétrage › orchestration) : `calcul.recalcul_auto`, `calcul.n2`, `calcul.potentiels`. État :
 `GET /api/batiments/<id>/calculs/etat/`, `GET /api/parcs/<id>/calculs/etat/` ; « Recalculer » (gestionnaire) :
 `POST /api/batiments/<id>/calculs/recalculer/`. Un `QuerySet.update()` n'émet aucun signal : toute écriture d'une
-entrée de calcul doit passer par `save()`. Versions des moteurs au 2026-11-16 : `n0-5`, `n1-6`, `n2-5`
+entrée de calcul doit passer par `save()`. Versions des moteurs au 2026-11-17 : `n0-5`, `n1-6`, `n2-6`
 (`calc_service.ENGINE_VERSION`).
 
 Indicateurs (I3) : besoins de chauffage et de refroidissement, puissance maximale, énergie finale, primaire, CO₂,
@@ -110,6 +110,30 @@ coût (rendements 3CL, COP horaire d'une PAC), et, en N1/N2 seulement, **DH RE20
 base 26 °C (`dh_26`), séries mensuelles. Le N2 cumule aussi, **par triangle**, les pertes d'hiver (octobre–avril),
 les gains d'été (juin–août), le solaire absorbé et les températures de surface intérieure
 (`GET /api/calculs/<id>/triangles/`).
+
+## Validation physique
+
+Chantier `bt-validation-physique` du lab (2026-11-17, lot 46) ; rapport et inventaire des hypothèses de chaque
+niveau hors dépôt (`chantiers/bt-validation-physique/RAPPORT.md`, `HYPOTHESES.md`).
+
+- **Cas analytiques, un canal à la fois** (`api.tests.test_validation_analytique`, attendus calculés à la main dans le
+  test) : régime permanent sans soleil (N2 : Σ U·A·ΔT + 0,34·q·ΔT à 0,5 % ; N1 : réseau 5R1C), boîte adiabatique
+  (dT/dt = Q/C à 1 %), constante de temps du N1 (2 %), angle d'incidence (Duffie & Beckman ex. 1.6.1), soleil seul sur
+  une baie et sur une paroi opaque (0,2 %), DH RE2020 et heures > 28 °C recalculés depuis la série d'un vrai calcul.
+- **Invariants** (`test_validation_invariants`) : isolation, climat, g, surventilation nocturne, store et débit dans
+  le bon sens sur chaque niveau ; rotation de 180° et échange est/ouest (N1).
+- **Trois niveaux sur trois bâtiments types** (`test_validation_niveaux`, lourd : `BT_VALIDATION_LOURDE=1`) :
+  chauffage N2/N1 à ±15 % près et apports solaires par les baies à ±3 % près (tenus) ; N0/N1 à ±20 % (tenu en
+  logement, pas pour un bureau : +24 %, écart ouvert tenu par un `expectedFailure`).
+- **Corrigé** (`n2-6`) : le N2 sans environnement relevé n'avait aucune réflexion par le sol (albédo 0,20 désormais,
+  comme N0/N1) ; un mur mitoyen recevait ce réfléchi ; le N2 tertiaire ne baissait pas la consigne hors occupation
+  (−3 °C heure par heure désormais, calendrier sur l'indice horaire comme N1).
+- **Écarts assumés, connus** : le 5R1C met H_tr,is en série avec des U qui comptent déjà R_si (N1 ~7 % sous le
+  statique) ; N1 prend une inertie de classe, N2 celle des parois reconstruites sans masse intérieure — **principale
+  cause des écarts d'été** entre N1 et N2 ; le N2 met le solaire transmis dans l'air (option d'essai
+  `payload['solaire_transmis'] = 'plancher'`, désactivée). Ces deux points attendent une décision.
+- **Non vérifié** : BESTEST (ASHRAE 140), cas de l'ISO 52016-1, paroi sinusoïdale, sol contre l'ISO 13370,
+  convergence du N2.
 
 ## Protections solaires
 
@@ -204,8 +228,8 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
 
 ## Tests
 
-- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **751 tests**
-  au 2026-11-16. Aucun appel réseau : tout service externe (open data, IA, service de rendu) est simulé. Depuis le lab :
+- Backend : `python manage.py test` (dans `backend/`), un module par domaine dans `backend/api/tests/` — **780 tests**
+  au 2026-11-17 (dont 2 lourds, joués avec `BT_VALIDATION_LOURDE=1`). Aucun appel réseau : tout service externe (open data, IA, service de rendu) est simulé. Depuis le lab :
   `bash chantiers/tests/essai.sh bilan-thermique` (PostgreSQL jetable, réseau fermé).
 - Service de rendu : `npm test` (unitaires) et `npm run test:integration` dans `rendu-service/` (dans son image).
 - Frontend : pas de tests unitaires ; `ng build` et vérification en navigateur réel (voir `frontend/README.md`).
@@ -214,6 +238,9 @@ le **by-pass d'été** de la double flux, toujours modélisé en N1/N2 (échange
 ## Limites connues
 
 - Un seul nœud d'air (pas de multizone, D9) ; ponts thermiques non comptés ; pas d'échange infrarouge avec le ciel.
+- Horaires (occupation, nuit, ouverture des fenêtres) lus sur l'heure UTC de la météo, non sur l'heure légale.
+- Inertie : N1 par classe, N2 par les seules parois d'enveloppe (aucun plancher intermédiaire) ; le N2 met le solaire
+  transmis dans l'air. Écarts d'été entre N1 et N2 qui en découlent : voir « Validation physique ».
 - Le diffus du ciel n'est masqué ni par l'horizon ni par les arbres plantés (N0/N1).
 - Le N0 (mensuel) ne représente ni la surventilation nocturne, ni l'ouverture des fenêtres, ni le by-pass, et ne
   donne aucun indicateur de confort.

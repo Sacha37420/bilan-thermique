@@ -429,7 +429,8 @@ contre pyBuildingEnergy), plutôt que d'importer une dépendance lourde. Ⓟ.
    - réflexion par les façades voisines (un rebond, albédo de façade par matériau BD TOPO ou
      texture Panoramax), utile en rue étroite où les murs ne voient presque que des façades ;
    - albédo par défaut (0,20 dans `observed_env.DEFAULT_GROUND_ALBEDO`) appliqué à tout bâtiment
-     sans environnement observé, au lieu d'aucun terme, pour que N1 et N2 restent comparables ;
+     sans environnement observé, au lieu d'aucun terme, pour que N1 et N2 restent comparables — **fait au lot 46**
+     (`n2-6`) ;
    - B4 : traiter un sol clair ou une terrasse claire comme une source d'apports à surveiller en
      confort d'été (une protection fixe en casquette ne coupe pas ce rayonnement venu du bas).
 
@@ -754,6 +755,7 @@ Tenu à jour à chaque lot livré (détail dans `FEUILLE_DE_ROUTE.md`).
 | 40 | livré 2026-11-16 | `#17` | Intégration : service de rendu au `docker-compose.yml`, by-pass d'été de la double flux (`n1-6`, `n2-5`), ouverture des fenêtres réglable par parc (désactivée par défaut), documentation complète ; déploiement et parcours réel à faire. |
 | 41–44 | livré 2026-11-16 | `#18`, `#19` | Trois niveaux calculés et tenus à jour sans geste (chantier `bt-trois-niveaux`) : `recalcul/` (signaux → planification regroupée, N0/N1 puis N2 et potentiels sous `joblock`), potentiels N0/N1/N2, parc et rendu par niveau, état des calculs sur quatre onglets. D49–D52 remplacent D37 et D44. 669 → 743 tests. |
 | 45 | livré 2026-11-16 | — | Comparer les simulations : tableau du parc par grandeur et par simulation, potentiels du parc sur plusieurs simulations, `niveaux` sur les blocs chiffres clés / tableau / carte, cases à cocher du graphe, réglage du document (D53). Corrigé : bouquet de la carte et numéro de calcul de la vue 3D envoyés en texte (refusés par le serveur). 743 → 751 tests. |
+| 46 | livré 2026-11-17 | — | Validation physique (chantier du lab `bt-validation-physique`) : cas analytiques N1/N2 par canal, invariants, trois niveaux sur trois bâtiments types. Corrigé (`n2-6`) : albédo 0,20 par défaut dans le N2 sans environnement relevé (§ 6.3 point 5, appliqué), mitoyens sans réfléchi, réduit tertiaire de −3 °C reproduit dans le N2. Aucune décision nouvelle : inertie, destination du solaire transmis, heure locale et consigne opérative laissées au propriétaire. 751 → 780 tests. |
 
 ## 17. Rapport de fin de session (2026-11-15)
 

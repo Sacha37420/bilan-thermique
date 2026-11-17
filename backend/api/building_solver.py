@@ -406,7 +406,8 @@ def _assemble_F_hour(systems, areas, offsets, n_dof, triangles_geom, h_e_vec, po
             e_glo = 0.0  # mitoyen (Lot 12) : face extérieure contre le voisin, jamais au soleil
         # Lot AI : réflexion par le sol (albédo relevé), traitée comme du diffus —
         # y compris vis-à-vis d'un store fermé (même facteur que e_dif).
-        if ground_reflect_factor is not None and ground_reflect_factor[i]:
+        # Validation physique (C2) : un mur mitoyen ne voit jamais le sol extérieur — aucun réfléchi non plus.
+        if ground_reflect_factor is not None and ground_reflect_factor[i] and geom.get('boundary') != 'adiabatic':
             fs = shading_fs_dif[i] if (volet_closed and shading_fs_dif is not None) else 1.0
             e_glo += ground_reflect_factor[i] * ghi * fs * dif_f
 
@@ -966,6 +967,13 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
     inner_w = np.array([0.0 if is_outside[i] else a for i, a in enumerate(areas)], dtype=float)
     inner_w = inner_w / max(inner_w.sum(), 1e-12)
     t_mrt_series = [float(T[inner_idx] @ inner_w)]
+    solar_to_floor = None
+    solar_floor_j = 0.0
+    if payload.get('solaire_transmis', 'air') == 'plancher':
+        floors = [i for i, tri in enumerate(triangles) if float(tri.get('tilt_deg', 90.0)) > 150.0 and not is_outside[i]]
+        if floors:
+            w_f = np.array([areas[i] for i in floors], dtype=float)
+            solar_to_floor = (inner_idx[floors], w_f / w_f.sum())
     t_op_series = [0.5 * (t_air_series[0] + t_mrt_series[0])]
     heating_j = 0.0
     cooling_j = 0.0
@@ -1121,6 +1129,16 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
             ground_reflect_factor=ground_reflect_factor,
             outside=is_outside, h_outside=h_e_constant,
         )
+        # Validation physique (essai E3, option `payload['solaire_transmis'] = 'plancher'`, défaut 'air') : le
+        # rayonnement transmis par les vitrages est déposé sur la face intérieure des planchers (au prorata de l'aire,
+        # répartition de l'ISO 52016-1 § 6.5.13 et des cas BESTEST) au lieu du nœud d'air. Bilan : il sort du poste
+        # « solaire transmis » de l'air et rentre par le poste « enveloppe » (flux des surfaces vers l'air).
+        if solar_to_floor is not None and hour_diagnostics and hour_diagnostics.get('solar_interior_w'):
+            moved = hour_diagnostics['solar_interior_w']
+            F[air_idx] -= moved
+            F[solar_to_floor[0]] += moved * solar_to_floor[1]
+            hour_diagnostics['solar_interior_w'] = 0.0
+            solar_floor_j += moved * DT_SECONDS
         b_free = (C_global / DT_SECONDS) @ T + F
 
         if mode == 'imposed':
@@ -1241,6 +1259,8 @@ def run_building_simulation(building_envelope, paroi_layers_by_id, sun_visibilit
         total_j = sum(balance_j.values())
         balance = {f'{k}_kwh': v / 3.6e6 for k, v in balance_j.items()}
         balance['storage_kwh'] = storage_j / 3.6e6
+        if solar_to_floor is not None:
+            balance['solar_transmitted_floor_kwh'] = solar_floor_j / 3.6e6
         balance['closure_error_kwh'] = (total_j - storage_j) / 3.6e6
 
     j_kwh = DT_SECONDS / 3.6e6
